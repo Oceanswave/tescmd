@@ -52,7 +52,7 @@ class OutputFormatter:
     # ------------------------------------------------------------------
 
     @property
-    def format(self) -> str:  # noqa: A003
+    def format(self) -> str:
         """Return the active output format (``"rich"``, ``"json"``, or ``"quiet"``)."""
         return self._format
 
@@ -70,7 +70,7 @@ class OutputFormatter:
           :meth:`RichOutput.info` with a ``str()`` representation.
         """
         if self._format == "json":
-            print(format_json_response(data=data, command=command))  # noqa: T201
+            print(format_json_response(data=data, command=command))
         else:
             # Rich / quiet fallback — callers normally use self.rich directly
             # for typed output; this is a catch-all.
@@ -83,6 +83,6 @@ class OutputFormatter:
         * **rich** / **quiet** — prints via :meth:`RichOutput.error`.
         """
         if self._format == "json":
-            print(format_json_error(code=code, message=message, command=command))  # noqa: T201
+            print(format_json_error(code=code, message=message, command=command))
         else:
             self._rich.error(message)

@@ -24,26 +24,22 @@ from tescmd.models.vehicle import (
 )
 
 __all__ = [
-    # auth
-    "AUTH_BASE_URL",
     "AUTHORIZE_URL",
+    "AUTH_BASE_URL",
     "DEFAULT_REDIRECT_URI",
     "DEFAULT_SCOPES",
     "TOKEN_URL",
-    "AuthConfig",
-    "TokenData",
-    "TokenMeta",
-    # command
-    "CommandResponse",
-    "CommandResult",
-    # config
     "AppSettings",
-    "Profile",
-    # vehicle
+    "AuthConfig",
     "ChargeState",
     "ClimateState",
+    "CommandResponse",
+    "CommandResult",
     "DriveState",
     "GuiSettings",
+    "Profile",
+    "TokenData",
+    "TokenMeta",
     "Vehicle",
     "VehicleConfig",
     "VehicleData",

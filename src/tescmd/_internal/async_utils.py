@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Coroutine
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Coroutine
 
 
 def run_async(coro: Coroutine[Any, Any, Any]) -> Any:

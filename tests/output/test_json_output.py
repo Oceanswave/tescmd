@@ -79,7 +79,9 @@ class TestFormatJsonError:
     """Tests for :func:`format_json_error`."""
 
     def test_basic_error(self) -> None:
-        raw = format_json_error(code="AUTH_FAILED", message="Token expired", command="vehicle.list")
+        raw = format_json_error(
+            code="AUTH_FAILED", message="Token expired", command="vehicle.list"
+        )
         parsed = json.loads(raw)
 
         assert parsed["ok"] is False

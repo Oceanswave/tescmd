@@ -138,10 +138,7 @@ class RichOutput:
 
     def command_result(self, success: bool, message: str = "") -> None:
         """Print a coloured OK / FAILED indicator."""
-        if success:
-            text = "[green]OK[/green]"
-        else:
-            text = "[red]FAILED[/red]"
+        text = "[green]OK[/green]" if success else "[red]FAILED[/red]"
         if message:
             text += f"  {message}"
         self._con.print(text)

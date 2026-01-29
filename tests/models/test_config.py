@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import os
-
-import pytest
+from typing import TYPE_CHECKING
 
 from tescmd.models.config import AppSettings, Profile
+
+if TYPE_CHECKING:
+    import pytest
 
 
 class TestProfile:

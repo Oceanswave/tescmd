@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel
@@ -39,7 +39,7 @@ def format_json_response(*, data: Any, command: str) -> str:
         "ok": True,
         "command": command,
         "data": _serialize(data),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
     return json.dumps(envelope, indent=2, default=str)
 
@@ -67,6 +67,6 @@ def format_json_error(
         "ok": False,
         "command": command,
         "error": error_body,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
     return json.dumps(envelope, indent=2, default=str)

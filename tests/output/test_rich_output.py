@@ -27,7 +27,9 @@ class TestVehicleList:
         ro = RichOutput(console)
 
         vehicles = [
-            Vehicle(vin="5YJ3E1EA1NF000001", display_name="My Tesla", state="online", vehicle_id=1),
+            Vehicle(
+                vin="5YJ3E1EA1NF000001", display_name="My Tesla", state="online", vehicle_id=1
+            ),
             Vehicle(vin="5YJ3E1EA1NF000002", display_name="Other", state="asleep", vehicle_id=2),
         ]
         ro.vehicle_list(vehicles)
