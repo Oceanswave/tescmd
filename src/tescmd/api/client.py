@@ -1,0 +1,133 @@
+"""Async HTTP client for the Tesla Fleet API."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+import httpx
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+from tescmd.api.errors import (
+    AuthError,
+    NetworkError,
+    RateLimitError,
+    TeslaAPIError,
+    VehicleAsleepError,
+)
+
+# ---------------------------------------------------------------------------
+# Region -> base URL mapping
+# ---------------------------------------------------------------------------
+
+REGION_BASE_URLS: dict[str, str] = {
+    "na": "https://fleet-api.prd.na.vn.cloud.tesla.com",
+    "eu": "https://fleet-api.prd.eu.vn.cloud.tesla.com",
+    "cn": "https://fleet-api.prd.cn.vn.cloud.tesla.com",
+}
+
+
+class TeslaFleetClient:
+    """Low-level async HTTP client for Tesla Fleet API endpoints."""
+
+    def __init__(
+        self,
+        access_token: str,
+        region: str = "na",
+        timeout: float = 30.0,
+        on_token_refresh: Callable[[], Awaitable[str | None]] | None = None,
+    ) -> None:
+        base_url = REGION_BASE_URLS.get(region)
+        if base_url is None:
+            msg = f"Unknown region {region!r}; expected one of {sorted(REGION_BASE_URLS)}"
+            raise ValueError(msg)
+
+        self._access_token = access_token
+        self._on_token_refresh = on_token_refresh
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            timeout=timeout,
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+    # -- public helpers -----------------------------------------------------
+
+    async def get(self, path: str, **kwargs: Any) -> dict[str, Any]:
+        """Issue a GET request and return the parsed JSON body."""
+        return await self._request("GET", path, **kwargs)
+
+    async def post(self, path: str, **kwargs: Any) -> dict[str, Any]:
+        """Issue a POST request and return the parsed JSON body."""
+        return await self._request("POST", path, **kwargs)
+
+    def update_token(self, access_token: str) -> None:
+        """Replace the current access token and update the header."""
+        self._access_token = access_token
+        self._client.headers["Authorization"] = f"Bearer {access_token}"
+
+    async def close(self) -> None:
+        """Close the underlying HTTP client."""
+        await self._client.aclose()
+
+    # -- async context manager -----------------------------------------------
+
+    async def __aenter__(self) -> TeslaFleetClient:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> None:
+        await self.close()
+
+    # -- internal ------------------------------------------------------------
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        _retried: bool = False,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        try:
+            response = await self._client.request(method, path, **kwargs)
+        except httpx.TimeoutException as exc:
+            raise NetworkError(f"Request timed out: {exc}") from exc
+        except httpx.ConnectError as exc:
+            raise NetworkError(f"Connection error: {exc}") from exc
+
+        # Handle 401 with optional token refresh
+        if response.status_code == 401 and not _retried:
+            if self._on_token_refresh is not None:
+                new_token = await self._on_token_refresh()
+                if new_token is not None:
+                    self.update_token(new_token)
+                    return await self._request(method, path, _retried=True, **kwargs)
+            raise AuthError("Authentication failed", status_code=401)
+
+        return self._parse_response(response)
+
+    @staticmethod
+    def _parse_response(response: httpx.Response) -> dict[str, Any]:
+        """Translate HTTP status codes to domain exceptions and return JSON."""
+        if response.status_code == 429:
+            raw = response.headers.get("retry-after")
+            retry_after: int | None = int(raw) if raw is not None else None
+            raise RateLimitError(retry_after=retry_after)
+
+        if response.status_code == 408:
+            raise VehicleAsleepError("Vehicle is asleep", status_code=408)
+
+        if response.status_code >= 400:
+            text = response.text[:200]
+            raise TeslaAPIError(
+                f"HTTP {response.status_code}: {text}",
+                status_code=response.status_code,
+            )
+
+        result: dict[str, Any] = response.json()
+        return result
