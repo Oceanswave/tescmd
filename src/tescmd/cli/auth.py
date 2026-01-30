@@ -93,6 +93,10 @@ async def cmd_login(args: argparse.Namespace, formatter: OutputFormatter) -> Non
     formatter.rich.info("")
     formatter.rich.info("Opening your browser to sign in to Tesla...")
     formatter.rich.info(
+        "When prompted, click [cyan]Select All[/cyan] and then"
+        " [cyan]Allow[/cyan] to grant tescmd access."
+    )
+    formatter.rich.info(
         "[dim]If the browser doesn't open, visit the URL printed below.[/dim]"
     )
 
