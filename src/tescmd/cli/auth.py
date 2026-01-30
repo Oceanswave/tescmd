@@ -10,7 +10,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tescmd.api.errors import ConfigError
-from tescmd.auth.oauth import login_flow, refresh_access_token
+from tescmd.auth.oauth import (
+    login_flow,
+    refresh_access_token,
+    register_partner_account,
+)
 from tescmd.auth.token_store import TokenStore
 from tescmd.models.auth import DEFAULT_SCOPES
 from tescmd.models.config import AppSettings
@@ -48,6 +52,12 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     # -- export --------------------------------------------------------------
     export_p = auth_sub.add_parser("export", help="Export tokens as JSON to stdout")
     export_p.set_defaults(func=cmd_export)
+
+    # -- register ------------------------------------------------------------
+    register_p = auth_sub.add_parser(
+        "register", help="Register app with the Fleet API (one-time)"
+    )
+    register_p.set_defaults(func=cmd_register)
 
     # -- import --------------------------------------------------------------
     import_p = auth_sub.add_parser("import", help="Import tokens from JSON on stdin")
@@ -112,6 +122,17 @@ async def cmd_login(args: argparse.Namespace, formatter: OutputFormatter) -> Non
 
     formatter.rich.info("")
     formatter.rich.info("[bold green]Login successful![/bold green]")
+
+    # Auto-register with the Fleet API (requires client_secret)
+    if client_secret:
+        await _auto_register(formatter, client_id, client_secret, region)
+    else:
+        formatter.rich.info("")
+        formatter.rich.info(
+            "[yellow]Note:[/yellow] Run [cyan]tescmd auth register[/cyan]"
+            " to register your app with the Fleet API."
+        )
+
     formatter.rich.info("")
     formatter.rich.info("Try it out:")
     formatter.rich.info("  [cyan]tescmd vehicle list[/cyan]")
@@ -226,9 +247,75 @@ async def cmd_import(args: argparse.Namespace, formatter: OutputFormatter) -> No
         formatter.rich.info("Tokens imported successfully.")
 
 
+async def cmd_register(args: argparse.Namespace, formatter: OutputFormatter) -> None:
+    """Register the application with the Tesla Fleet API for the active region."""
+    settings = AppSettings()
+
+    if not settings.client_id:
+        raise ConfigError(
+            "TESLA_CLIENT_ID is required. "
+            "Run 'tescmd auth login' to set up your credentials."
+        )
+    if not settings.client_secret:
+        raise ConfigError(
+            "TESLA_CLIENT_SECRET is required for Fleet API registration. "
+            "Add it to your .env file or set it as an environment variable."
+        )
+
+    region = getattr(args, "region", None) or settings.region
+
+    if formatter.format != "json":
+        formatter.rich.info(
+            f"Registering application with Fleet API ({region} region)..."
+        )
+
+    await register_partner_account(
+        client_id=settings.client_id,
+        client_secret=settings.client_secret,
+        domain="localhost",
+        region=region,
+    )
+
+    if formatter.format == "json":
+        formatter.output(
+            {"status": "registered", "region": region},
+            command="auth.register",
+        )
+    else:
+        formatter.rich.info("[green]Registration successful.[/green]")
+        formatter.rich.info("")
+        formatter.rich.info("Try it out:")
+        formatter.rich.info("  [cyan]tescmd vehicle list[/cyan]")
+        formatter.rich.info("")
+
+
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
+
+async def _auto_register(
+    formatter: OutputFormatter,
+    client_id: str,
+    client_secret: str,
+    region: str,
+) -> None:
+    """Attempt Fleet API registration silently after login."""
+    formatter.rich.info("")
+    formatter.rich.info("Registering with the Fleet API...")
+    try:
+        await register_partner_account(
+            client_id=client_id,
+            client_secret=client_secret,
+            domain="localhost",
+            region=region,
+        )
+        formatter.rich.info("[green]Registration successful.[/green]")
+    except Exception:
+        formatter.rich.info(
+            "[yellow]Registration failed. Run"
+            " [cyan]tescmd auth register[/cyan] to retry.[/yellow]"
+        )
 
 
 def _interactive_setup(

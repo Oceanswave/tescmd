@@ -13,6 +13,7 @@ from tescmd.api.errors import (
     AuthError,
     NetworkError,
     RateLimitError,
+    RegistrationRequiredError,
     TeslaAPIError,
     VehicleAsleepError,
 )
@@ -121,6 +122,13 @@ class TeslaFleetClient:
 
         if response.status_code == 408:
             raise VehicleAsleepError("Vehicle is asleep", status_code=408)
+
+        if response.status_code == 412:
+            raise RegistrationRequiredError(
+                "Your application is not registered with the Tesla Fleet API "
+                "for this region. Run 'tescmd auth register' to fix this.",
+                status_code=412,
+            )
 
         if response.status_code >= 400:
             text = response.text[:200]

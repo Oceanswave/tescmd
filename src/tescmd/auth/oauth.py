@@ -1,4 +1,4 @@
-"""OAuth2 PKCE helpers and interactive login flow."""
+"""OAuth2 PKCE helpers, partner registration, and interactive login flow."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from urllib.parse import urlencode
 
 import httpx
 
+from tescmd.api.client import REGION_BASE_URLS
 from tescmd.api.errors import AuthError
 from tescmd.auth.server import OAuthCallbackServer
 from tescmd.models.auth import (
@@ -108,6 +109,80 @@ async def refresh_access_token(
     if resp.status_code != 200:
         raise AuthError(f"Token refresh failed: {resp.text}", status_code=resp.status_code)
     return TokenData.model_validate(resp.json())
+
+
+# ---------------------------------------------------------------------------
+# Partner registration (one-time per region)
+# ---------------------------------------------------------------------------
+
+
+async def get_partner_token(
+    client_id: str,
+    client_secret: str,
+    region: str = "na",
+) -> str:
+    """Obtain a partner token via *client_credentials* grant.
+
+    The ``audience`` parameter tells Tesla which regional endpoint the
+    token is for.
+    """
+    audience = REGION_BASE_URLS.get(region)
+    if audience is None:
+        msg = f"Unknown region {region!r}; expected one of {sorted(REGION_BASE_URLS)}"
+        raise AuthError(msg)
+
+    payload = {
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "scope": "openid vehicle_device_data vehicle_cmds vehicle_charging_cmds",
+        "audience": audience,
+    }
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(TOKEN_URL, data=payload)
+    if resp.status_code != 200:
+        raise AuthError(
+            f"Partner token request failed: {resp.text}",
+            status_code=resp.status_code,
+        )
+    data: dict[str, Any] = resp.json()
+    token: str = data["access_token"]
+    return token
+
+
+async def register_partner_account(
+    client_id: str,
+    client_secret: str,
+    domain: str = "localhost",
+    region: str = "na",
+) -> dict[str, Any]:
+    """Register the application with the Tesla Fleet API for *region*.
+
+    This must be called once per region before the Fleet API will accept
+    requests.  It is safe to call more than once (idempotent).
+    """
+    base_url = REGION_BASE_URLS.get(region)
+    if base_url is None:
+        msg = f"Unknown region {region!r}; expected one of {sorted(REGION_BASE_URLS)}"
+        raise AuthError(msg)
+
+    partner_token = await get_partner_token(client_id, client_secret, region)
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{base_url}/api/1/partner_accounts",
+            json={"domain": domain},
+            headers={"Authorization": f"Bearer {partner_token}"},
+        )
+
+    if resp.status_code >= 400:
+        raise AuthError(
+            f"Partner registration failed (HTTP {resp.status_code}): {resp.text}",
+            status_code=resp.status_code,
+        )
+    result: dict[str, Any] = resp.json()
+    return result
 
 
 # ---------------------------------------------------------------------------

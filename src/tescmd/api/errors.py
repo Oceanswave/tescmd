@@ -48,6 +48,10 @@ class RateLimitError(TeslaAPIError):
         self.retry_after = retry_after
 
 
+class RegistrationRequiredError(TeslaAPIError):
+    """Raised on HTTP 412 — app not registered with regional Fleet API."""
+
+
 class NetworkError(TeslaAPIError):
     """Raised on connection / timeout errors."""
 
