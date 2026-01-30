@@ -310,30 +310,42 @@ async def auto_wake(
     # Vehicle is asleep — decide whether to wake.
     if not auto:
         if formatter.format not in ("json",):
-            # Interactive TTY prompt
-            formatter.rich.info("")
-            formatter.rich.info("[yellow]Vehicle is asleep.[/yellow]")
-            formatter.rich.info("")
-            formatter.rich.info("  Waking via the Tesla app (iOS/Android) is [green]free[/green].")
-            formatter.rich.info("  Sending a wake via the API is [yellow]billable[/yellow].")
-            formatter.rich.info("")
-            choice = click.prompt(
-                "  [W] Wake via API    [C] Cancel",
-                type=click.Choice(["w", "c"], case_sensitive=False),
-                default="c",
-                show_choices=False,
-            )
-            if choice.lower() != "w":
+            # Interactive TTY prompt with retry loop
+            while True:
+                formatter.rich.info("")
+                formatter.rich.info("[yellow]Vehicle is asleep.[/yellow]")
+                formatter.rich.info("")
+                formatter.rich.info(
+                    "  Waking via the Tesla app (iOS/Android) is [green]free[/green]."
+                )
+                formatter.rich.info(
+                    "  Sending a wake via the API is [yellow]billable[/yellow]."
+                )
+                formatter.rich.info("")
+                choice = click.prompt(
+                    "  [W] Wake via API    [R] Retry    [C] Cancel",
+                    type=click.Choice(["w", "r", "c"], case_sensitive=False),
+                    default="c",
+                    show_choices=False,
+                )
+                if choice.lower() == "r":
+                    try:
+                        return await operation()
+                    except VehicleAsleepError:
+                        continue  # Still asleep — show prompt again
+                if choice.lower() == "w":
+                    break  # Fall through to wake-via-API path
+                # choice == "c"
                 raise VehicleAsleepError(
-                    "Wake skipped. You can wake the vehicle from the"
-                    " Tesla app for free and retry.",
+                    "Wake cancelled. You can wake the vehicle from the"
+                    " Tesla app for free and re-run the command.",
                     status_code=408,
                 )
         else:
             # JSON / piped mode — no interactive prompt possible
             raise VehicleAsleepError(
                 "Vehicle is asleep. Use --wake to send a billable wake via the API,"
-                " or wake from the Tesla app for free.",
+                " or wake from the Tesla app for free and re-run the command.",
                 status_code=408,
             )
 

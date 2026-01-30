@@ -57,7 +57,55 @@ class TestWakeConfirmation:
 
         with (
             patch("tescmd.cli._client.click.prompt", return_value="c"),
-            pytest.raises(VehicleAsleepError, match="Wake skipped"),
+            pytest.raises(VehicleAsleepError, match="Wake cancelled"),
+        ):
+            await auto_wake(formatter, api, "VIN", operation)
+
+    async def test_retry_succeeds_when_vehicle_wakes_via_app(self) -> None:
+        """Pressing 'r' retries the operation; succeeds if vehicle is now online."""
+        formatter = _make_formatter("rich")
+        api = _make_vehicle_api()
+        # First call: asleep (triggers prompt). Retry: succeeds.
+        operation = AsyncMock(side_effect=[VehicleAsleepError("asleep", 408), "result"])
+
+        with patch("tescmd.cli._client.click.prompt", return_value="r"):
+            result = await auto_wake(formatter, api, "VIN", operation)
+
+        assert result == "result"
+        api.wake.assert_not_called()  # No billable wake sent
+
+    async def test_retry_loops_when_still_asleep(self) -> None:
+        """Pressing 'r' twice when still asleep re-prompts, then 'w' wakes."""
+        formatter = _make_formatter("rich")
+        api = _make_vehicle_api()
+        api.wake.return_value = MagicMock(state="online")
+        # First call: asleep. Retry 1: still asleep. Retry 2: still asleep. Wake+retry: succeeds.
+        operation = AsyncMock(
+            side_effect=[
+                VehicleAsleepError("asleep", 408),  # initial attempt
+                VehicleAsleepError("asleep", 408),  # retry 1
+                VehicleAsleepError("asleep", 408),  # retry 2
+                "result",  # after API wake
+            ]
+        )
+
+        with (
+            patch("tescmd.cli._client.click.prompt", side_effect=["r", "r", "w"]),
+            patch("tescmd.cli._client._wake_and_wait", new_callable=AsyncMock),
+        ):
+            result = await auto_wake(formatter, api, "VIN", operation)
+
+        assert result == "result"
+
+    async def test_retry_then_cancel(self) -> None:
+        """Pressing 'r' then 'c' retries once, then cancels."""
+        formatter = _make_formatter("rich")
+        api = _make_vehicle_api()
+        operation = AsyncMock(side_effect=VehicleAsleepError("asleep", 408))
+
+        with (
+            patch("tescmd.cli._client.click.prompt", side_effect=["r", "c"]),
+            pytest.raises(VehicleAsleepError, match="Wake cancelled"),
         ):
             await auto_wake(formatter, api, "VIN", operation)
 

@@ -175,12 +175,12 @@ When a vehicle is asleep and a command needs to wake it, `auto_wake()` behaves d
 
 | Mode | `--wake` flag | Behavior |
 |---|---|---|
-| TTY (Rich) | Not set | Interactive prompt: `[W] Wake via API  [C] Cancel` |
+| TTY (Rich) | Not set | Interactive prompt: `[W] Wake via API  [R] Retry  [C] Cancel` |
 | TTY (Rich) | Set | Auto-wake without prompting |
 | JSON / piped | Not set | Raise `VehicleAsleepError` with `--wake` guidance |
 | JSON / piped | Set | Auto-wake without prompting |
 
-The `vehicle wake` command is an explicit wake request and uses its own logic (no prompt needed). The wake state cache means the prompt only triggers when the vehicle is actually asleep — if it was recently confirmed online, the prompt is skipped entirely.
+The `[R] Retry` option allows users to wake the vehicle for free via the Tesla mobile app and then retry the command without a billable API call. If the vehicle is still asleep after retry, the prompt re-appears. The `vehicle wake` command is an explicit wake request and uses its own logic (no prompt needed). The wake state cache means the prompt only triggers when the vehicle is actually asleep — if it was recently confirmed online, the prompt is skipped entirely.
 
 ## Coding Conventions
 
@@ -204,7 +204,7 @@ The `vehicle wake` command is an explicit wake request and uses its own logic (n
 - Test files mirror source: `tests/cli/test_auth.py`, `tests/api/test_client.py`, etc.
 - Use `pytest-httpx` to mock HTTP responses (no live API calls in tests)
 - Async tests use `@pytest.mark.asyncio`
-- Current count: ~679 tests
+- Current count: ~682 tests
 
 ## Linting & Formatting
 
