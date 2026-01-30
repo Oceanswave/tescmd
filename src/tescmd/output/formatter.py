@@ -46,6 +46,7 @@ class OutputFormatter:
             self._console = Console()
 
         self._rich = RichOutput(self._console)
+        self._cache_meta: dict[str, Any] | None = None
 
     # ------------------------------------------------------------------
     # Public helpers
@@ -57,9 +58,28 @@ class OutputFormatter:
         return self._format
 
     @property
+    def console(self) -> Console:
+        """Return the underlying :class:`Console` instance."""
+        return self._console
+
+    @property
     def rich(self) -> RichOutput:
         """Return the underlying :class:`RichOutput` instance."""
         return self._rich
+
+    def set_cache_meta(
+        self,
+        *,
+        hit: bool,
+        age_seconds: int,
+        ttl_seconds: int,
+    ) -> None:
+        """Store cache metadata to be included in the next JSON output."""
+        self._cache_meta = {
+            "hit": hit,
+            "age_seconds": age_seconds,
+            "ttl_seconds": ttl_seconds,
+        }
 
     def output(self, data: Any, *, command: str) -> None:
         """Emit *data* using the current format.
@@ -70,7 +90,8 @@ class OutputFormatter:
           :meth:`RichOutput.info` with a ``str()`` representation.
         """
         if self._format == "json":
-            print(format_json_response(data=data, command=command))
+            print(format_json_response(data=data, command=command, cache_meta=self._cache_meta))
+            self._cache_meta = None
         else:
             # Rich / quiet fallback — callers normally use self.rich directly
             # for typed output; this is a catch-all.

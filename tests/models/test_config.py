@@ -49,8 +49,27 @@ class TestAppSettings:
         assert settings.config_dir == "~/.config/tescmd"
         assert settings.output_format is None
         assert settings.profile == "default"
+        assert settings.setup_tier is None
+        assert settings.github_repo is None
         assert settings.access_token is None
         assert settings.refresh_token is None
+
+    def test_domain_lowercased_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+
+        monkeypatch.setenv("TESLA_DOMAIN", "Oceanswave.GitHub.IO")
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        assert settings.domain == "oceanswave.github.io"
+
+    def test_domain_none_stays_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        assert settings.domain is None
 
     def test_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Clear any existing TESLA_ env vars first

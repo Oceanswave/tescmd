@@ -11,7 +11,7 @@ When stdout is not a TTY (i.e., output is piped or captured), tescmd automatical
 ```bash
 # These produce JSON:
 result=$(tescmd vehicle list)
-tescmd charge status | jq '.battery_level'
+tescmd vehicle data | jq '.charge_state.battery_level'
 tescmd vehicle data > vehicle_state.json
 ```
 
@@ -39,7 +39,7 @@ All JSON output follows a consistent envelope:
 ```json
 {
   "ok": false,
-  "command": "charge.start",
+  "command": "vehicle.data",
   "error": {
     "code": "vehicle_asleep",
     "message": "Vehicle is asleep. Wake it first with: tescmd vehicle wake"
@@ -48,7 +48,7 @@ All JSON output follows a consistent envelope:
 }
 ```
 
-### Data Shapes by Command Group
+### Data Shapes by Command
 
 **`vehicle list`:**
 ```json
@@ -67,6 +67,9 @@ All JSON output follows a consistent envelope:
 ```
 
 **`vehicle data`:**
+
+JSON output returns raw API values (Celsius, miles, bar) regardless of display unit settings:
+
 ```json
 {
   "ok": true,
@@ -76,13 +79,27 @@ All JSON output follows a consistent envelope:
     "charge_state": {
       "battery_level": 72,
       "battery_range": 215.5,
+      "ideal_battery_range": 230.0,
+      "est_battery_range": 200.0,
+      "usable_battery_level": 70,
       "charge_limit_soc": 80,
       "charging_state": "Disconnected",
       "charge_rate": 0,
       "charger_voltage": 0,
       "charger_actual_current": 0,
+      "charger_power": 0,
+      "charger_type": null,
+      "charge_energy_added": 0.0,
+      "charge_miles_added_rated": 0.0,
       "charge_port_door_open": false,
-      "scheduled_charging_start_time": null
+      "charge_port_latch": "Disengaged",
+      "conn_charge_cable": "<invalid>",
+      "minutes_to_full_charge": 0,
+      "time_to_full_charge": 0.0,
+      "scheduled_charging_start_time": null,
+      "scheduled_charging_mode": "Off",
+      "battery_heater_on": false,
+      "preconditioning_enabled": false
     },
     "climate_state": {
       "inside_temp": 21.5,
@@ -91,7 +108,18 @@ All JSON output follows a consistent envelope:
       "passenger_temp_setting": 22.0,
       "is_climate_on": false,
       "fan_status": 0,
-      "defrost_mode": 0
+      "defrost_mode": 0,
+      "seat_heater_left": 0,
+      "seat_heater_right": 0,
+      "seat_heater_rear_left": 0,
+      "seat_heater_rear_center": 0,
+      "seat_heater_rear_right": 0,
+      "steering_wheel_heater": false,
+      "cabin_overheat_protection": "Off",
+      "cabin_overheat_protection_actively_cooling": false,
+      "is_auto_conditioning_on": false,
+      "is_preconditioning": false,
+      "bioweapon_defense_mode": false
     },
     "drive_state": {
       "latitude": 37.3861,
@@ -105,37 +133,56 @@ All JSON output follows a consistent envelope:
       "locked": true,
       "odometer": 15234.5,
       "sentry_mode": true,
-      "car_version": "2025.2.6"
+      "car_version": "2025.2.6",
+      "door_driver_front": 0,
+      "door_driver_rear": 0,
+      "door_passenger_front": 0,
+      "door_passenger_rear": 0,
+      "window_driver_front": 0,
+      "window_driver_rear": 0,
+      "window_passenger_front": 0,
+      "window_passenger_rear": 0,
+      "ft": 0,
+      "rt": 0,
+      "center_display_state": 0,
+      "dashcam_state": "Recording",
+      "remote_start_enabled": false,
+      "is_user_present": false,
+      "homelink_nearby": false,
+      "tpms_pressure_fl": 2.9,
+      "tpms_pressure_fr": 3.0,
+      "tpms_pressure_rl": 2.85,
+      "tpms_pressure_rr": 2.9
+    },
+    "vehicle_config": {
+      "car_type": "modely",
+      "trim_badging": "74d",
+      "exterior_color": "MidnightSilver",
+      "wheel_type": "Gemini19",
+      "roof_color": "Glass",
+      "can_accept_navigation_requests": true,
+      "can_actuate_trunks": true,
+      "has_seat_cooling": false,
+      "motorized_charge_port": true,
+      "plg": true,
+      "eu_vehicle": false
+    },
+    "gui_settings": {
+      "gui_distance_units": "mi/hr",
+      "gui_temperature_units": "F",
+      "gui_charge_rate_units": "mi/hr"
     }
   }
 }
 ```
 
-**`charge status`:**
-```json
-{
-  "ok": true,
-  "command": "charge.status",
-  "data": {
-    "battery_level": 72,
-    "battery_range": 215.5,
-    "charge_limit_soc": 80,
-    "charging_state": "Charging",
-    "charge_rate": 32.0,
-    "charger_voltage": 240,
-    "charger_actual_current": 32,
-    "minutes_to_full_charge": 95,
-    "charge_port_door_open": true,
-    "charger_type": "AC"
-  }
-}
-```
+> **Note on units:** JSON output always returns raw API values — temperatures in Celsius, distances in miles, tire pressures in bar. The unit conversion system (`DisplayUnits`) only affects Rich terminal output. Scripts should handle conversion themselves if needed.
 
-**Command responses (actions like `charge start`, `security lock`, etc.):**
+**Command responses (actions like `vehicle wake`):**
 ```json
 {
   "ok": true,
-  "command": "charge.start",
+  "command": "vehicle.wake",
   "data": {
     "result": true,
     "reason": ""
@@ -158,11 +205,10 @@ All JSON output follows a consistent envelope:
 Use exit codes for control flow:
 
 ```bash
-tescmd charge start --quiet
+tescmd vehicle wake --quiet
 case $? in
-  0) echo "Charging started" ;;
-  3) echo "Vehicle is asleep, waking..." && tescmd vehicle wake --wait && tescmd charge start ;;
-  4) echo "Command failed (maybe not plugged in?)" ;;
+  0) echo "Vehicle is awake" ;;
+  3) echo "Vehicle is offline" ;;
   *) echo "Error occurred" ;;
 esac
 ```
@@ -232,34 +278,24 @@ TESLA_TOKEN_FILE=/etc/tescmd/token # token file (instead of keyring)
 
 ```bash
 # Get battery level
-tescmd charge status | jq -r '.data.battery_level'
+tescmd vehicle data | jq -r '.data.charge_state.battery_level'
 
 # Get vehicle location as "lat,lng"
 tescmd vehicle location | jq -r '.data | "\(.latitude),\(.longitude)"'
 
-# Get interior temperature
-tescmd climate status | jq -r '.data.inside_temp'
+# Get interior temperature (returns Celsius)
+tescmd vehicle data | jq -r '.data.climate_state.inside_temp'
 
 # List all VINs
 tescmd vehicle list | jq -r '.data[].vin'
-```
 
-### Conditional Actions
-
-```bash
-# Charge if battery below 50%
-level=$(tescmd charge status | jq -r '.data.battery_level')
-if [ "$level" -lt 50 ]; then
-  tescmd charge start --quiet
-fi
+# Get tire pressure in bar (raw API value)
+tescmd vehicle data | jq -r '.data.vehicle_state | "FL: \(.tpms_pressure_fl), FR: \(.tpms_pressure_fr)"'
 ```
 
 ### Cron Jobs
 
 ```bash
-# crontab: Start preconditioning at 7 AM weekdays
-0 7 * * 1-5 TESLA_VIN=5YJ3E1EA1NF000000 tescmd climate on --quiet
-
 # crontab: Log vehicle state every 15 minutes
 */15 * * * * tescmd vehicle data >> /var/log/tesla/state.jsonl
 ```
@@ -267,11 +303,8 @@ fi
 ### Chaining Commands
 
 ```bash
-# Wake, then start charging
-tescmd vehicle wake --wait --quiet && tescmd charge start
-
-# Set climate and navigate
-tescmd climate set --temp 72 --quiet && tescmd nav set "Work address"
+# Wake, then get data
+tescmd vehicle wake --wait --quiet && tescmd vehicle data
 ```
 
 ## Error Handling for Bots
@@ -297,13 +330,13 @@ run_command() {
   return $code
 }
 
-run_command charge start
+run_command vehicle data
 ```
 
 ### JSON Error Parsing
 
 ```bash
-output=$(tescmd charge start)
+output=$(tescmd vehicle data)
 ok=$(echo "$output" | jq -r '.ok')
 
 if [ "$ok" != "true" ]; then
@@ -318,7 +351,7 @@ fi
 `--quiet` suppresses all stdout and writes only errors to stderr. Use when you only care about the exit code:
 
 ```bash
-tescmd charge start --quiet && echo "OK" || echo "FAIL"
+tescmd vehicle wake --quiet && echo "OK" || echo "FAIL"
 ```
 
 ## Rate Limiting

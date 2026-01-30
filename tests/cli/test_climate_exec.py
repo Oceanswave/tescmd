@@ -84,9 +84,7 @@ class TestClimateOn:
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/auto_conditioning_start",
             json=CMD_OK,
         )
-        result = CliRunner().invoke(
-            cli, ["--format", "json", "--wake", "climate", "on"]
-        )
+        result = CliRunner().invoke(cli, ["--format", "json", "--wake", "climate", "on"])
         assert result.exit_code == 0, result.output
 
         data = json.loads(result.output)
@@ -107,9 +105,7 @@ class TestClimateOff:
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/auto_conditioning_stop",
             json=CMD_OK,
         )
-        result = CliRunner().invoke(
-            cli, ["--format", "json", "--wake", "climate", "off"]
-        )
+        result = CliRunner().invoke(cli, ["--format", "json", "--wake", "climate", "off"])
         assert result.exit_code == 0, result.output
 
         data = json.loads(result.output)
@@ -147,9 +143,7 @@ class TestClimateSetFahrenheit:
 
 
 class TestClimateSetCelsius:
-    def test_set_22c_sent_directly(
-        self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
-    ) -> None:
+    def test_set_22c_sent_directly(self, httpx_mock: HTTPXMock, cli_env: dict[str, str]) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/set_temps",
             json=CMD_OK,
@@ -171,9 +165,7 @@ class TestClimateSetCelsius:
 
 
 class TestClimatePrecondition:
-    def test_precondition_on(
-        self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
-    ) -> None:
+    def test_precondition_on(self, httpx_mock: HTTPXMock, cli_env: dict[str, str]) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/set_preconditioning_max",
             json=CMD_OK,
@@ -194,9 +186,7 @@ class TestClimatePrecondition:
 
 
 class TestClimateSeat:
-    def test_seat_driver_level_3(
-        self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
-    ) -> None:
+    def test_seat_driver_level_3(self, httpx_mock: HTTPXMock, cli_env: dict[str, str]) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/remote_seat_heater_request",
             json=CMD_OK,
@@ -211,9 +201,7 @@ class TestClimateSeat:
         assert body["heater"] == 0  # driver -> seat index 0
         assert body["level"] == 3
 
-    def test_seat_rear_left_level_2(
-        self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
-    ) -> None:
+    def test_seat_rear_left_level_2(self, httpx_mock: HTTPXMock, cli_env: dict[str, str]) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/remote_seat_heater_request",
             json=CMD_OK,
@@ -259,9 +247,7 @@ class TestClimateSeatCool:
 
 
 class TestClimateWheelHeater:
-    def test_wheel_heater_on(
-        self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
-    ) -> None:
+    def test_wheel_heater_on(self, httpx_mock: HTTPXMock, cli_env: dict[str, str]) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/remote_steering_wheel_heater_request",
             json=CMD_OK,
@@ -282,9 +268,7 @@ class TestClimateWheelHeater:
 
 
 class TestClimateOverheat:
-    def test_overheat_on(
-        self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
-    ) -> None:
+    def test_overheat_on(self, httpx_mock: HTTPXMock, cli_env: dict[str, str]) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/set_cabin_overheat_protection",
             json=CMD_OK,
@@ -299,9 +283,7 @@ class TestClimateOverheat:
         assert body["on"] is True
         assert body["fan_only"] is False
 
-    def test_overheat_on_fan_only(
-        self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
-    ) -> None:
+    def test_overheat_on_fan_only(self, httpx_mock: HTTPXMock, cli_env: dict[str, str]) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/set_cabin_overheat_protection",
             json=CMD_OK,
@@ -309,8 +291,13 @@ class TestClimateOverheat:
         result = CliRunner().invoke(
             cli,
             [
-                "--format", "json", "--wake",
-                "climate", "overheat", "--on", "--fan-only",
+                "--format",
+                "json",
+                "--wake",
+                "climate",
+                "overheat",
+                "--on",
+                "--fan-only",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -326,9 +313,7 @@ class TestClimateOverheat:
 
 
 class TestClimateBioweapon:
-    def test_bioweapon_on(
-        self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
-    ) -> None:
+    def test_bioweapon_on(self, httpx_mock: HTTPXMock, cli_env: dict[str, str]) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/set_bioweapon_mode",
             json=CMD_OK,
@@ -350,9 +335,7 @@ class TestClimateBioweapon:
 
 
 class TestClimateCopTemp:
-    def test_cop_temp_level_2(
-        self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
-    ) -> None:
+    def test_cop_temp_level_2(self, httpx_mock: HTTPXMock, cli_env: dict[str, str]) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/set_cop_temp",
             json=CMD_OK,
@@ -373,9 +356,7 @@ class TestClimateCopTemp:
 
 
 class TestClimateAutoSeat:
-    def test_auto_seat_driver_on(
-        self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
-    ) -> None:
+    def test_auto_seat_driver_on(self, httpx_mock: HTTPXMock, cli_env: dict[str, str]) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/remote_auto_seat_climate_request",
             json=CMD_OK,
@@ -397,9 +378,7 @@ class TestClimateAutoSeat:
 
 
 class TestClimateAutoWheel:
-    def test_auto_wheel_on(
-        self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
-    ) -> None:
+    def test_auto_wheel_on(self, httpx_mock: HTTPXMock, cli_env: dict[str, str]) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/remote_auto_steering_wheel_heat_climate_request",
             json=CMD_OK,
@@ -420,9 +399,7 @@ class TestClimateAutoWheel:
 
 
 class TestClimateWheelLevel:
-    def test_wheel_level_3(
-        self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
-    ) -> None:
+    def test_wheel_level_3(self, httpx_mock: HTTPXMock, cli_env: dict[str, str]) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/remote_steering_wheel_heat_level_request",
             json=CMD_OK,
@@ -443,9 +420,7 @@ class TestClimateWheelLevel:
 
 
 class TestClimateKeeper:
-    def test_keeper_dog(
-        self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
-    ) -> None:
+    def test_keeper_dog(self, httpx_mock: HTTPXMock, cli_env: dict[str, str]) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/set_climate_keeper_mode",
             json=CMD_OK,
@@ -459,9 +434,7 @@ class TestClimateKeeper:
         body = _request_body(httpx_mock)
         assert body["climate_keeper_mode"] == 2  # dog -> 2
 
-    def test_keeper_camp(
-        self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
-    ) -> None:
+    def test_keeper_camp(self, httpx_mock: HTTPXMock, cli_env: dict[str, str]) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/set_climate_keeper_mode",
             json=CMD_OK,
@@ -475,9 +448,7 @@ class TestClimateKeeper:
         body = _request_body(httpx_mock)
         assert body["climate_keeper_mode"] == 3  # camp -> 3
 
-    def test_keeper_off(
-        self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
-    ) -> None:
+    def test_keeper_off(self, httpx_mock: HTTPXMock, cli_env: dict[str, str]) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/set_climate_keeper_mode",
             json=CMD_OK,

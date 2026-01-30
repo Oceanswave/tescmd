@@ -53,9 +53,7 @@ class TestTrunkOpen:
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/actuate_trunk",
             json=CMD_OK,
         )
-        result = CliRunner().invoke(
-            cli, ["--format", "json", "--wake", "trunk", "open"]
-        )
+        result = CliRunner().invoke(cli, ["--format", "json", "--wake", "trunk", "open"])
 
         assert result.exit_code == 0, result.output
         body = _request_body(httpx_mock)
@@ -65,9 +63,7 @@ class TestTrunkOpen:
         self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
     ) -> None:
         httpx_mock.add_response(json=CMD_OK)
-        result = CliRunner().invoke(
-            cli, ["--format", "json", "--wake", "trunk", "open"]
-        )
+        result = CliRunner().invoke(cli, ["--format", "json", "--wake", "trunk", "open"])
 
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -87,9 +83,7 @@ class TestTrunkClose:
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/actuate_trunk",
             json=CMD_OK,
         )
-        result = CliRunner().invoke(
-            cli, ["--format", "json", "--wake", "trunk", "close"]
-        )
+        result = CliRunner().invoke(cli, ["--format", "json", "--wake", "trunk", "close"])
 
         assert result.exit_code == 0, result.output
         body = _request_body(httpx_mock)
@@ -99,9 +93,7 @@ class TestTrunkClose:
         self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
     ) -> None:
         httpx_mock.add_response(json=CMD_OK)
-        result = CliRunner().invoke(
-            cli, ["--format", "json", "--wake", "trunk", "close"]
-        )
+        result = CliRunner().invoke(cli, ["--format", "json", "--wake", "trunk", "close"])
 
         assert result.exit_code == 0
         req_url = _request_url(httpx_mock)
@@ -121,9 +113,7 @@ class TestTrunkFrunk:
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/actuate_trunk",
             json=CMD_OK,
         )
-        result = CliRunner().invoke(
-            cli, ["--format", "json", "--wake", "trunk", "frunk"]
-        )
+        result = CliRunner().invoke(cli, ["--format", "json", "--wake", "trunk", "frunk"])
 
         assert result.exit_code == 0, result.output
         body = _request_body(httpx_mock)
@@ -133,9 +123,7 @@ class TestTrunkFrunk:
         self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
     ) -> None:
         httpx_mock.add_response(json=CMD_OK)
-        result = CliRunner().invoke(
-            cli, ["--format", "json", "--wake", "trunk", "frunk"]
-        )
+        result = CliRunner().invoke(cli, ["--format", "json", "--wake", "trunk", "frunk"])
 
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -148,9 +136,7 @@ class TestTrunkFrunk:
 
 
 class TestTrunkSunroof:
-    def test_sunroof_vent(
-        self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
-    ) -> None:
+    def test_sunroof_vent(self, httpx_mock: HTTPXMock, cli_env: dict[str, str]) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/sun_roof_control",
             json=CMD_OK,
@@ -163,9 +149,7 @@ class TestTrunkSunroof:
         body = _request_body(httpx_mock)
         assert body["state"] == "vent"
 
-    def test_sunroof_close(
-        self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
-    ) -> None:
+    def test_sunroof_close(self, httpx_mock: HTTPXMock, cli_env: dict[str, str]) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/sun_roof_control",
             json=CMD_OK,
@@ -178,14 +162,10 @@ class TestTrunkSunroof:
         body = _request_body(httpx_mock)
         assert body["state"] == "close"
 
-    def test_sunroof_default_is_vent(
-        self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
-    ) -> None:
+    def test_sunroof_default_is_vent(self, httpx_mock: HTTPXMock, cli_env: dict[str, str]) -> None:
         """When neither --vent nor --close is given, default is vent."""
         httpx_mock.add_response(json=CMD_OK)
-        result = CliRunner().invoke(
-            cli, ["--format", "json", "--wake", "trunk", "sunroof"]
-        )
+        result = CliRunner().invoke(cli, ["--format", "json", "--wake", "trunk", "sunroof"])
 
         assert result.exit_code == 0
         body = _request_body(httpx_mock)
@@ -227,9 +207,16 @@ class TestTrunkWindowVent:
         result = CliRunner().invoke(
             cli,
             [
-                "--format", "json", "--wake",
-                "trunk", "window", "--vent",
-                "--lat", "40.71", "--lon", "-74.01",
+                "--format",
+                "json",
+                "--wake",
+                "trunk",
+                "window",
+                "--vent",
+                "--lat",
+                "40.71",
+                "--lon",
+                "-74.01",
             ],
         )
 
@@ -239,14 +226,10 @@ class TestTrunkWindowVent:
         assert body["lat"] == pytest.approx(40.71)
         assert body["lon"] == pytest.approx(-74.01)
 
-    def test_window_default_is_vent(
-        self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
-    ) -> None:
+    def test_window_default_is_vent(self, httpx_mock: HTTPXMock, cli_env: dict[str, str]) -> None:
         """When neither --vent nor --close is given, default is vent."""
         httpx_mock.add_response(json=CMD_OK)
-        result = CliRunner().invoke(
-            cli, ["--format", "json", "--wake", "trunk", "window"]
-        )
+        result = CliRunner().invoke(cli, ["--format", "json", "--wake", "trunk", "window"])
 
         assert result.exit_code == 0
         body = _request_body(httpx_mock)
@@ -265,9 +248,16 @@ class TestTrunkWindowClose:
         result = CliRunner().invoke(
             cli,
             [
-                "--format", "json", "--wake",
-                "trunk", "window", "--close",
-                "--lat", "37.77", "--lon", "-122.42",
+                "--format",
+                "json",
+                "--wake",
+                "trunk",
+                "window",
+                "--close",
+                "--lat",
+                "37.77",
+                "--lon",
+                "-122.42",
             ],
         )
 
@@ -325,9 +315,16 @@ class TestTrunkWindowClose:
         result = CliRunner().invoke(
             cli,
             [
-                "--format", "json", "--wake",
-                "trunk", "window", "--close",
-                "--lat", "37.77", "--lon", "-122.42",
+                "--format",
+                "json",
+                "--wake",
+                "trunk",
+                "window",
+                "--close",
+                "--lat",
+                "37.77",
+                "--lon",
+                "-122.42",
             ],
         )
 

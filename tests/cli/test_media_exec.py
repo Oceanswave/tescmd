@@ -41,9 +41,7 @@ def _request_body(httpx_mock: HTTPXMock, idx: int = 0) -> dict[str, Any]:
 class TestMediaPlayPause:
     """Tests for ``tescmd media play-pause``."""
 
-    def test_play_pause(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_play_pause(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/media_toggle_playback",
             method="POST",
@@ -84,9 +82,7 @@ class TestMediaPlayPause:
 class TestMediaNextTrack:
     """Tests for ``tescmd media next-track``."""
 
-    def test_next_track(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_next_track(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/media_next_track",
             method="POST",
@@ -108,9 +104,7 @@ class TestMediaNextTrack:
 class TestMediaPrevTrack:
     """Tests for ``tescmd media prev-track``."""
 
-    def test_prev_track(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_prev_track(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/media_prev_track",
             method="POST",
@@ -132,9 +126,7 @@ class TestMediaPrevTrack:
 class TestMediaNextFav:
     """Tests for ``tescmd media next-fav``."""
 
-    def test_next_fav(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_next_fav(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/media_next_fav",
             method="POST",
@@ -156,9 +148,7 @@ class TestMediaNextFav:
 class TestMediaPrevFav:
     """Tests for ``tescmd media prev-fav``."""
 
-    def test_prev_fav(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_prev_fav(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/media_prev_fav",
             method="POST",
@@ -180,9 +170,7 @@ class TestMediaPrevFav:
 class TestMediaVolumeUp:
     """Tests for ``tescmd media volume-up``."""
 
-    def test_volume_up(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_volume_up(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/media_volume_up",
             method="POST",
@@ -204,9 +192,7 @@ class TestMediaVolumeUp:
 class TestMediaVolumeDown:
     """Tests for ``tescmd media volume-down``."""
 
-    def test_volume_down(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_volume_down(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/media_volume_down",
             method="POST",
@@ -233,9 +219,7 @@ class TestMediaVolumeDown:
 class TestMediaAdjustVolume:
     """Tests for ``tescmd media adjust-volume VIN VOLUME``."""
 
-    def test_adjust_volume(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_adjust_volume(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/adjust_volume",
             method="POST",
@@ -271,9 +255,7 @@ class TestMediaAdjustVolume:
         body = _request_body(httpx_mock)
         assert body["volume"] == 8
 
-    def test_adjust_volume_min(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_adjust_volume_min(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         """adjust-volume accepts minimum value 0."""
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/adjust_volume",
@@ -291,9 +273,7 @@ class TestMediaAdjustVolume:
         assert parsed["ok"] is True
         assert parsed["command"] == "media.adjust-volume"
 
-    def test_adjust_volume_max(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_adjust_volume_max(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         """adjust-volume accepts maximum value 11."""
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/adjust_volume",
@@ -332,9 +312,7 @@ class TestMediaAdjustVolume:
 class TestMediaOutputEnvelope:
     """Verify the JSON envelope structure shared by all media commands."""
 
-    def test_envelope_has_timestamp(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_envelope_has_timestamp(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/media_toggle_playback",
             method="POST",

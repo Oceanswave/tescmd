@@ -103,9 +103,7 @@ class TestSecurityStatus:
 
 
 class TestSecurityLock:
-    def test_lock_sends_command(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_lock_sends_command(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/door_lock",
             json=CMD_OK,
@@ -129,9 +127,7 @@ class TestSecurityLock:
 
 
 class TestSecurityUnlock:
-    def test_unlock_sends_command(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_unlock_sends_command(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/door_unlock",
             json=CMD_OK,
@@ -155,9 +151,7 @@ class TestSecurityUnlock:
 
 
 class TestSecuritySentry:
-    def test_sentry_on(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_sentry_on(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/set_sentry_mode",
             json=CMD_OK,
@@ -175,9 +169,7 @@ class TestSecuritySentry:
         body = _cmd_request(httpx_mock, "set_sentry_mode")
         assert body["on"] is True
 
-    def test_sentry_off(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_sentry_off(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/set_sentry_mode",
             json=CMD_OK,
@@ -201,9 +193,7 @@ class TestSecuritySentry:
 
 
 class TestSecurityValet:
-    def test_valet_on(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_valet_on(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/set_valet_mode",
             json=CMD_OK,
@@ -221,9 +211,7 @@ class TestSecurityValet:
         body = _cmd_request(httpx_mock, "set_valet_mode")
         assert body["on"] is True
 
-    def test_valet_on_with_password(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_valet_on_with_password(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/set_valet_mode",
             json=CMD_OK,
@@ -232,8 +220,15 @@ class TestSecurityValet:
         result = runner.invoke(
             cli,
             [
-                "--format", "json", "--wake",
-                "security", "valet", "--on", "--password", "1234", VIN,
+                "--format",
+                "json",
+                "--wake",
+                "security",
+                "valet",
+                "--on",
+                "--password",
+                "1234",
+                VIN,
             ],
             catch_exceptions=False,
         )
@@ -242,9 +237,7 @@ class TestSecurityValet:
         assert body["on"] is True
         assert body["password"] == "1234"
 
-    def test_valet_off(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_valet_off(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/set_valet_mode",
             json=CMD_OK,
@@ -318,9 +311,7 @@ class TestSecurityRemoteStart:
 
 
 class TestSecurityFlash:
-    def test_flash_sends_command(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_flash_sends_command(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/flash_lights",
             json=CMD_OK,
@@ -344,9 +335,7 @@ class TestSecurityFlash:
 
 
 class TestSecurityHonk:
-    def test_honk_sends_command(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_honk_sends_command(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/honk_horn",
             json=CMD_OK,
@@ -370,9 +359,7 @@ class TestSecurityHonk:
 
 
 class TestSecurityPinReset:
-    def test_pin_reset_sends_command(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_pin_reset_sends_command(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/reset_pin_to_drive_pin",
             json=CMD_OK,
@@ -422,9 +409,7 @@ class TestSecurityPinClearAdmin:
 
 
 class TestSecuritySpeedClear:
-    def test_speed_clear_sends_pin(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_speed_clear_sends_pin(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/speed_limit_clear_pin",
             json=CMD_OK,
@@ -475,9 +460,7 @@ class TestSecuritySpeedClearAdmin:
 
 
 class TestSecuritySpeedLimit:
-    def test_speed_limit_activate(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_speed_limit_activate(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/speed_limit_activate",
             json=CMD_OK,
@@ -495,9 +478,7 @@ class TestSecuritySpeedLimit:
         body = _cmd_request(httpx_mock, "speed_limit_activate")
         assert body["pin"] == "1234"
 
-    def test_speed_limit_deactivate(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_speed_limit_deactivate(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/speed_limit_deactivate",
             json=CMD_OK,
@@ -506,8 +487,14 @@ class TestSecuritySpeedLimit:
         result = runner.invoke(
             cli,
             [
-                "--format", "json", "--wake",
-                "security", "speed-limit", "--deactivate", "1234", VIN,
+                "--format",
+                "json",
+                "--wake",
+                "security",
+                "speed-limit",
+                "--deactivate",
+                "1234",
+                VIN,
             ],
             catch_exceptions=False,
         )
@@ -518,9 +505,7 @@ class TestSecuritySpeedLimit:
         body = _cmd_request(httpx_mock, "speed_limit_deactivate")
         assert body["pin"] == "1234"
 
-    def test_speed_limit_set(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_speed_limit_set(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/speed_limit_set_limit",
             json=CMD_OK,
@@ -545,9 +530,7 @@ class TestSecuritySpeedLimit:
 
 
 class TestSecurityPinToDrive:
-    def test_pin_to_drive_on(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_pin_to_drive_on(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/set_pin_to_drive",
             json=CMD_OK,
@@ -565,9 +548,7 @@ class TestSecurityPinToDrive:
         body = _cmd_request(httpx_mock, "set_pin_to_drive")
         assert body["on"] is True
 
-    def test_pin_to_drive_off(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_pin_to_drive_off(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/set_pin_to_drive",
             json=CMD_OK,
@@ -589,9 +570,7 @@ class TestSecurityPinToDrive:
 
 
 class TestSecurityGuestMode:
-    def test_guest_mode_on(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_guest_mode_on(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/guest_mode",
             json=CMD_OK,
@@ -609,9 +588,7 @@ class TestSecurityGuestMode:
         body = _cmd_request(httpx_mock, "guest_mode")
         assert body["enable"] is True
 
-    def test_guest_mode_off(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_guest_mode_off(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/guest_mode",
             json=CMD_OK,
@@ -633,9 +610,7 @@ class TestSecurityGuestMode:
 
 
 class TestSecurityBoombox:
-    def test_boombox_sends_command(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_boombox_sends_command(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/remote_boombox",
             json=CMD_OK,

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from tescmd._internal.vin import InvalidVINError, resolve_vin, validate_vin

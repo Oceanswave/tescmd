@@ -51,9 +51,7 @@ class TestVehicleList:
         assert parsed["data"][0]["display_name"] == "Test"
         assert parsed["data"][0]["state"] == "online"
 
-    def test_list_vehicles_empty(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_list_vehicles_empty(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles",
             json={"response": [], "count": 0},
@@ -272,9 +270,7 @@ class TestVehicleWake:
 
 
 class TestVehicleAlerts:
-    def test_alerts_returns_list(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_alerts_returns_list(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/recent_alerts",
             json={
@@ -334,9 +330,7 @@ class TestVehicleReleaseNotes:
 
 
 class TestVehicleService:
-    def test_service_returns_data(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_service_returns_data(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/service_data",
             json={
@@ -364,9 +358,7 @@ class TestVehicleService:
 
 
 class TestVehicleDrivers:
-    def test_drivers_returns_list(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_drivers_returns_list(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/drivers",
             json={
@@ -397,9 +389,7 @@ class TestVehicleDrivers:
 
 
 class TestVehicleRename:
-    def test_rename_sends_command(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_rename_sends_command(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         # auto_wake tries the operation first; if it succeeds the wake
         # endpoint is never called, so we only mock the command itself.
         httpx_mock.add_response(
@@ -443,9 +433,7 @@ class TestVehicleRename:
         )
         # Find the POST to set_vehicle_name and verify the JSON body
         requests = httpx_mock.get_requests()
-        cmd_request = [
-            r for r in requests if "set_vehicle_name" in str(r.url)
-        ]
+        cmd_request = [r for r in requests if "set_vehicle_name" in str(r.url)]
         assert len(cmd_request) == 1
         body = json.loads(cmd_request[0].content)
         assert body["vehicle_name"] == "My Tesla"
@@ -457,9 +445,7 @@ class TestVehicleRename:
 
 
 class TestVehicleMobileAccess:
-    def test_mobile_access_enabled(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_mobile_access_enabled(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/mobile_enabled",
             json={"response": True},
@@ -476,9 +462,7 @@ class TestVehicleMobileAccess:
         assert parsed["command"] == "vehicle.mobile-access"
         assert parsed["data"]["mobile_enabled"] is True
 
-    def test_mobile_access_disabled(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_mobile_access_disabled(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/mobile_enabled",
             json={"response": False},
@@ -516,9 +500,7 @@ class TestVehicleNearbyChargers:
                             "available_stalls": 5,
                         }
                     ],
-                    "destination_charging": [
-                        {"name": "Test Dest", "distance_miles": 1.0}
-                    ],
+                    "destination_charging": [{"name": "Test Dest", "distance_miles": 1.0}],
                 }
             },
         )
@@ -537,9 +519,7 @@ class TestVehicleNearbyChargers:
         assert len(parsed["data"]["destination_charging"]) == 1
         assert parsed["data"]["destination_charging"][0]["name"] == "Test Dest"
 
-    def test_nearby_chargers_empty(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_nearby_chargers_empty(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/nearby_charging_sites",
             json={

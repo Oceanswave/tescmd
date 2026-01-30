@@ -9,11 +9,14 @@ Write-commands mock the corresponding POST ``/command/*`` endpoint.
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 from click.testing import CliRunner
-from pytest_httpx import HTTPXMock
 
 from tescmd.cli.main import cli
+
+if TYPE_CHECKING:
+    from pytest_httpx import HTTPXMock
 
 FLEET = "https://fleet-api.prd.na.vn.cloud.tesla.com"
 VIN = "5YJ3E1EA1NF000001"
@@ -46,9 +49,7 @@ COMMAND_OK: dict = {"response": {"result": True, "reason": ""}}
 class TestChargeStatus:
     """Tests for ``tescmd charge status`` (read via vehicle_data GET)."""
 
-    def test_charge_status_json(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_charge_status_json(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         """charge status returns charge_state fields in the JSON envelope."""
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/vehicle_data?endpoints=charge_state",
@@ -95,9 +96,7 @@ class TestChargeStatus:
 
 
 class TestChargeStart:
-    def test_charge_start(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_charge_start(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/charge_start",
             method="POST",
@@ -116,9 +115,7 @@ class TestChargeStart:
 
 
 class TestChargeStop:
-    def test_charge_stop(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_charge_stop(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/charge_stop",
             method="POST",
@@ -137,9 +134,7 @@ class TestChargeStop:
 
 
 class TestChargeLimitMax:
-    def test_limit_max(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_limit_max(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/charge_max_range",
             method="POST",
@@ -158,9 +153,7 @@ class TestChargeLimitMax:
 
 
 class TestChargeLimitStd:
-    def test_limit_std(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_limit_std(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/charge_standard",
             method="POST",
@@ -179,9 +172,7 @@ class TestChargeLimitStd:
 
 
 class TestChargePortOpen:
-    def test_port_open(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_port_open(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/charge_port_door_open",
             method="POST",
@@ -200,9 +191,7 @@ class TestChargePortOpen:
 
 
 class TestChargePortClose:
-    def test_port_close(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_port_close(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/charge_port_door_close",
             method="POST",
@@ -226,9 +215,7 @@ class TestChargePortClose:
 
 
 class TestChargeLimit:
-    def test_charge_limit_80(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_charge_limit_80(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/set_charge_limit",
             method="POST",
@@ -253,9 +240,7 @@ class TestChargeLimit:
 
 
 class TestChargeAmps:
-    def test_charge_amps_32(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_charge_amps_32(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/set_charging_amps",
             method="POST",
@@ -280,9 +265,7 @@ class TestChargeAmps:
 
 
 class TestChargeSchedule:
-    def test_schedule_enable(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_schedule_enable(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/set_scheduled_charging",
             method="POST",
@@ -306,9 +289,7 @@ class TestChargeSchedule:
 
 
 class TestChargeDeparture:
-    def test_departure_enable(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_departure_enable(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/set_scheduled_departure",
             method="POST",
@@ -332,9 +313,7 @@ class TestChargeDeparture:
 
 
 class TestPreconditionAdd:
-    def test_precondition_add(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_precondition_add(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/add_precondition_schedule",
             method="POST",
@@ -354,9 +333,7 @@ class TestPreconditionAdd:
 
 
 class TestPreconditionRemove:
-    def test_precondition_remove(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_precondition_remove(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/remove_precondition_schedule",
             method="POST",
@@ -382,9 +359,7 @@ class TestPreconditionRemove:
 class TestOutputEnvelope:
     """Verify the JSON envelope structure shared by all write-commands."""
 
-    def test_envelope_has_timestamp(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_envelope_has_timestamp(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/charge_start",
             method="POST",

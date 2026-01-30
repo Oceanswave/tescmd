@@ -107,3 +107,130 @@ class TestWakeVehicle:
         assert isinstance(vehicle, Vehicle)
         assert vehicle.vin == "5YJ3E1EA1NF000001"
         assert vehicle.state == "online"
+
+
+VIN = "5YJ3E1EA1NF000001"
+
+
+class TestGetVehicle:
+    @pytest.mark.asyncio
+    async def test_get_vehicle(self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient) -> None:
+        httpx_mock.add_response(
+            url=f"{FLEET_BASE}/api/1/vehicles/{VIN}",
+            json={
+                "response": {
+                    "vin": VIN,
+                    "display_name": "My Model 3",
+                    "state": "online",
+                    "vehicle_id": 123456,
+                }
+            },
+        )
+        api = VehicleAPI(mock_client)
+        vehicle = await api.get_vehicle(VIN)
+
+        assert isinstance(vehicle, Vehicle)
+        assert vehicle.vin == VIN
+
+
+class TestNearbyChargingSites:
+    @pytest.mark.asyncio
+    async def test_nearby_charging_sites_returns_model(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        from tescmd.models.vehicle import NearbyChargingSites
+
+        httpx_mock.add_response(
+            url=f"{FLEET_BASE}/api/1/vehicles/{VIN}/nearby_charging_sites",
+            json={
+                "response": {
+                    "superchargers": [
+                        {
+                            "name": "SC 1",
+                            "distance_miles": 2.5,
+                            "total_stalls": 10,
+                            "available_stalls": 5,
+                        },
+                    ],
+                    "destination_charging": [
+                        {"name": "Dest 1", "distance_miles": 1.0},
+                    ],
+                }
+            },
+        )
+        api = VehicleAPI(mock_client)
+        result = await api.nearby_charging_sites(VIN)
+
+        assert isinstance(result, NearbyChargingSites)
+        assert len(result.superchargers) == 1
+        assert result.superchargers[0].name == "SC 1"
+        assert len(result.destination_charging) == 1
+
+
+class TestRecentAlerts:
+    @pytest.mark.asyncio
+    async def test_recent_alerts(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(
+            url=f"{FLEET_BASE}/api/1/vehicles/{VIN}/recent_alerts",
+            json={"response": [{"name": "ServiceRequired", "time": "2024-01-01"}]},
+        )
+        api = VehicleAPI(mock_client)
+        alerts = await api.recent_alerts(VIN)
+
+        assert len(alerts) == 1
+        assert alerts[0]["name"] == "ServiceRequired"
+
+
+class TestReleaseNotes:
+    @pytest.mark.asyncio
+    async def test_release_notes(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(
+            url=f"{FLEET_BASE}/api/1/vehicles/{VIN}/release_notes",
+            json={"response": {"release_notes": [{"title": "Update 2024.8"}]}},
+        )
+        api = VehicleAPI(mock_client)
+        data = await api.release_notes(VIN)
+
+        assert "release_notes" in data
+
+
+class TestServiceData:
+    @pytest.mark.asyncio
+    async def test_service_data(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(
+            url=f"{FLEET_BASE}/api/1/vehicles/{VIN}/service_data",
+            json={"response": {"service_status": "in_service"}},
+        )
+        api = VehicleAPI(mock_client)
+        data = await api.service_data(VIN)
+
+        assert data["service_status"] == "in_service"
+
+
+class TestListDrivers:
+    @pytest.mark.asyncio
+    async def test_list_drivers(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        from tescmd.models.sharing import ShareDriverInfo
+
+        httpx_mock.add_response(
+            url=f"{FLEET_BASE}/api/1/vehicles/{VIN}/drivers",
+            json={
+                "response": [
+                    {"share_user_id": 1, "email": "driver@test.com", "status": "active"},
+                ]
+            },
+        )
+        api = VehicleAPI(mock_client)
+        drivers = await api.list_drivers(VIN)
+
+        assert len(drivers) == 1
+        assert isinstance(drivers[0], ShareDriverInfo)
+        assert drivers[0].email == "driver@test.com"

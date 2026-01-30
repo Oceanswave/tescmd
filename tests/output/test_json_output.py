@@ -74,7 +74,6 @@ class TestFormatJsonResponse:
         # Should contain a UTC offset indicator
         assert "+" in ts or ts.endswith("Z") or "+00:00" in ts
 
-
     def test_dict_with_nested_model_is_serialized(self) -> None:
         """A plain dict containing a Pydantic model should serialize the model."""
         cs = ChargeState(battery_level=72, charging_state="Complete")

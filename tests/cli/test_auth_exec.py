@@ -14,7 +14,6 @@ from click.testing import CliRunner
 
 from tescmd.cli.main import cli
 
-
 # ---------------------------------------------------------------------------
 # auth status
 # ---------------------------------------------------------------------------
@@ -159,9 +158,7 @@ class TestAuthExport:
 
         with patch("tescmd.cli.auth.TokenStore", return_value=mock_store):
             runner = CliRunner()
-            result = runner.invoke(
-                cli, ["auth", "export"], catch_exceptions=False
-            )
+            result = runner.invoke(cli, ["auth", "export"], catch_exceptions=False)
 
         assert result.exit_code == 0
         parsed = json.loads(result.output)
@@ -182,9 +179,7 @@ class TestAuthExport:
 
         with patch("tescmd.cli.auth.TokenStore", return_value=mock_store):
             runner = CliRunner()
-            result = runner.invoke(
-                cli, ["auth", "export"], catch_exceptions=False
-            )
+            result = runner.invoke(cli, ["auth", "export"], catch_exceptions=False)
 
         assert result.exit_code == 0
         parsed = json.loads(result.output)

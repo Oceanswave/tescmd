@@ -7,11 +7,12 @@ tescmd follows a layered architecture with strict separation of concerns. Each l
 ```
 ┌─────────────────────────────────────────────────┐
 │                    CLI Layer                     │
-│  cli/main.py ─ cli/charge.py ─ cli/vehicle.py   │
-│         (argparse, dispatch, output)             │
+│  cli/main.py ─ cli/auth.py ─ cli/vehicle.py     │
+│  cli/key.py ─ cli/setup.py                      │
+│        (Click groups, dispatch, output)          │
 ├─────────────────────────────────────────────────┤
 │                   API Layer                      │
-│  api/vehicle.py ─ api/command.py ─ api/fleet.py  │
+│              api/vehicle.py                      │
 │       (domain methods, request building)         │
 ├─────────────────────────────────────────────────┤
 │                  Client Layer                    │
@@ -23,32 +24,32 @@ tescmd follows a layered architecture with strict separation of concerns. Each l
 │    (OAuth2 PKCE, token refresh, keyring)         │
 ├─────────────────────────────────────────────────┤
 │               Infrastructure                     │
-│  config/ ─ output/ ─ crypto/ ─ ble/ ─ models/   │
-│  (settings, formatting, keys, BLE, schemas)      │
+│    output/ ─ crypto/ ─ models/ ─ _internal/      │
+│  (formatting, units, keys, schemas, helpers)     │
 └─────────────────────────────────────────────────┘
 ```
 
 ## Data Flow
 
-### Typical Command Execution
+### Typical Data Query Execution
 
 ```
-User runs: tescmd charge start
+User runs: tescmd vehicle data
 
   1. cli/main.py
-     ├── Parses global args (--vin, --format, --profile)
-     ├── Loads settings (CLI > env > config > defaults)
-     └── Dispatches to cli/charge.py
+     ├── Click parses global args (--vin, --format, --profile)
+     ├── Creates AppContext with settings
+     └── Dispatches to cli/vehicle.py
 
-  2. cli/charge.py
-     ├── Parses subcommand args
-     ├── Resolves VIN (arg > flag > profile > picker)
+  2. cli/vehicle.py
+     ├── Click parses subcommand args
+     ├── Resolves VIN (arg > flag > env > profile > picker)
      ├── Creates API client
-     └── Calls api/command.py → start_charge(vin)
+     └── Calls api/vehicle.py → get_vehicle_data(vin)
 
-  3. api/command.py
-     ├── Builds request payload
-     └── Calls client.post("/api/1/vehicles/{id}/command/charge_start")
+  3. api/vehicle.py
+     ├── Builds query parameters
+     └── Calls client.get("/api/1/vehicles/{vin}/vehicle_data")
 
   4. api/client.py (TeslaFleetClient)
      ├── Injects Authorization header (from token store)
@@ -57,52 +58,15 @@ User runs: tescmd charge start
      ├── Handles 401 → triggers token refresh → retries
      └── Returns parsed response
 
-  5. cli/charge.py (back in CLI layer)
-     ├── Receives CommandResponse model
+  5. cli/vehicle.py (back in CLI layer)
+     ├── Receives VehicleData model
      └── Passes to output/formatter.py for display
 
   6. output/formatter.py
-     ├── TTY detected? → rich_output.py (Rich panel)
+     ├── TTY detected? → rich_output.py (Rich tables with unit conversion)
      ├── Piped? → json_output.py (JSON object)
      └── --quiet? → stderr summary only
 ```
-
-### Data Query Execution
-
-```
-User runs: tescmd charge status
-
-  1. cli/main.py
-     ├── Parses global args (--vin, --format, --profile)
-     ├── Loads settings (CLI > env > config > defaults)
-     └── Dispatches to cli/charge.py
-
-  2. cli/charge.py
-     ├── Parses subcommand args (status)
-     ├── Resolves VIN (arg > flag > profile > picker)
-     ├── Creates API client
-     └── Calls api/vehicle.py → get_vehicle_data(vin, endpoints=["charge_state"])
-
-  3. api/vehicle.py
-     ├── Builds query parameters
-     └── Calls client.get("/api/1/vehicles/{vin}/vehicle_data?endpoints=charge_state")
-
-  4. api/client.py (TeslaFleetClient)
-     ├── Injects Authorization header (from token store)
-     ├── Sends HTTP GET via httpx
-     └── Returns parsed response as ChargeState model
-
-  5. cli/charge.py (back in CLI layer)
-     ├── Receives ChargeState model
-     └── Passes to output/formatter.py for display
-
-  6. output/formatter.py
-     ├── TTY? → rich_output.py (Rich panel: battery %, range, rate, etc.)
-     ├── Piped? → json_output.py (JSON with charge_state fields)
-     └── --quiet? → stderr summary only
-```
-
-Note: Data queries (status, info, location, data) go through `VehicleAPI` and only require an OAuth token. Commands (start, stop, lock, etc.) go through `CommandAPI` and may require an enrolled EC key.
 
 ### Authentication Flow
 
@@ -131,101 +95,105 @@ User runs: tescmd auth login
 
 ### `cli/` — Command-Line Interface
 
-Each file corresponds to a command group (`auth`, `vehicle`, `charge`, etc.). Responsibilities:
+Each file corresponds to a command group (`auth`, `vehicle`, `key`, `setup`). Built with **Click**. Responsibilities:
 
-- Define argparse subparsers and arguments
-- Resolve VIN and other context
-- Call API layer methods
-- Format and display output
+- Define Click command groups, commands, and options
+- Resolve VIN and other context via `AppContext`
+- Call API layer methods using `run_async()` helper
+- Format and display output via `OutputFormatter`
 - Handle user-facing errors (translate API errors to messages)
 
 CLI modules do **not** construct HTTP requests or handle auth tokens directly.
 
+**Currently implemented command groups:**
+- `auth` — login, logout, status, refresh, register
+- `vehicle` — list, info, data, location, wake
+- `key` — generate, register, list
+- `setup` — interactive first-run configuration wizard
+
 ### `api/` — API Client
 
 - **`client.py`** (`TeslaFleetClient`) — Base HTTP client. Manages httpx session, auth headers, base URL, retries, token refresh.
-- **`vehicle.py`** (`VehicleAPI`) — Vehicle data endpoints (list, info, data).
-- **`command.py`** (`CommandAPI`) — Vehicle command endpoints (charge, climate, security, etc.).
-- **`fleet.py`** (`FleetAPI`) — Fleet-wide endpoints (status, telemetry config).
-- **`errors.py`** — Typed exceptions: `AuthError`, `VehicleAsleepError`, `CommandFailedError`, `RateLimitError`, etc.
+- **`vehicle.py`** (`VehicleAPI`) — Vehicle data endpoints (list, info, data, location, wake).
+- **`errors.py`** — Typed exceptions: `AuthError`, `VehicleAsleepError`, `RegistrationRequiredError`, `RateLimitError`, etc.
 
 API classes use **composition**: they receive a `TeslaFleetClient` instance, not extend it.
 
 ```python
-class CommandAPI:
+class VehicleAPI:
     def __init__(self, client: TeslaFleetClient) -> None:
         self._client = client
 
-    async def start_charge(self, vin: str) -> CommandResponse:
-        return await self._client.post(f"/api/1/vehicles/{vin}/command/charge_start")
+    async def list_vehicles(self) -> list[Vehicle]:
+        resp = await self._client.get("/api/1/vehicles")
+        return [Vehicle(**v) for v in resp["response"]]
 ```
 
 ### `models/` — Data Models
 
 Pydantic v2 models for all structured data:
 
-- **`vehicle.py`** — `Vehicle`, `VehicleData`, `DriveState`, `ChargeState`, `ClimateState`, etc.
+- **`vehicle.py`** — `Vehicle`, `VehicleData`, `DriveState`, `ChargeState`, `ClimateState`, `VehicleState`, `VehicleConfig`, `GuiSettings`
 - **`auth.py`** — `TokenResponse`, `AuthConfig`
 - **`command.py`** — `CommandResponse`, `CommandResult`
-- **`config.py`** — `AppConfig`, `Profile` (pydantic-settings for env/file loading)
+- **`config.py`** — `AppSettings` (pydantic-settings for env/file loading)
 
-Models serve as the **contract** between layers. API methods return models; CLI methods accept and display models.
+Models serve as the **contract** between layers. API methods return models; CLI methods accept and display models. All vehicle models use `extra="allow"` so unknown API fields are preserved without errors.
 
 ### `auth/` — Authentication
 
-- **`oauth.py`** — OAuth2 PKCE flow implementation. Generates verifier/challenge, builds auth URL, handles code exchange.
+- **`oauth.py`** — OAuth2 PKCE flow implementation. Generates verifier/challenge, builds auth URL, handles code exchange. Also handles partner account registration.
 - **`token_store.py`** — Wraps `keyring` for OS-native credential storage. Stores access token, refresh token, expiry, and metadata.
 - **`server.py`** — Ephemeral local HTTP server that receives the OAuth redirect callback.
 
 ### `crypto/` — Key Management
 
 - **`keys.py`** — EC P-256 key generation, PEM export/import, public key extraction.
-- **`signing.py`** — Command signing for Tesla's vehicle command protocol (protocol v2).
 
 ### `output/` — Output Formatting
 
 - **`formatter.py`** — `OutputFormatter` detects output context (TTY, pipe, quiet flag) and delegates.
-- **`rich_output.py`** — Rich-based rendering: tables for lists, panels for details, spinners for async ops.
+- **`rich_output.py`** — Rich-based rendering: tables for vehicle data, charge status, climate status, vehicle config, GUI settings. Includes `DisplayUnits` for configurable unit conversion (°F/°C, mi/km, PSI/bar).
 - **`json_output.py`** — JSON serialization with consistent structure for machine parsing.
-
-### `config/` — Configuration
-
-- **`settings.py`** — Pydantic Settings subclass. Merges CLI args, env vars (with `.env`), config.toml, and defaults.
-- **`profiles.py`** — Named profiles in `config.toml`. Each profile stores VIN, region, output format preferences.
-
-### `ble/` — Bluetooth Low Energy
-
-- **`enroll.py`** — Uses `bleak` to communicate with the vehicle over BLE for key enrollment. This is the only module that requires physical proximity to the vehicle.
 
 ### `_internal/` — Shared Utilities
 
 - **`vin.py`** — Smart VIN resolution: checks positional arg, `--vin` flag, active profile, then falls back to interactive vehicle picker.
-- **`async_utils.py`** — Helpers for running async code from sync entry points, async timeouts, etc.
+- **`async_utils.py`** — `run_async()` helper for running async code from sync Click entry points.
 
 ## Design Decisions
 
 ### Why Composition Over Inheritance
 
-API classes (`VehicleAPI`, `CommandAPI`, `FleetAPI`) wrap a `TeslaFleetClient` instance rather than inheriting from it. This provides:
+API classes (`VehicleAPI`) wrap a `TeslaFleetClient` instance rather than inheriting from it. This provides:
 
 - **Testability** — inject a mock client
 - **Separation** — domain logic doesn't leak into HTTP transport
 - **Flexibility** — the client can be shared across API classes without diamond inheritance
 
-### Why argparse Over click/typer
+### Why Click
 
-- Zero additional dependencies (stdlib)
-- Works naturally with async (no decorator-based dispatch to fight)
-- Full control over help formatting and error messages
-- Nested subparsers (`tescmd charge start`) map cleanly to `cli/` file structure
+- Natural fit for nested command groups (`tescmd auth login`, `tescmd vehicle data`)
+- Decorator-based interface keeps commands concise
+- Built-in support for `--help`, types, choices, environment variable fallbacks
+- `@click.pass_obj` context propagation works well with `AppContext` pattern
+- Async integration via `run_async()` wrapper
 
 ### Why REST-First with Portal Key Enrollment
 
-Tesla's Fleet API handles all vehicle commands over REST. Key enrollment (registering a public key on the vehicle) is the only operation outside the REST API. The primary enrollment path uses the Tesla Developer Portal — a web-based flow where the vehicle receives the key over cellular and the owner confirms via the Tesla app. BLE enrollment is an alternative for offline provisioning. Both paths are isolated to their own modules (`ble/enroll.py` is optional).
+Tesla's Fleet API handles all vehicle commands over REST. Key enrollment (registering a public key on the vehicle) is the only operation outside the REST API. The primary enrollment path uses the Tesla Developer Portal — a web-based flow where the vehicle receives the key over cellular and the owner confirms via the Tesla app. BLE enrollment is an alternative for offline provisioning.
 
 ### Why Auto-Detect Output Format
 
 Scripts that pipe tescmd output need JSON. Humans at a terminal want Rich formatting. Auto-detection (`sys.stdout.isatty()`) serves both without requiring flags, while `--format` provides explicit override when needed.
+
+### Why Display-Layer Unit Conversion
+
+The Tesla API returns temperatures in Celsius, distances in miles, and tire pressures in bar. Rather than converting in the Pydantic models (which would lose the raw API values), conversions happen in `RichOutput` via the `DisplayUnits` dataclass. This means:
+
+- JSON output always contains raw API values (consistent, machine-readable)
+- Rich output displays human-friendly units (configurable)
+- Models remain faithful mirrors of the API contract
 
 ### Why Keyring for Token Storage
 

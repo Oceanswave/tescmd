@@ -33,14 +33,14 @@ The `[dev]` extra installs:
 ```
 tescmd/
 ├── src/tescmd/          # Source code (src layout)
-│   ├── cli/             # CLI layer (argparse, dispatch, output)
+│   ├── cli/             # CLI layer (Click command groups)
 │   ├── api/             # API client layer (HTTP, domain methods)
 │   ├── models/          # Pydantic v2 models
 │   ├── auth/            # OAuth2, token storage
-│   ├── crypto/          # EC keys, command signing
-│   ├── output/          # Rich + JSON formatters
-│   ├── config/          # Settings, profiles
-│   ├── ble/             # BLE key enrollment
+│   ├── crypto/          # EC keys
+│   ├── output/          # Rich + JSON formatters, display units
+│   ├── config/          # Configuration (stub)
+│   ├── ble/             # BLE key enrollment (stub)
 │   └── _internal/       # Shared utilities
 ├── tests/               # Test files (mirrors src/ structure)
 │   ├── cli/
@@ -157,9 +157,10 @@ asyncio_mode = "auto"
 Tests mirror the source structure:
 
 ```
-src/tescmd/cli/charge.py    →  tests/cli/test_charge.py
+src/tescmd/cli/vehicle.py   →  tests/cli/test_cli_integration.py
 src/tescmd/api/client.py    →  tests/api/test_client.py
 src/tescmd/auth/oauth.py    →  tests/auth/test_oauth.py
+src/tescmd/output/rich_output.py → tests/output/test_rich_output.py
 ```
 
 ### Mocking HTTP Calls
@@ -194,36 +195,48 @@ All API tests are async. Use `@pytest.mark.asyncio`:
 
 ```python
 @pytest.mark.asyncio
-async def test_start_charge(httpx_mock):
+async def test_get_vehicle_data(httpx_mock):
     httpx_mock.add_response(
-        url="https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/vehicles/VIN123/command/charge_start",
-        json={"response": {"result": True, "reason": ""}},
+        url="https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/vehicles/VIN123/vehicle_data",
+        json={"response": {"vin": "VIN123", "charge_state": {"battery_level": 80}}},
     )
 
     client = TeslaFleetClient(access_token="test-token", region="na")
-    command_api = CommandAPI(client)
-    result = await command_api.start_charge("VIN123")
-    assert result.result is True
+    vehicle_api = VehicleAPI(client)
+    data = await vehicle_api.get_vehicle_data("VIN123")
+    assert data.charge_state.battery_level == 80
 ```
 
-### Testing CLI Output
+### Testing Rich Output
 
-Test CLI commands by capturing output:
+Test Rich output by capturing to a `StringIO` buffer:
 
 ```python
 from io import StringIO
-from unittest.mock import patch
+from rich.console import Console
+from tescmd.output.rich_output import RichOutput, DisplayUnits, TempUnit
 
-def test_vehicle_list_json(httpx_mock):
-    httpx_mock.add_response(...)
+def test_climate_status_fahrenheit():
+    buf = StringIO()
+    console = Console(file=buf, force_terminal=True, width=100)
+    ro = RichOutput(console)  # defaults to US units
 
-    with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
-        # Run CLI command with --format json
-        main(["vehicle", "list", "--format", "json"])
+    cs = ClimateState(inside_temp=22.0, is_climate_on=True)
+    ro.climate_status(cs)
+    output = buf.getvalue()
 
-    output = json.loads(mock_stdout.getvalue())
-    assert output["ok"] is True
-    assert len(output["data"]) == 1
+    assert "71.6" in output  # 22°C → 71.6°F
+
+def test_climate_status_celsius():
+    buf = StringIO()
+    console = Console(file=buf, force_terminal=True, width=100)
+    ro = RichOutput(console, units=DisplayUnits(temp=TempUnit.C))
+
+    cs = ClimateState(inside_temp=22.0, is_climate_on=True)
+    ro.climate_status(cs)
+    output = buf.getvalue()
+
+    assert "22.0°C" in output
 ```
 
 ### Shared Fixtures
@@ -255,118 +268,122 @@ def sample_vehicle_data():
 
 ## Adding a New Command
 
-This walks through adding a new command group or subcommand.
+This walks through adding a new command group or subcommand using Click.
 
 ### Step 1: Add the CLI Module
 
-Create `src/tescmd/cli/windows.py` (example: window control commands):
+Create `src/tescmd/cli/charge.py` (example: charge commands):
 
 ```python
-"""CLI commands for window control."""
+"""CLI commands for charge control."""
 
 from __future__ import annotations
 
-import argparse
 from typing import TYPE_CHECKING
 
+import click
+
+from tescmd._internal.async_utils import run_async
+from tescmd.cli._options import vin_argument
+
 if TYPE_CHECKING:
-    from tescmd.api.command import CommandAPI
-    from tescmd.output.formatter import OutputFormatter
-
-def register(subparsers: argparse._SubParsersAction) -> None:
-    """Register window commands with the argument parser."""
-    parser = subparsers.add_parser("windows", help="Window control")
-    sub = parser.add_subparsers(dest="subcommand", required=True)
-
-    # windows status
-    status_parser = sub.add_parser("status", help="Get window state")
-    status_parser.set_defaults(func=cmd_status)
-
-    # windows vent
-    vent_parser = sub.add_parser("vent", help="Vent all windows")
-    vent_parser.set_defaults(func=cmd_vent)
-
-    # windows close
-    close_parser = sub.add_parser("close", help="Close all windows")
-    close_parser.set_defaults(func=cmd_close)
+    from tescmd.cli.main import AppContext
 
 
-async def cmd_status(
-    args: argparse.Namespace,
-    command_api: CommandAPI,
-    formatter: OutputFormatter,
-) -> int:
-    """Query window state."""
-    data = await command_api.get_vehicle_data(args.vin, endpoints=["vehicle_state"])
-    formatter.output(data, command="windows.status")
-    return 0
+@click.group("charge")
+def charge_group() -> None:
+    """Charge queries and control."""
 
 
-async def cmd_vent(
-    args: argparse.Namespace,
-    command_api: CommandAPI,
-    formatter: OutputFormatter,
-) -> int:
-    """Vent all windows."""
-    result = await command_api.vent_windows(args.vin)
-    formatter.output(result, command="windows.vent")
-    return 0
+@charge_group.command("status")
+@vin_argument
+@click.pass_obj
+def charge_status(ctx: AppContext, vin: str | None) -> None:
+    """Display current charging state."""
+    resolved_vin = vin or ctx.vin
+    if not resolved_vin:
+        raise click.UsageError("No VIN specified. Use --vin or set TESLA_VIN.")
+    data = run_async(_fetch_charge_status(resolved_vin, ctx))
+    ctx.formatter.charge_status(data)
 
 
-async def cmd_close(
-    args: argparse.Namespace,
-    command_api: CommandAPI,
-    formatter: OutputFormatter,
-) -> int:
-    """Close all windows."""
-    result = await command_api.close_windows(args.vin)
-    formatter.output(result, command="windows.close")
-    return 0
+@charge_group.command("start")
+@vin_argument
+@click.pass_obj
+def charge_start(ctx: AppContext, vin: str | None) -> None:
+    """Start charging."""
+    resolved_vin = vin or ctx.vin
+    if not resolved_vin:
+        raise click.UsageError("No VIN specified.")
+    result = run_async(_start_charge(resolved_vin, ctx))
+    ctx.formatter.command_result(result)
+
+
+async def _fetch_charge_status(vin: str, ctx: AppContext):
+    # Build API client, call VehicleAPI.get_vehicle_data with charge_state endpoint
+    ...
+
+
+async def _start_charge(vin: str, ctx: AppContext):
+    # Build API client, call CommandAPI.start_charge
+    ...
 ```
 
-### Step 2: Add API Methods
+### Step 2: Register in Main
 
-Add methods to `src/tescmd/api/command.py`:
+Add to `src/tescmd/cli/main.py` in `_register_commands()`:
 
 ```python
-async def vent_windows(self, vin: str) -> CommandResponse:
-    return await self._client.post(
-        f"/api/1/vehicles/{vin}/command/window_control",
-        json={"command": "vent"},
-    )
+def _register_commands() -> None:
+    from tescmd.cli.auth import auth_group
+    from tescmd.cli.charge import charge_group  # new
+    from tescmd.cli.key import key_group
+    from tescmd.cli.setup import setup_cmd
+    from tescmd.cli.vehicle import vehicle_group
 
-async def close_windows(self, vin: str) -> CommandResponse:
-    return await self._client.post(
-        f"/api/1/vehicles/{vin}/command/window_control",
-        json={"command": "close"},
-    )
+    cli.add_command(auth_group)
+    cli.add_command(charge_group)  # new
+    cli.add_command(key_group)
+    cli.add_command(setup_cmd)
+    cli.add_command(vehicle_group)
 ```
 
-### Step 3: Register in Main
+### Step 3: Add Rich Output Method
 
-Add to `src/tescmd/cli/main.py`:
+Add a method to `src/tescmd/output/rich_output.py`:
 
 ```python
-from tescmd.cli import windows
+def charge_status(self, cs: ChargeState) -> None:
+    table = Table(title="Charge Status")
+    table.add_column("Field", style="bold")
+    table.add_column("Value")
 
-# In the parser setup:
-windows.register(subparsers)
+    if cs.battery_level is not None:
+        table.add_row("Battery %", f"{cs.battery_level}%")
+    if cs.battery_range is not None:
+        table.add_row("Range", self._fmt_dist(cs.battery_range))
+    # ... more fields
+    self._con.print(table)
 ```
 
 ### Step 4: Add Tests
 
-Create `tests/cli/test_windows.py`:
+Create `tests/cli/test_charge.py`:
 
 ```python
 import pytest
+from click.testing import CliRunner
+from tescmd.cli.main import cli
 
-@pytest.mark.asyncio
-async def test_vent_windows(httpx_mock):
+def test_charge_status(httpx_mock):
     httpx_mock.add_response(
-        url="https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/vehicles/VIN123/command/window_control",
-        json={"response": {"result": True, "reason": ""}},
+        url="...",
+        json={"response": {"charge_state": {"battery_level": 80}}},
     )
-    # ... test implementation
+    runner = CliRunner()
+    result = runner.invoke(cli, ["charge", "status", "--vin", "VIN123"])
+    assert result.exit_code == 0
+    assert "80%" in result.output
 ```
 
 ### Step 5: Update Documentation
@@ -376,7 +393,7 @@ async def test_vent_windows(httpx_mock):
 
 ### Checklist for New Commands
 
-- [ ] CLI module in `src/tescmd/cli/` with `register()` function
+- [ ] CLI module in `src/tescmd/cli/` with Click group and commands
 - [ ] API methods in appropriate `src/tescmd/api/` module
 - [ ] Pydantic models for any new response shapes in `src/tescmd/models/`
 - [ ] Rich output formatting for new data types in `src/tescmd/output/rich_output.py`

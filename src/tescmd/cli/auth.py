@@ -1,4 +1,4 @@
-"""CLI commands for authentication (login, logout, status, refresh, export, import)."""
+"""CLI commands for authentication (login, logout, status, refresh, export, import, register)."""
 
 from __future__ import annotations
 
@@ -9,6 +9,9 @@ import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import click
+
+from tescmd._internal.async_utils import run_async
 from tescmd.api.errors import ConfigError
 from tescmd.auth.oauth import (
     login_flow,
@@ -16,67 +19,45 @@ from tescmd.auth.oauth import (
     register_partner_account,
 )
 from tescmd.auth.token_store import TokenStore
+from tescmd.cli._options import global_options
 from tescmd.models.auth import DEFAULT_SCOPES
 from tescmd.models.config import AppSettings
 
 if TYPE_CHECKING:
-    import argparse
-
+    from tescmd.cli.main import AppContext
     from tescmd.output.formatter import OutputFormatter
 
 DEVELOPER_PORTAL_URL = "https://developer.tesla.com"
 
 
-def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    """Register the ``auth`` command group and its sub-commands."""
-    auth_parser = subparsers.add_parser("auth", help="Authentication commands")
-    auth_sub = auth_parser.add_subparsers(dest="subcommand")
+# ---------------------------------------------------------------------------
+# Command group
+# ---------------------------------------------------------------------------
 
-    # -- login ---------------------------------------------------------------
-    login_p = auth_sub.add_parser("login", help="Log in via OAuth2 PKCE flow")
-    login_p.add_argument("--port", type=int, default=8085, help="Local callback port")
-    login_p.set_defaults(func=cmd_login)
-
-    # -- logout --------------------------------------------------------------
-    logout_p = auth_sub.add_parser("logout", help="Clear stored tokens")
-    logout_p.set_defaults(func=cmd_logout)
-
-    # -- status --------------------------------------------------------------
-    status_p = auth_sub.add_parser("status", help="Show authentication status")
-    status_p.set_defaults(func=cmd_status)
-
-    # -- refresh -------------------------------------------------------------
-    refresh_p = auth_sub.add_parser("refresh", help="Refresh the access token")
-    refresh_p.set_defaults(func=cmd_refresh)
-
-    # -- export --------------------------------------------------------------
-    export_p = auth_sub.add_parser("export", help="Export tokens as JSON to stdout")
-    export_p.set_defaults(func=cmd_export)
-
-    # -- register ------------------------------------------------------------
-    register_p = auth_sub.add_parser(
-        "register", help="Register app with the Fleet API (one-time)"
-    )
-    register_p.set_defaults(func=cmd_register)
-
-    # -- import --------------------------------------------------------------
-    import_p = auth_sub.add_parser("import", help="Import tokens from JSON on stdin")
-    import_p.set_defaults(func=cmd_import)
+auth_group = click.Group("auth", help="Authentication commands")
 
 
 # ---------------------------------------------------------------------------
-# Command handlers
+# Commands
 # ---------------------------------------------------------------------------
 
 
-async def cmd_login(args: argparse.Namespace, formatter: OutputFormatter) -> None:
-    """Run the interactive OAuth2 login flow."""
+@auth_group.command("login")
+@click.option("--port", type=int, default=8085, help="Local callback port")
+@global_options
+def login_cmd(app_ctx: AppContext, port: int) -> None:
+    """Log in via OAuth2 PKCE flow."""
+    run_async(_cmd_login(app_ctx, port))
+
+
+async def _cmd_login(app_ctx: AppContext, port: int) -> None:
+    formatter = app_ctx.formatter
     settings = AppSettings()
 
     client_id = settings.client_id
     client_secret = settings.client_secret
 
-    redirect_uri = f"http://localhost:{args.port}/callback"
+    redirect_uri = f"http://localhost:{port}/callback"
 
     if not client_id:
         if formatter.format == "json":
@@ -91,14 +72,14 @@ async def cmd_login(args: argparse.Namespace, formatter: OutputFormatter) -> Non
             )
             return
 
-        client_id, client_secret = _interactive_setup(
-            formatter, args, redirect_uri
-        )
-        if not client_id:
-            return
+        # Redirect first-run to the setup wizard for a guided experience
+        from tescmd.cli.setup import _cmd_setup
 
-    store = TokenStore(profile=getattr(args, "profile", "default"))
-    region = getattr(args, "region", None) or settings.region
+        await _cmd_setup(app_ctx)
+        return
+
+    store = TokenStore(profile=app_ctx.profile)
+    region = app_ctx.region or settings.region
 
     formatter.rich.info("")
     formatter.rich.info("Opening your browser to sign in to Tesla...")
@@ -106,16 +87,14 @@ async def cmd_login(args: argparse.Namespace, formatter: OutputFormatter) -> Non
         "When prompted, click [cyan]Select All[/cyan] and then"
         " [cyan]Allow[/cyan] to grant tescmd access."
     )
-    formatter.rich.info(
-        "[dim]If the browser doesn't open, visit the URL printed below.[/dim]"
-    )
+    formatter.rich.info("[dim]If the browser doesn't open, visit the URL printed below.[/dim]")
 
     await login_flow(
         client_id=client_id,
         client_secret=client_secret,
         redirect_uri=redirect_uri,
         scopes=DEFAULT_SCOPES,
-        port=args.port,
+        port=port,
         token_store=store,
         region=region,
     )
@@ -125,14 +104,10 @@ async def cmd_login(args: argparse.Namespace, formatter: OutputFormatter) -> Non
 
     # Auto-register with the Fleet API (requires client_secret + domain)
     if client_secret and settings.domain:
-        await _auto_register(
-            formatter, client_id, client_secret, settings.domain, region
-        )
+        await _auto_register(formatter, client_id, client_secret, settings.domain, region)
     else:
         formatter.rich.info("")
-        formatter.rich.info(
-            "[yellow]Next step:[/yellow] Register your app with the Fleet API."
-        )
+        formatter.rich.info("[yellow]Next step:[/yellow] Register your app with the Fleet API.")
         formatter.rich.info("  [cyan]tescmd auth register[/cyan]")
 
     formatter.rich.info("")
@@ -141,9 +116,16 @@ async def cmd_login(args: argparse.Namespace, formatter: OutputFormatter) -> Non
     formatter.rich.info("")
 
 
-async def cmd_logout(args: argparse.Namespace, formatter: OutputFormatter) -> None:
-    """Clear all stored tokens."""
-    store = TokenStore(profile=getattr(args, "profile", "default"))
+@auth_group.command("logout")
+@global_options
+def logout_cmd(app_ctx: AppContext) -> None:
+    """Clear stored tokens."""
+    run_async(_cmd_logout(app_ctx))
+
+
+async def _cmd_logout(app_ctx: AppContext) -> None:
+    formatter = app_ctx.formatter
+    store = TokenStore(profile=app_ctx.profile)
     store.clear()
 
     if formatter.format == "json":
@@ -152,9 +134,16 @@ async def cmd_logout(args: argparse.Namespace, formatter: OutputFormatter) -> No
         formatter.rich.info("Tokens cleared.")
 
 
-async def cmd_status(args: argparse.Namespace, formatter: OutputFormatter) -> None:
-    """Display current authentication status."""
-    store = TokenStore(profile=getattr(args, "profile", "default"))
+@auth_group.command("status")
+@global_options
+def status_cmd(app_ctx: AppContext) -> None:
+    """Show authentication status."""
+    run_async(_cmd_status(app_ctx))
+
+
+async def _cmd_status(app_ctx: AppContext) -> None:
+    formatter = app_ctx.formatter
+    store = TokenStore(profile=app_ctx.profile)
 
     if not store.has_token:
         if formatter.format == "json":
@@ -190,10 +179,17 @@ async def cmd_status(args: argparse.Namespace, formatter: OutputFormatter) -> No
         formatter.rich.info(f"Refresh token: {'yes' if has_refresh else 'no'}")
 
 
-async def cmd_refresh(args: argparse.Namespace, formatter: OutputFormatter) -> None:
+@auth_group.command("refresh")
+@global_options
+def refresh_cmd(app_ctx: AppContext) -> None:
     """Refresh the access token using the stored refresh token."""
+    run_async(_cmd_refresh(app_ctx))
+
+
+async def _cmd_refresh(app_ctx: AppContext) -> None:
+    formatter = app_ctx.formatter
     settings = AppSettings()
-    store = TokenStore(profile=getattr(args, "profile", "default"))
+    store = TokenStore(profile=app_ctx.profile)
 
     rt = store.refresh_token
     if not rt:
@@ -229,34 +225,33 @@ async def cmd_refresh(args: argparse.Namespace, formatter: OutputFormatter) -> N
         formatter.rich.info("Token refreshed successfully.")
 
 
-async def cmd_export(args: argparse.Namespace, formatter: OutputFormatter) -> None:
+@auth_group.command("export")
+@global_options
+def export_cmd(app_ctx: AppContext) -> None:
     """Export tokens as JSON to stdout."""
-    store = TokenStore(profile=getattr(args, "profile", "default"))
+    run_async(_cmd_export(app_ctx))
+
+
+async def _cmd_export(app_ctx: AppContext) -> None:
+    store = TokenStore(profile=app_ctx.profile)
     data = store.export_dict()
     print(json.dumps(data, indent=2))
 
 
-async def cmd_import(args: argparse.Namespace, formatter: OutputFormatter) -> None:
-    """Import tokens from JSON on stdin."""
-    raw = sys.stdin.read()
-    data = json.loads(raw)
-    store = TokenStore(profile=getattr(args, "profile", "default"))
-    store.import_dict(data)
-
-    if formatter.format == "json":
-        formatter.output({"status": "imported"}, command="auth.import")
-    else:
-        formatter.rich.info("Tokens imported successfully.")
+@auth_group.command("register")
+@global_options
+def register_cmd(app_ctx: AppContext) -> None:
+    """Register app with the Fleet API (one-time)."""
+    run_async(_cmd_register(app_ctx))
 
 
-async def cmd_register(args: argparse.Namespace, formatter: OutputFormatter) -> None:
-    """Register the application with the Tesla Fleet API for the active region."""
+async def _cmd_register(app_ctx: AppContext) -> None:
+    formatter = app_ctx.formatter
     settings = AppSettings()
 
     if not settings.client_id:
         raise ConfigError(
-            "TESLA_CLIENT_ID is required. "
-            "Run 'tescmd auth login' to set up your credentials."
+            "TESLA_CLIENT_ID is required. Run 'tescmd auth login' to set up your credentials."
         )
     if not settings.client_secret:
         raise ConfigError(
@@ -264,7 +259,7 @@ async def cmd_register(args: argparse.Namespace, formatter: OutputFormatter) -> 
             "Add it to your .env file or set it as an environment variable."
         )
 
-    region = getattr(args, "region", None) or settings.region
+    region = app_ctx.region or settings.region
     domain = settings.domain
 
     # Prompt for domain if not configured
@@ -280,9 +275,7 @@ async def cmd_register(args: argparse.Namespace, formatter: OutputFormatter) -> 
         )
 
     if formatter.format != "json":
-        formatter.rich.info(
-            f"Registering application with Fleet API ({region} region)..."
-        )
+        formatter.rich.info(f"Registering application with Fleet API ({region} region)...")
 
     await register_partner_account(
         client_id=settings.client_id,
@@ -302,6 +295,26 @@ async def cmd_register(args: argparse.Namespace, formatter: OutputFormatter) -> 
         formatter.rich.info("Try it out:")
         formatter.rich.info("  [cyan]tescmd vehicle list[/cyan]")
         formatter.rich.info("")
+
+
+@auth_group.command("import")
+@global_options
+def import_cmd(app_ctx: AppContext) -> None:
+    """Import tokens from JSON on stdin."""
+    run_async(_cmd_import(app_ctx))
+
+
+async def _cmd_import(app_ctx: AppContext) -> None:
+    formatter = app_ctx.formatter
+    raw = sys.stdin.read()
+    data = json.loads(raw)
+    store = TokenStore(profile=app_ctx.profile)
+    store.import_dict(data)
+
+    if formatter.format == "json":
+        formatter.output({"status": "imported"}, command="auth.import")
+    else:
+        formatter.rich.info("Tokens imported successfully.")
 
 
 # ---------------------------------------------------------------------------
@@ -329,19 +342,25 @@ async def _auto_register(
         formatter.rich.info("[green]Registration successful.[/green]")
     except Exception:
         formatter.rich.info(
-            "[yellow]Registration failed. Run"
-            " [cyan]tescmd auth register[/cyan] to retry.[/yellow]"
+            "[yellow]Registration failed. Run [cyan]tescmd auth register[/cyan] to retry.[/yellow]"
         )
 
 
 def _interactive_setup(
     formatter: OutputFormatter,
-    args: argparse.Namespace,
+    port: int,
     redirect_uri: str,
+    *,
+    domain: str = "",
 ) -> tuple[str, str]:
-    """Walk the user through first-time Tesla API credential setup."""
+    """Walk the user through first-time Tesla API credential setup.
+
+    When *domain* is provided (e.g. from the setup wizard), the developer
+    portal instructions show ``https://{domain}`` as the Allowed Origin URL.
+    Tesla's Fleet API requires the origin to match the registration domain.
+    """
     info = formatter.rich.info
-    origin_url = f"http://localhost:{args.port}"
+    origin_url = f"https://{domain}" if domain else f"http://localhost:{port}"
 
     info("")
     info("[bold cyan]Welcome to tescmd![/bold cyan]")
@@ -378,13 +397,9 @@ def _interactive_setup(
     # Step 2 — Application Details
     info("[bold]Step 2 — Application Details[/bold]")
     info("  Application Name:  [cyan]tescmd[/cyan]  (or anything you like)")
+    info("  Description:       [cyan]Personal CLI tool for vehicle status and control[/cyan]")
     info(
-        "  Description:       [cyan]Personal CLI tool for"
-        " vehicle status and control[/cyan]"
-    )
-    info(
-        "  Purpose of Usage:  [cyan]Query vehicle data and send"
-        " commands from the terminal[/cyan]"
+        "  Purpose of Usage:  [cyan]Query vehicle data and send commands from the terminal[/cyan]"
     )
     info("  Click Next.")
     info("")
@@ -441,9 +456,7 @@ def _interactive_setup(
 
     # Prompt for Client Secret (optional for public clients)
     try:
-        client_secret = input(
-            "Client Secret (optional, press Enter to skip): "
-        ).strip()
+        client_secret = input("Client Secret (optional, press Enter to skip): ").strip()
     except (EOFError, KeyboardInterrupt):
         info("")
         return ("", "")
@@ -468,21 +481,12 @@ def _prompt_for_domain(formatter: OutputFormatter) -> str:
     """Prompt the user for a domain to use for Fleet API registration."""
     info = formatter.rich.info
     info("")
-    info(
-        "Tesla requires a [bold]registered domain[/bold] to activate"
-        " your Fleet API access."
-    )
+    info("Tesla requires a [bold]registered domain[/bold] to activate your Fleet API access.")
     info("")
-    info(
-        "  The easiest option is a free [cyan]GitHub Pages[/cyan] site:"
-    )
-    info(
-        "  1. Create a public repo named [cyan]<username>.github.io[/cyan]"
-    )
+    info("  The easiest option is a free [cyan]GitHub Pages[/cyan] site:")
+    info("  1. Create a public repo named [cyan]<username>.github.io[/cyan]")
     info("  2. Enable GitHub Pages in the repo settings")
-    info(
-        "  3. Enter [cyan]<username>.github.io[/cyan] as your domain below"
-    )
+    info("  3. Enter [cyan]<username>.github.io[/cyan] as your domain below")
     info("")
     info(
         "[dim]Any domain you control works. For vehicle commands"
@@ -503,11 +507,11 @@ def _prompt_for_domain(formatter: OutputFormatter) -> str:
     # Strip protocol if user included it
     for prefix in ("https://", "http://"):
         if domain.startswith(prefix):
-            domain = domain[len(prefix):]
+            domain = domain[len(prefix) :]
             break
 
-    # Strip trailing slash
-    domain = domain.rstrip("/")
+    # Strip trailing slash and lowercase (Tesla Fleet API rejects uppercase)
+    domain = domain.rstrip("/").lower()
 
     # Save domain to .env for future use
     _write_env_value("TESLA_DOMAIN", domain)

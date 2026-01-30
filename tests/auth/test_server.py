@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import urllib.request
+import contextlib
 import urllib.error
+import urllib.request
 
 from tescmd.auth.server import OAuthCallbackServer
 
@@ -31,12 +32,8 @@ class TestOAuthCallbackServer:
         server.start()
         try:
             port = server.server_address[1]
-            try:
-                urllib.request.urlopen(
-                    f"http://127.0.0.1:{port}/callback?error=access_denied"
-                )
-            except urllib.error.HTTPError:
-                pass  # 400 response is expected for error callbacks
+            with contextlib.suppress(urllib.error.HTTPError):
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/callback?error=access_denied")
             code, state = server.wait_for_callback(timeout=5)
             assert code is None
             assert state is None

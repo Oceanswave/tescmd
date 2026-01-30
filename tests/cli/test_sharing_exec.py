@@ -378,9 +378,7 @@ class TestSharingRevokeInvite:
 
         req = httpx_mock.get_requests()[0]
         assert req.method == "POST"
-        assert f"/api/1/vehicles/{VIN}/invitations/inv-456/revoke" in _request_url(
-            httpx_mock
-        )
+        assert f"/api/1/vehicles/{VIN}/invitations/inv-456/revoke" in _request_url(httpx_mock)
 
     def test_revoke_invite_sends_no_body(
         self, cli_env: dict[str, str], httpx_mock: HTTPXMock
@@ -450,9 +448,7 @@ class TestSharingListInvites:
         assert parsed["data"][1]["id"] == "inv-456"
         assert parsed["data"][1]["status"] == "redeemed"
 
-    def test_list_invites_empty(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_list_invites_empty(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/invitations",
             json={"response": []},

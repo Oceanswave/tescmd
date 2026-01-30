@@ -53,9 +53,7 @@ def _request_body(httpx_mock: HTTPXMock, idx: int = 0) -> dict[str, Any]:
 class TestSoftwareStatus:
     """Tests for ``tescmd software status``."""
 
-    def test_software_status(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_software_status(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         """software status returns car_version and software_update."""
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/vehicle_data?endpoints=vehicle_state",
@@ -73,10 +71,8 @@ class TestSoftwareStatus:
         assert parsed["ok"] is True
         assert parsed["command"] == "software.status"
         assert parsed["data"]["car_version"] == "2024.26.9"
-        # software_update is a Pydantic model inside a plain dict,
-        # serialised as a string by json.dumps(default=str)
         assert "software_update" in parsed["data"]
-        assert "status=''" in parsed["data"]["software_update"]
+        assert parsed["data"]["software_update"]["status"] == ""
 
     def test_software_status_with_pending_update(
         self, cli_env: dict[str, str], httpx_mock: HTTPXMock
@@ -110,11 +106,9 @@ class TestSoftwareStatus:
         assert parsed["ok"] is True
         assert parsed["command"] == "software.status"
         assert parsed["data"]["car_version"] == "2024.26.9"
-        # software_update is a Pydantic model inside a plain dict,
-        # serialised as a string by json.dumps(default=str)
         assert "software_update" in parsed["data"]
-        assert "status='available'" in parsed["data"]["software_update"]
-        assert "version='2024.32.1'" in parsed["data"]["software_update"]
+        assert parsed["data"]["software_update"]["status"] == "available"
+        assert parsed["data"]["software_update"]["version"] == "2024.32.1"
 
     def test_software_status_sends_correct_endpoint(
         self, cli_env: dict[str, str], httpx_mock: HTTPXMock
@@ -162,9 +156,7 @@ class TestSoftwareStatus:
 class TestSoftwareSchedule:
     """Tests for ``tescmd software schedule VIN SECONDS``."""
 
-    def test_software_schedule(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_software_schedule(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         """software schedule posts to /command/schedule_software_update."""
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/schedule_software_update",
@@ -230,9 +222,7 @@ class TestSoftwareSchedule:
 class TestSoftwareCancel:
     """Tests for ``tescmd software cancel``."""
 
-    def test_software_cancel(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_software_cancel(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         """software cancel posts to /command/cancel_software_update."""
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/cancel_software_update",

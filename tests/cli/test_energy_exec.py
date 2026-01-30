@@ -11,11 +11,14 @@ integer ``site_id`` rather than a vehicle VIN.  They do **not** require the
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 from click.testing import CliRunner
-from pytest_httpx import HTTPXMock
 
 from tescmd.cli.main import cli
+
+if TYPE_CHECKING:
+    from pytest_httpx import HTTPXMock
 
 FLEET = "https://fleet-api.prd.na.vn.cloud.tesla.com"
 SITE_ID = 12345
@@ -96,9 +99,7 @@ COMMAND_RESPONSE: dict = {
 class TestEnergyList:
     """Tests for ``tescmd energy list`` (GET /api/1/products)."""
 
-    def test_list_products(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_list_products(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/products",
             json=PRODUCTS_RESPONSE,
@@ -118,9 +119,7 @@ class TestEnergyList:
         assert parsed["data"][0]["energy_site_id"] == SITE_ID
         assert parsed["data"][0]["site_name"] == "My Powerwall"
 
-    def test_list_products_empty(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_list_products_empty(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/products",
             json={"response": []},
@@ -191,9 +190,7 @@ class TestEnergyStatus:
         assert parsed["data"]["default_real_mode"] == "self_consumption"
         assert parsed["data"]["storm_mode_enabled"] is False
 
-    def test_status_has_timestamp(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_status_has_timestamp(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/energy_sites/{SITE_ID}/site_info",
             json=SITE_INFO_RESPONSE,
@@ -216,9 +213,7 @@ class TestEnergyStatus:
 class TestEnergyLive:
     """Tests for ``tescmd energy live SITE_ID`` (GET live_status)."""
 
-    def test_live_returns_power_flow(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_live_returns_power_flow(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/energy_sites/{SITE_ID}/live_status",
             json=LIVE_STATUS_RESPONSE,
@@ -249,9 +244,7 @@ class TestEnergyLive:
 class TestEnergyBackup:
     """Tests for ``tescmd energy backup SITE_ID PERCENT`` (POST backup)."""
 
-    def test_backup_set_reserve(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_backup_set_reserve(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/energy_sites/{SITE_ID}/backup",
             method="POST",
@@ -284,7 +277,7 @@ class TestEnergyBackup:
             catch_exceptions=False,
         )
         requests = httpx_mock.get_requests()
-        post_req = [r for r in requests if r.method == "POST"][0]
+        post_req = next(r for r in requests if r.method == "POST")
         body = json.loads(post_req.content)
         assert body["backup_reserve_percent"] == 75
 
@@ -303,9 +296,7 @@ class TestEnergyBackup:
 class TestEnergyMode:
     """Tests for ``tescmd energy mode SITE_ID MODE`` (POST operation)."""
 
-    def test_mode_self_consumption(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_mode_self_consumption(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/energy_sites/{SITE_ID}/operation",
             method="POST",
@@ -323,9 +314,7 @@ class TestEnergyMode:
         assert parsed["command"] == "energy.mode"
         assert parsed["data"]["code"] == 200
 
-    def test_mode_backup(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_mode_backup(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/energy_sites/{SITE_ID}/operation",
             method="POST",
@@ -342,9 +331,7 @@ class TestEnergyMode:
         assert parsed["ok"] is True
         assert parsed["command"] == "energy.mode"
 
-    def test_mode_autonomous(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_mode_autonomous(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/energy_sites/{SITE_ID}/operation",
             method="POST",
@@ -361,9 +348,7 @@ class TestEnergyMode:
         assert parsed["ok"] is True
         assert parsed["command"] == "energy.mode"
 
-    def test_mode_sends_correct_body(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_mode_sends_correct_body(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/energy_sites/{SITE_ID}/operation",
             method="POST",
@@ -376,7 +361,7 @@ class TestEnergyMode:
             catch_exceptions=False,
         )
         requests = httpx_mock.get_requests()
-        post_req = [r for r in requests if r.method == "POST"][0]
+        post_req = next(r for r in requests if r.method == "POST")
         body = json.loads(post_req.content)
         assert body["default_real_mode"] == "autonomous"
 
@@ -395,9 +380,7 @@ class TestEnergyMode:
 class TestEnergyStorm:
     """Tests for ``tescmd energy storm SITE_ID --on/--off`` (POST storm_mode)."""
 
-    def test_storm_enable(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_storm_enable(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/energy_sites/{SITE_ID}/storm_mode",
             method="POST",
@@ -415,9 +398,7 @@ class TestEnergyStorm:
         assert parsed["command"] == "energy.storm"
         assert parsed["data"]["code"] == 200
 
-    def test_storm_disable(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_storm_disable(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/energy_sites/{SITE_ID}/storm_mode",
             method="POST",
@@ -449,7 +430,7 @@ class TestEnergyStorm:
             catch_exceptions=False,
         )
         requests = httpx_mock.get_requests()
-        post_req = [r for r in requests if r.method == "POST"][0]
+        post_req = next(r for r in requests if r.method == "POST")
         body = json.loads(post_req.content)
         assert body["enabled"] is True
 
@@ -468,7 +449,7 @@ class TestEnergyStorm:
             catch_exceptions=False,
         )
         requests = httpx_mock.get_requests()
-        post_req = [r for r in requests if r.method == "POST"][0]
+        post_req = next(r for r in requests if r.method == "POST")
         body = json.loads(post_req.content)
         assert body["enabled"] is False
 
@@ -481,9 +462,7 @@ class TestEnergyStorm:
 class TestEnergyTou:
     """Tests for ``tescmd energy tou SITE_ID SETTINGS_JSON`` (POST time_of_use_settings)."""
 
-    def test_tou_update(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_tou_update(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/energy_sites/{SITE_ID}/time_of_use_settings",
             method="POST",
@@ -502,9 +481,7 @@ class TestEnergyTou:
         assert parsed["command"] == "energy.tou"
         assert parsed["data"]["code"] == 200
 
-    def test_tou_sends_correct_body(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_tou_sends_correct_body(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/energy_sites/{SITE_ID}/time_of_use_settings",
             method="POST",
@@ -519,7 +496,7 @@ class TestEnergyTou:
             catch_exceptions=False,
         )
         requests = httpx_mock.get_requests()
-        post_req = [r for r in requests if r.method == "POST"][0]
+        post_req = next(r for r in requests if r.method == "POST")
         body = json.loads(post_req.content)
         assert body["tou_settings"] == tou_settings
 
@@ -532,9 +509,7 @@ class TestEnergyTou:
 class TestEnergyHistory:
     """Tests for ``tescmd energy history SITE_ID`` (GET history?kind=charging)."""
 
-    def test_history_returns_data(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_history_returns_data(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/energy_sites/{SITE_ID}/history?kind=charging",
             json=CHARGING_HISTORY_RESPONSE,
@@ -580,9 +555,7 @@ class TestEnergyHistory:
 class TestEnergyOffGrid:
     """Tests for ``tescmd energy off-grid SITE_ID RESERVE`` (POST off_grid)."""
 
-    def test_off_grid_set_reserve(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_off_grid_set_reserve(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/energy_sites/{SITE_ID}/off_grid_vehicle_charging_reserve",
             method="POST",
@@ -615,7 +588,7 @@ class TestEnergyOffGrid:
             catch_exceptions=False,
         )
         requests = httpx_mock.get_requests()
-        post_req = [r for r in requests if r.method == "POST"][0]
+        post_req = next(r for r in requests if r.method == "POST")
         body = json.loads(post_req.content)
         assert body["off_grid_vehicle_charging_reserve_percent"] == 45
 
@@ -634,18 +607,18 @@ class TestEnergyOffGrid:
 class TestEnergyGridConfig:
     """Tests for ``tescmd energy grid-config SITE_ID CONFIG_JSON`` (POST grid_import_export)."""
 
-    def test_grid_config_update(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_grid_config_update(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/energy_sites/{SITE_ID}/grid_import_export",
             method="POST",
             json=COMMAND_RESPONSE,
         )
-        config = json.dumps({
-            "disallow_charge_from_grid_with_solar_installed": True,
-            "customer_preferred_export_rule": "pv_only",
-        })
+        config = json.dumps(
+            {
+                "disallow_charge_from_grid_with_solar_installed": True,
+                "customer_preferred_export_rule": "pv_only",
+            }
+        )
         runner = CliRunner()
         result = runner.invoke(
             cli,
@@ -678,7 +651,7 @@ class TestEnergyGridConfig:
             catch_exceptions=False,
         )
         requests = httpx_mock.get_requests()
-        post_req = [r for r in requests if r.method == "POST"][0]
+        post_req = next(r for r in requests if r.method == "POST")
         body = json.loads(post_req.content)
         # grid_import_export sends the config dict directly as the POST body
         assert body == grid_config
@@ -692,9 +665,7 @@ class TestEnergyGridConfig:
 class TestEnergyCalendar:
     """Tests for ``tescmd energy calendar SITE_ID`` (GET calendar_history)."""
 
-    def test_calendar_defaults(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_calendar_defaults(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         """calendar with default options (kind=energy, period=day)."""
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/energy_sites/{SITE_ID}/calendar_history?kind=energy&period=day",
@@ -725,10 +696,15 @@ class TestEnergyCalendar:
         result = runner.invoke(
             cli,
             [
-                "--format", "json",
-                "energy", "calendar", str(SITE_ID),
-                "--kind", "backup",
-                "--period", "month",
+                "--format",
+                "json",
+                "energy",
+                "calendar",
+                str(SITE_ID),
+                "--kind",
+                "backup",
+                "--period",
+                "month",
             ],
             catch_exceptions=False,
         )
@@ -748,10 +724,15 @@ class TestEnergyCalendar:
         runner.invoke(
             cli,
             [
-                "--format", "json",
-                "energy", "calendar", str(SITE_ID),
-                "--kind", "backup",
-                "--period", "week",
+                "--format",
+                "json",
+                "energy",
+                "calendar",
+                str(SITE_ID),
+                "--kind",
+                "backup",
+                "--period",
+                "week",
             ],
             catch_exceptions=False,
         )
@@ -770,12 +751,19 @@ class TestEnergyCalendar:
         result = runner.invoke(
             cli,
             [
-                "--format", "json",
-                "energy", "calendar", str(SITE_ID),
-                "--kind", "energy",
-                "--period", "day",
-                "--start-date", "2024-06-01",
-                "--end-date", "2024-06-30",
+                "--format",
+                "json",
+                "energy",
+                "calendar",
+                str(SITE_ID),
+                "--kind",
+                "energy",
+                "--period",
+                "day",
+                "--start-date",
+                "2024-06-01",
+                "--end-date",
+                "2024-06-30",
             ],
             catch_exceptions=False,
         )
@@ -810,9 +798,7 @@ class TestEnergyCalendar:
 class TestOutputEnvelope:
     """Verify the JSON envelope structure shared by energy commands."""
 
-    def test_envelope_has_timestamp(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_envelope_has_timestamp(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/products",
             json=PRODUCTS_RESPONSE,

@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
-from pytest_httpx import HTTPXMock
 
 from tescmd.api.errors import AuthError
 from tescmd.auth.oauth import exchange_code, get_partner_token, refresh_access_token
+
+if TYPE_CHECKING:
+    from pytest_httpx import HTTPXMock
 
 TOKEN_URL = "https://auth.tesla.com/oauth2/v3/token"
 
@@ -35,9 +39,7 @@ class TestExchangeCode:
         assert result.expires_in == 3600
 
     @pytest.mark.asyncio
-    async def test_exchange_code_failure_raises_auth_error(
-        self, httpx_mock: HTTPXMock
-    ) -> None:
+    async def test_exchange_code_failure_raises_auth_error(self, httpx_mock: HTTPXMock) -> None:
         """Non-200 response from token endpoint raises AuthError."""
         httpx_mock.add_response(
             url=TOKEN_URL,
@@ -75,9 +77,7 @@ class TestRefreshAccessToken:
         assert result.expires_in == 7200
 
     @pytest.mark.asyncio
-    async def test_refresh_failure_raises_auth_error(
-        self, httpx_mock: HTTPXMock
-    ) -> None:
+    async def test_refresh_failure_raises_auth_error(self, httpx_mock: HTTPXMock) -> None:
         """Non-200 response during refresh raises AuthError."""
         httpx_mock.add_response(
             url=TOKEN_URL,

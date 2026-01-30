@@ -39,9 +39,7 @@ def _request_body(httpx_mock: HTTPXMock, idx: int = 0) -> dict[str, Any]:
 class TestNavSend:
     """Tests for ``tescmd nav send VIN ADDRESS...``."""
 
-    def test_nav_send(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_nav_send(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         """nav send posts to /command/share and returns success."""
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/share",
@@ -73,9 +71,18 @@ class TestNavSend:
         runner.invoke(
             cli,
             [
-                "--format", "json", "--wake",
-                "nav", "send", VIN,
-                "1600", "Amphitheatre", "Parkway", "Mountain", "View", "CA",
+                "--format",
+                "json",
+                "--wake",
+                "nav",
+                "send",
+                VIN,
+                "1600",
+                "Amphitheatre",
+                "Parkway",
+                "Mountain",
+                "View",
+                "CA",
             ],
             catch_exceptions=False,
         )
@@ -83,9 +90,7 @@ class TestNavSend:
         # The share method wraps the address in the android.intent.extra.TEXT value
         assert "1600 Amphitheatre Parkway Mountain View CA" in json.dumps(body)
 
-    def test_nav_send_has_timestamp(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_nav_send_has_timestamp(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/share",
             method="POST",
@@ -113,9 +118,7 @@ class TestNavGps:
     tests use positive longitudes to avoid that parsing limitation.
     """
 
-    def test_nav_gps(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_nav_gps(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         """nav gps posts to /command/navigation_gps_request and returns success."""
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/navigation_gps_request",
@@ -162,9 +165,7 @@ class TestNavGps:
 class TestNavSupercharger:
     """Tests for ``tescmd nav supercharger``."""
 
-    def test_nav_supercharger(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_nav_supercharger(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         """nav supercharger posts to /command/navigation_sc_request."""
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/navigation_sc_request",
@@ -225,9 +226,15 @@ class TestNavHomelink:
         result = runner.invoke(
             cli,
             [
-                "--format", "json", "--wake",
-                "nav", "homelink",
-                "--lat", "37.77", "--lon", "-122.42",
+                "--format",
+                "json",
+                "--wake",
+                "nav",
+                "homelink",
+                "--lat",
+                "37.77",
+                "--lon",
+                "-122.42",
             ],
             catch_exceptions=False,
         )
@@ -249,9 +256,15 @@ class TestNavHomelink:
         runner.invoke(
             cli,
             [
-                "--format", "json", "--wake",
-                "nav", "homelink",
-                "--lat", "37.77", "--lon", "-122.42",
+                "--format",
+                "json",
+                "--wake",
+                "nav",
+                "homelink",
+                "--lat",
+                "37.77",
+                "--lon",
+                "-122.42",
             ],
             catch_exceptions=False,
         )
@@ -312,9 +325,7 @@ class TestNavHomelink:
 class TestNavWaypoints:
     """Tests for ``tescmd nav waypoints VIN WAYPOINTS_JSON``."""
 
-    def test_nav_waypoints(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_nav_waypoints(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         """nav waypoints posts to /command/navigation_request and returns success."""
         # navigation_waypoints_request maps to /command/navigation_request
         httpx_mock.add_response(
@@ -323,10 +334,12 @@ class TestNavWaypoints:
             json=COMMAND_OK,
         )
         runner = CliRunner()
-        waypoints_json = json.dumps([
-            {"lat": 37.77, "lon": -122.42},
-            {"lat": 37.33, "lon": -121.89},
-        ])
+        waypoints_json = json.dumps(
+            [
+                {"lat": 37.77, "lon": -122.42},
+                {"lat": 37.33, "lon": -121.89},
+            ]
+        )
         result = runner.invoke(
             cli,
             ["--format", "json", "--wake", "nav", "waypoints", VIN, waypoints_json],

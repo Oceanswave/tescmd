@@ -34,9 +34,7 @@ COMMAND_OK: dict = {"response": {"result": True, "reason": ""}}
 class TestRawGet:
     """Tests for ``tescmd raw get PATH``."""
 
-    def test_raw_get(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_raw_get(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         """raw get wraps the entire API response in data."""
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles",
@@ -55,9 +53,7 @@ class TestRawGet:
         assert parsed["data"]["response"] == [{"vin": VIN}]
         assert parsed["data"]["count"] == 1
 
-    def test_raw_get_with_params(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_raw_get_with_params(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         """raw get --params passes query parameters to the request."""
         httpx_mock.add_response(
             json={"response": {"vin": VIN, "state": "online"}},
@@ -67,10 +63,13 @@ class TestRawGet:
         result = runner.invoke(
             cli,
             [
-                "--format", "json",
-                "raw", "get",
+                "--format",
+                "json",
+                "raw",
+                "get",
                 f"/api/1/vehicles/{VIN}/vehicle_data",
-                "--params", params_json,
+                "--params",
+                params_json,
             ],
             catch_exceptions=False,
         )
@@ -79,9 +78,7 @@ class TestRawGet:
         assert parsed["ok"] is True
         assert parsed["command"] == "raw.get"
 
-    def test_raw_get_has_timestamp(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_raw_get_has_timestamp(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         """raw get includes a timestamp in the JSON envelope."""
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles",
@@ -97,9 +94,7 @@ class TestRawGet:
         parsed = json.loads(result.output)
         assert "timestamp" in parsed
 
-    def test_raw_get_empty_response(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_raw_get_empty_response(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         """raw get handles empty list responses."""
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles",
@@ -125,9 +120,7 @@ class TestRawGet:
 class TestRawPost:
     """Tests for ``tescmd raw post PATH``."""
 
-    def test_raw_post(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_raw_post(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         """raw post sends POST and wraps the response in data."""
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/flash_lights",
@@ -138,8 +131,10 @@ class TestRawPost:
         result = runner.invoke(
             cli,
             [
-                "--format", "json",
-                "raw", "post",
+                "--format",
+                "json",
+                "raw",
+                "post",
                 f"/api/1/vehicles/{VIN}/command/flash_lights",
             ],
             catch_exceptions=False,
@@ -151,9 +146,7 @@ class TestRawPost:
         assert parsed["data"]["response"]["result"] is True
         assert parsed["data"]["response"]["reason"] == ""
 
-    def test_raw_post_with_body(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_raw_post_with_body(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         """raw post --body sends JSON body in the request."""
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/set_charge_limit",
@@ -165,10 +158,13 @@ class TestRawPost:
         result = runner.invoke(
             cli,
             [
-                "--format", "json",
-                "raw", "post",
+                "--format",
+                "json",
+                "raw",
+                "post",
                 f"/api/1/vehicles/{VIN}/command/set_charge_limit",
-                "--body", body_json,
+                "--body",
+                body_json,
             ],
             catch_exceptions=False,
         )
@@ -191,10 +187,13 @@ class TestRawPost:
         runner.invoke(
             cli,
             [
-                "--format", "json",
-                "raw", "post",
+                "--format",
+                "json",
+                "raw",
+                "post",
                 f"/api/1/vehicles/{VIN}/command/set_charge_limit",
-                "--body", body_json,
+                "--body",
+                body_json,
             ],
             catch_exceptions=False,
         )
@@ -203,9 +202,7 @@ class TestRawPost:
         sent_body = json.loads(requests[0].content)
         assert sent_body["percent"] == 90
 
-    def test_raw_post_has_timestamp(
-        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
-    ) -> None:
+    def test_raw_post_has_timestamp(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         """raw post includes a timestamp in the JSON envelope."""
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/flash_lights",
@@ -216,8 +213,10 @@ class TestRawPost:
         result = runner.invoke(
             cli,
             [
-                "--format", "json",
-                "raw", "post",
+                "--format",
+                "json",
+                "raw",
+                "post",
                 f"/api/1/vehicles/{VIN}/command/flash_lights",
             ],
             catch_exceptions=False,

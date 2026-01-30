@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -28,6 +29,19 @@ REGION_BASE_URLS: dict[str, str] = {
     "cn": "https://fleet-api.prd.cn.vn.cloud.tesla.com",
 }
 
+# ---------------------------------------------------------------------------
+# Tesla Fleet API documented rate limits (per device, per account).
+# See: https://developer.tesla.com/docs/fleet-api/billing-and-limits
+# ---------------------------------------------------------------------------
+
+RATE_LIMITS = {
+    "data": 60,  # Realtime data: 60 req/min
+    "commands": 30,  # Device commands: 30 req/min
+    "wakes": 3,  # Wakes: 3 req/min
+    "auth": 20,  # Auth: 20 req/sec
+}
+_RATE_LIMIT_MAX_RETRIES = 3
+
 
 class TeslaFleetClient:
     """Low-level async HTTP client for Tesla Fleet API endpoints."""
@@ -38,6 +52,7 @@ class TeslaFleetClient:
         region: str = "na",
         timeout: float = 30.0,
         on_token_refresh: Callable[[], Awaitable[str | None]] | None = None,
+        on_rate_limit_wait: Callable[[int, int, int], Awaitable[None]] | None = None,
     ) -> None:
         base_url = REGION_BASE_URLS.get(region)
         if base_url is None:
@@ -46,6 +61,7 @@ class TeslaFleetClient:
 
         self._access_token = access_token
         self._on_token_refresh = on_token_refresh
+        self._on_rate_limit_wait = on_rate_limit_wait
         self._client = httpx.AsyncClient(
             base_url=base_url,
             timeout=timeout,
@@ -90,10 +106,31 @@ class TeslaFleetClient:
         self,
         method: str,
         path: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Issue an HTTP request with automatic retry on 429 rate-limit responses."""
+        for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
+            try:
+                return await self._send(method, path, **kwargs)
+            except RateLimitError as exc:
+                if attempt >= _RATE_LIMIT_MAX_RETRIES:
+                    raise
+                wait = exc.retry_after or min(2 ** (attempt + 1), 30)
+                if self._on_rate_limit_wait:
+                    await self._on_rate_limit_wait(wait, attempt + 1, _RATE_LIMIT_MAX_RETRIES)
+                else:
+                    await asyncio.sleep(wait)
+        raise RateLimitError()  # unreachable, satisfies type checker
+
+    async def _send(
+        self,
+        method: str,
+        path: str,
         *,
         _retried: bool = False,
         **kwargs: Any,
     ) -> dict[str, Any]:
+        """Send a single HTTP request, handling auth refresh on 401."""
         try:
             response = await self._client.request(method, path, **kwargs)
         except httpx.TimeoutException as exc:
@@ -107,7 +144,7 @@ class TeslaFleetClient:
                 new_token = await self._on_token_refresh()
                 if new_token is not None:
                     self.update_token(new_token)
-                    return await self._request(method, path, _retried=True, **kwargs)
+                    return await self._send(method, path, _retried=True, **kwargs)
             raise AuthError("Authentication failed", status_code=401)
 
         return self._parse_response(response)

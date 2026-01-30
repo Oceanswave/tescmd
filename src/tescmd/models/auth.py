@@ -3,15 +3,30 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 # ---------------------------------------------------------------------------
-# Constants
+# Scope constants
 # ---------------------------------------------------------------------------
+
+VEHICLE_SCOPES: list[str] = [
+    "vehicle_device_data",
+    "vehicle_cmds",
+    "vehicle_charging_cmds",
+]
+
+ENERGY_SCOPES: list[str] = [
+    "energy_device_data",
+    "energy_cmds",
+]
+
+USER_SCOPES: list[str] = [
+    "user_data",
+]
 
 DEFAULT_SCOPES: list[str] = [
     "openid",
     "offline_access",
-    "vehicle_device_data",
-    "vehicle_cmds",
-    "vehicle_charging_cmds",
+    *VEHICLE_SCOPES,
+    *ENERGY_SCOPES,
+    *USER_SCOPES,
 ]
 
 DEFAULT_PORT: int = 8085
