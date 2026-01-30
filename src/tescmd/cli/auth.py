@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import sys
 import time
+import webbrowser
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tescmd.api.errors import ConfigError
@@ -17,6 +19,8 @@ if TYPE_CHECKING:
     import argparse
 
     from tescmd.output.formatter import OutputFormatter
+
+DEVELOPER_PORTAL_URL = "https://developer.tesla.com"
 
 
 def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -59,18 +63,38 @@ async def cmd_login(args: argparse.Namespace, formatter: OutputFormatter) -> Non
     """Run the interactive OAuth2 login flow."""
     settings = AppSettings()
 
-    if not settings.client_id:
-        raise ConfigError(
-            "TESLA_CLIENT_ID is not set. "
-            "Export it as an environment variable or add it to your .env file."
-        )
+    client_id = settings.client_id
+    client_secret = settings.client_secret
+
+    if not client_id:
+        if formatter.format == "json":
+            formatter.output_error(
+                code="missing_client_id",
+                message=(
+                    "TESLA_CLIENT_ID is not set. Register an application at"
+                    " https://developer.tesla.com and set TESLA_CLIENT_ID"
+                    " in your environment or .env file."
+                ),
+                command="auth.login",
+            )
+            return
+
+        client_id, client_secret = _interactive_setup(formatter, args)
+        if not client_id:
+            return
 
     store = TokenStore(profile=getattr(args, "profile", "default"))
     region = getattr(args, "region", None) or settings.region
 
+    formatter.rich.info("")
+    formatter.rich.info("Opening your browser to sign in to Tesla...")
+    formatter.rich.info(
+        "[dim]If the browser doesn't open, visit the URL printed below.[/dim]"
+    )
+
     await login_flow(
-        client_id=settings.client_id,
-        client_secret=settings.client_secret,
+        client_id=client_id,
+        client_secret=client_secret,
         redirect_uri=DEFAULT_REDIRECT_URI,
         scopes=DEFAULT_SCOPES,
         port=args.port,
@@ -78,10 +102,12 @@ async def cmd_login(args: argparse.Namespace, formatter: OutputFormatter) -> Non
         region=region,
     )
 
-    if formatter.format == "json":
-        formatter.output({"status": "logged_in"}, command="auth.login")
-    else:
-        formatter.rich.info("Login successful.")
+    formatter.rich.info("")
+    formatter.rich.info("[bold green]Login successful![/bold green]")
+    formatter.rich.info("")
+    formatter.rich.info("Try it out:")
+    formatter.rich.info("  [cyan]tescmd vehicle list[/cyan]")
+    formatter.rich.info("")
 
 
 async def cmd_logout(args: argparse.Namespace, formatter: OutputFormatter) -> None:
@@ -143,7 +169,10 @@ async def cmd_refresh(args: argparse.Namespace, formatter: OutputFormatter) -> N
         raise ConfigError("No refresh token found. Run 'tescmd auth login' first.")
 
     if not settings.client_id:
-        raise ConfigError("TESLA_CLIENT_ID is not set.")
+        raise ConfigError(
+            "TESLA_CLIENT_ID is required for token refresh. "
+            "Add it to your .env file or set it as an environment variable."
+        )
 
     meta = store.metadata or {}
     scopes: list[str] = meta.get("scopes", DEFAULT_SCOPES)
@@ -187,3 +216,121 @@ async def cmd_import(args: argparse.Namespace, formatter: OutputFormatter) -> No
         formatter.output({"status": "imported"}, command="auth.import")
     else:
         formatter.rich.info("Tokens imported successfully.")
+
+
+# ---------------------------------------------------------------------------
+# Private helpers
+# ---------------------------------------------------------------------------
+
+
+def _interactive_setup(
+    formatter: OutputFormatter,
+    args: argparse.Namespace,
+) -> tuple[str, str]:
+    """Walk the user through first-time Tesla API credential setup."""
+    formatter.rich.info("")
+    formatter.rich.info("[bold cyan]Welcome to tescmd![/bold cyan]")
+    formatter.rich.info("")
+    formatter.rich.info(
+        "To control your Tesla, you need API credentials from the"
+        " Tesla Developer Portal. Let's set that up."
+    )
+    formatter.rich.info("")
+
+    # Step-by-step instructions
+    formatter.rich.info("[bold]Step 1:[/bold] Create a Tesla Developer account")
+    formatter.rich.info(
+        f"  Visit [link={DEVELOPER_PORTAL_URL}]{DEVELOPER_PORTAL_URL}[/link]"
+    )
+    formatter.rich.info(
+        "  Sign in with your Tesla account and create an application."
+    )
+    formatter.rich.info("")
+    formatter.rich.info("[bold]Step 2:[/bold] Configure your application")
+    formatter.rich.info(
+        f"  Set the redirect URI to: [cyan]{DEFAULT_REDIRECT_URI}[/cyan]"
+    )
+    formatter.rich.info(
+        "  Enable the scopes you need (vehicle data, commands, etc.)."
+    )
+    formatter.rich.info("")
+    formatter.rich.info("[bold]Step 3:[/bold] Copy your Client ID and Client Secret")
+    formatter.rich.info(
+        "  You'll find these on your application's detail page."
+    )
+    formatter.rich.info("")
+
+    # Offer to open the developer portal
+    try:
+        answer = input("Open the Tesla Developer Portal in your browser? [Y/n] ")
+    except (EOFError, KeyboardInterrupt):
+        formatter.rich.info("")
+        return ("", "")
+
+    if answer.strip().lower() != "n":
+        webbrowser.open(DEVELOPER_PORTAL_URL)
+        formatter.rich.info("[dim]Browser opened.[/dim]")
+
+    formatter.rich.info("")
+    formatter.rich.info("Once you have your credentials, enter them below.")
+    formatter.rich.info("")
+
+    # Prompt for Client ID
+    try:
+        client_id = input("Client ID: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        formatter.rich.info("")
+        return ("", "")
+
+    if not client_id:
+        formatter.rich.info(
+            "[yellow]No Client ID provided. Setup cancelled.[/yellow]"
+        )
+        return ("", "")
+
+    # Prompt for Client Secret (optional for some OAuth flows)
+    try:
+        client_secret = input(
+            "Client Secret (optional, press Enter to skip): "
+        ).strip()
+    except (EOFError, KeyboardInterrupt):
+        formatter.rich.info("")
+        return ("", "")
+
+    # Offer to persist credentials to .env
+    formatter.rich.info("")
+    try:
+        save = input("Save credentials to .env file? [Y/n] ")
+    except (EOFError, KeyboardInterrupt):
+        formatter.rich.info("")
+        return (client_id, client_secret)
+
+    if save.strip().lower() != "n":
+        _write_env_file(client_id, client_secret)
+        formatter.rich.info("[green]Credentials saved to .env[/green]")
+
+    formatter.rich.info("")
+    return (client_id, client_secret)
+
+
+def _write_env_file(client_id: str, client_secret: str) -> None:
+    """Write Tesla API credentials to a ``.env`` file in the working directory."""
+    env_path = Path(".env")
+    lines: list[str] = []
+
+    if env_path.exists():
+        existing = env_path.read_text()
+        for line in existing.splitlines():
+            stripped = line.strip()
+            if stripped.startswith(("TESLA_CLIENT_ID=", "TESLA_CLIENT_SECRET=")):
+                continue
+            lines.append(line)
+        if lines and lines[-1] != "":
+            lines.append("")
+
+    lines.append(f"TESLA_CLIENT_ID={client_id}")
+    if client_secret:
+        lines.append(f"TESLA_CLIENT_SECRET={client_secret}")
+    lines.append("")
+
+    env_path.write_text("\n".join(lines))

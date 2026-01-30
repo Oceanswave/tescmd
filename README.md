@@ -7,6 +7,10 @@
 
 A Python CLI for querying and controlling Tesla vehicles via the Fleet API.
 
+## Why tescmd?
+
+Tesla's Fleet API gives developers full access to vehicle data and commands, but working with it directly means juggling OAuth2 PKCE flows, token refresh, regional endpoints, key enrollment, and raw JSON responses. tescmd wraps all of that into a single command-line tool that handles authentication, token management, and output formatting so you can focus on what you actually want to do — check your battery, start charging, find your car, or build automations around your vehicle. It works equally well as an interactive terminal tool for humans and as a scriptable JSON-emitting backend for bots and cron jobs.
+
 ## Features
 
 - **Full Fleet API coverage** — vehicle state queries (battery, location, climate, drive state) and 80+ vehicle commands (charge, climate, security, media, navigation, trunk, software, and more)
