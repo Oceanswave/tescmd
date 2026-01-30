@@ -13,17 +13,25 @@ def _serialize(obj: Any) -> Any:
     * :class:`pydantic.BaseModel` instances are dumped via
       :meth:`~pydantic.BaseModel.model_dump` with *exclude_none=True*.
     * Lists are recursed element-wise.
+    * Dicts are recursed value-wise (nested Pydantic models are serialized).
     * Everything else is returned as-is (``json.dumps`` handles the rest via
       *default=str*).
     """
     if isinstance(obj, BaseModel):
         return obj.model_dump(exclude_none=True)
+    if isinstance(obj, dict):
+        return {k: _serialize(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [_serialize(item) for item in obj]
     return obj
 
 
-def format_json_response(*, data: Any, command: str) -> str:
+def format_json_response(
+    *,
+    data: Any,
+    command: str,
+    cache_meta: dict[str, Any] | None = None,
+) -> str:
     """Return a JSON envelope for a successful response.
 
     The envelope has the shape::
@@ -32,7 +40,8 @@ def format_json_response(*, data: Any, command: str) -> str:
           "ok": true,
           "command": "<command>",
           "data": <serialised payload>,
-          "timestamp": "<ISO-8601 UTC>"
+          "timestamp": "<ISO-8601 UTC>",
+          "_cache": {"hit": true, "age_seconds": N, "ttl_seconds": M}  // optional
         }
     """
     envelope: dict[str, Any] = {
@@ -41,6 +50,8 @@ def format_json_response(*, data: Any, command: str) -> str:
         "data": _serialize(data),
         "timestamp": datetime.now(UTC).isoformat(),
     }
+    if cache_meta is not None:
+        envelope["_cache"] = cache_meta
     return json.dumps(envelope, indent=2, default=str)
 
 

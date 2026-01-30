@@ -1,22 +1,44 @@
-"""Smart VIN resolution."""
+"""Smart VIN resolution and validation."""
 
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
+import re
 
-if TYPE_CHECKING:
-    import argparse
+# ISO 3779: VINs are 17 alphanumeric characters, excluding I, O, Q.
+_VIN_PATTERN = re.compile(r"^[A-HJ-NPR-Z0-9]{17}$")
 
 
-def resolve_vin(args: argparse.Namespace) -> str | None:
+class InvalidVINError(ValueError):
+    """Raised when a VIN fails format validation."""
+
+
+def validate_vin(vin: str) -> str:
+    """Validate that *vin* matches the ISO 3779 VIN format.
+
+    Returns the uppercased VIN on success; raises :class:`InvalidVINError`
+    on failure.
+    """
+    upper = vin.upper()
+    if not _VIN_PATTERN.match(upper):
+        raise InvalidVINError(
+            f"Invalid VIN {vin!r}: must be 17 alphanumeric characters "
+            "(excluding I, O, Q per ISO 3779)."
+        )
+    return upper
+
+
+def resolve_vin(
+    *,
+    vin_positional: str | None = None,
+    vin_flag: str | None = None,
+) -> str | None:
     """Resolve VIN from multiple sources in priority order.
 
-    Resolution: positional arg > --vin flag > TESLA_VIN env > profile default > None.
+    Resolution: positional arg > --vin flag > TESLA_VIN env > None.
     """
-    vin: str | None = getattr(args, "vin_positional", None)
-    if not vin:
-        vin = getattr(args, "vin", None)
-    if not vin:
-        vin = os.environ.get("TESLA_VIN")
-    return vin
+    if vin_positional:
+        return vin_positional
+    if vin_flag:
+        return vin_flag
+    return os.environ.get("TESLA_VIN")

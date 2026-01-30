@@ -75,6 +75,42 @@ class TestFormatJsonResponse:
         assert "+" in ts or ts.endswith("Z") or "+00:00" in ts
 
 
+    def test_dict_with_nested_model_is_serialized(self) -> None:
+        """A plain dict containing a Pydantic model should serialize the model."""
+        cs = ChargeState(battery_level=72, charging_state="Complete")
+        data = {"response": cs, "extra": "info"}
+        raw = format_json_response(data=data, command="test")
+        parsed = json.loads(raw)
+
+        assert isinstance(parsed["data"]["response"], dict)
+        assert parsed["data"]["response"]["battery_level"] == 72
+        assert parsed["data"]["response"]["charging_state"] == "Complete"
+        assert parsed["data"]["extra"] == "info"
+
+    def test_deeply_nested_dict_with_models(self) -> None:
+        """Nested dicts at multiple depths with Pydantic models are serialized."""
+        ds = DriveState(latitude=37.7, longitude=-122.4)
+        data = {"level1": {"level2": {"drive": ds}}}
+        raw = format_json_response(data=data, command="test")
+        parsed = json.loads(raw)
+
+        assert parsed["data"]["level1"]["level2"]["drive"]["latitude"] == 37.7
+
+    def test_list_inside_dict_with_models(self) -> None:
+        """A list inside a dict containing Pydantic models is serialized."""
+        vehicles = [
+            Vehicle(vin="VIN1", state="online"),
+            Vehicle(vin="VIN2", state="asleep"),
+        ]
+        data = {"vehicles": vehicles, "count": 2}
+        raw = format_json_response(data=data, command="test")
+        parsed = json.loads(raw)
+
+        assert len(parsed["data"]["vehicles"]) == 2
+        assert parsed["data"]["vehicles"][0]["vin"] == "VIN1"
+        assert parsed["data"]["count"] == 2
+
+
 class TestFormatJsonError:
     """Tests for :func:`format_json_error`."""
 

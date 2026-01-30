@@ -10,7 +10,22 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
 authors = [{ name = "oceanswave" }]
+keywords = ["tesla", "fleet-api", "cli", "ev", "vehicle"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
 dependencies = [
+    "click>=8.1",
     "httpx>=0.27",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
@@ -31,6 +46,12 @@ dev = [
     "mypy>=1.13",
     "build>=1.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/oceanswave/tescmd"
+Repository = "https://github.com/oceanswave/tescmd"
+Issues = "https://github.com/oceanswave/tescmd/issues"
+Documentation = "https://github.com/oceanswave/tescmd#readme"
 
 [project.scripts]
 tescmd = "tescmd.cli.main:main"
