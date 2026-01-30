@@ -305,11 +305,10 @@ def _interactive_setup(
 
     # Post-creation
     info("[bold]Step 6 — Copy your credentials[/bold]")
-    info(
-        "  Go to Developer Applications, click [cyan]View Details[/cyan]"
-        " on your app,"
-    )
-    info("  and copy the Client ID and Client Secret.")
+    info("  Back on Developer Applications, click [cyan]View Details[/cyan]")
+    info("  on your new app. Under the [cyan]Credentials & APIs[/cyan] tab")
+    info("  you'll see your Client ID (copy icon) and Client Secret")
+    info("  (click the eye icon to reveal).")
     info("")
 
     # Prompt for Client ID
