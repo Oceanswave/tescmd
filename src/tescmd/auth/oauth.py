@@ -69,7 +69,7 @@ async def exchange_code(
     code_verifier: str,
     client_id: str,
     client_secret: str | None = None,
-    redirect_uri: str = "https://localhost/callback",
+    redirect_uri: str = "http://localhost:8085/callback",
 ) -> TokenData:
     """Exchange an authorization code for tokens."""
     payload: dict[str, Any] = {

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from tescmd.api.errors import ConfigError
 from tescmd.auth.oauth import login_flow, refresh_access_token
 from tescmd.auth.token_store import TokenStore
-from tescmd.models.auth import DEFAULT_REDIRECT_URI, DEFAULT_SCOPES
+from tescmd.models.auth import DEFAULT_SCOPES
 from tescmd.models.config import AppSettings
 
 if TYPE_CHECKING:
@@ -66,6 +66,8 @@ async def cmd_login(args: argparse.Namespace, formatter: OutputFormatter) -> Non
     client_id = settings.client_id
     client_secret = settings.client_secret
 
+    redirect_uri = f"http://localhost:{args.port}/callback"
+
     if not client_id:
         if formatter.format == "json":
             formatter.output_error(
@@ -79,7 +81,9 @@ async def cmd_login(args: argparse.Namespace, formatter: OutputFormatter) -> Non
             )
             return
 
-        client_id, client_secret = _interactive_setup(formatter, args)
+        client_id, client_secret = _interactive_setup(
+            formatter, args, redirect_uri
+        )
         if not client_id:
             return
 
@@ -95,7 +99,7 @@ async def cmd_login(args: argparse.Namespace, formatter: OutputFormatter) -> Non
     await login_flow(
         client_id=client_id,
         client_secret=client_secret,
-        redirect_uri=DEFAULT_REDIRECT_URI,
+        redirect_uri=redirect_uri,
         scopes=DEFAULT_SCOPES,
         port=args.port,
         token_store=store,
@@ -226,90 +230,121 @@ async def cmd_import(args: argparse.Namespace, formatter: OutputFormatter) -> No
 def _interactive_setup(
     formatter: OutputFormatter,
     args: argparse.Namespace,
+    redirect_uri: str,
 ) -> tuple[str, str]:
     """Walk the user through first-time Tesla API credential setup."""
-    formatter.rich.info("")
-    formatter.rich.info("[bold cyan]Welcome to tescmd![/bold cyan]")
-    formatter.rich.info("")
-    formatter.rich.info(
-        "To control your Tesla, you need API credentials from the"
-        " Tesla Developer Portal. Let's set that up."
-    )
-    formatter.rich.info("")
+    info = formatter.rich.info
+    origin_url = f"http://localhost:{args.port}"
 
-    # Step-by-step instructions
-    formatter.rich.info("[bold]Step 1:[/bold] Create a Tesla Developer account")
-    formatter.rich.info(
-        f"  Visit [link={DEVELOPER_PORTAL_URL}]{DEVELOPER_PORTAL_URL}[/link]"
+    info("")
+    info("[bold cyan]Welcome to tescmd![/bold cyan]")
+    info("")
+    info(
+        "To talk to your Tesla you need API credentials from the"
+        " Tesla Developer Portal. This wizard will walk you through it."
     )
-    formatter.rich.info(
-        "  Sign in with your Tesla account and create an application."
-    )
-    formatter.rich.info("")
-    formatter.rich.info("[bold]Step 2:[/bold] Configure your application")
-    formatter.rich.info(
-        f"  Set the redirect URI to: [cyan]{DEFAULT_REDIRECT_URI}[/cyan]"
-    )
-    formatter.rich.info(
-        "  Enable the scopes you need (vehicle data, commands, etc.)."
-    )
-    formatter.rich.info("")
-    formatter.rich.info("[bold]Step 3:[/bold] Copy your Client ID and Client Secret")
-    formatter.rich.info(
-        "  You'll find these on your application's detail page."
-    )
-    formatter.rich.info("")
+    info("")
 
     # Offer to open the developer portal
     try:
         answer = input("Open the Tesla Developer Portal in your browser? [Y/n] ")
     except (EOFError, KeyboardInterrupt):
-        formatter.rich.info("")
+        info("")
         return ("", "")
 
     if answer.strip().lower() != "n":
         webbrowser.open(DEVELOPER_PORTAL_URL)
-        formatter.rich.info("[dim]Browser opened.[/dim]")
+        info("[dim]Browser opened.[/dim]")
 
-    formatter.rich.info("")
-    formatter.rich.info("Once you have your credentials, enter them below.")
-    formatter.rich.info("")
+    info("")
+    info(
+        "Follow these steps to create a Fleet API application."
+        " If you already have one, skip to the credentials prompt below."
+    )
+    info("")
+
+    # Step 1 — Registration
+    info("[bold]Step 1 — Registration[/bold]")
+    info("  Select [cyan]Just for me[/cyan] and click Next.")
+    info("")
+
+    # Step 2 — Application Details
+    info("[bold]Step 2 — Application Details[/bold]")
+    info("  Application Name:  [cyan]tescmd[/cyan]  (or anything you like)")
+    info("  Description:       [cyan]Command line based automation[/cyan]")
+    info("  Purpose of Usage:  [cyan]Command line based automation[/cyan]")
+    info("  Click Next.")
+    info("")
+
+    # Step 3 — Client Details
+    info("[bold]Step 3 — Client Details[/bold]")
+    info(
+        "  OAuth Grant Type:    [cyan]Authorization Code and"
+        " Machine-to-Machine[/cyan]  (the default)"
+    )
+    info(f"  Allowed Origin URL:  [cyan]{origin_url}[/cyan]")
+    info(f"  Allowed Redirect URI: [cyan]{redirect_uri}[/cyan]")
+    info("  Allowed Returned URL: (leave empty)")
+    info("  Click Next.")
+    info("")
+
+    # Step 4 — API & Scopes
+    info("[bold]Step 4 — API & Scopes[/bold]")
+    info("  Under [bold]Fleet API[/bold], check at least:")
+    info("    [cyan]Vehicle Information[/cyan]")
+    info("    [cyan]Vehicle Location[/cyan]")
+    info("    [cyan]Vehicle Commands[/cyan]")
+    info("    [cyan]Vehicle Charging Management[/cyan]")
+    info("  Click Next.")
+    info("")
+
+    # Step 5 — Billing Details
+    info("[bold]Step 5 — Billing Details[/bold]")
+    info("  Click [cyan]Skip and Submit[/cyan] at the bottom of the page.")
+    info("")
+
+    # Post-creation
+    info("[bold]Step 6 — Copy your credentials[/bold]")
+    info(
+        "  Go to Developer Applications, click [cyan]View Details[/cyan]"
+        " on your app,"
+    )
+    info("  and copy the Client ID and Client Secret.")
+    info("")
 
     # Prompt for Client ID
     try:
         client_id = input("Client ID: ").strip()
     except (EOFError, KeyboardInterrupt):
-        formatter.rich.info("")
+        info("")
         return ("", "")
 
     if not client_id:
-        formatter.rich.info(
-            "[yellow]No Client ID provided. Setup cancelled.[/yellow]"
-        )
+        info("[yellow]No Client ID provided. Setup cancelled.[/yellow]")
         return ("", "")
 
-    # Prompt for Client Secret (optional for some OAuth flows)
+    # Prompt for Client Secret (optional for public clients)
     try:
         client_secret = input(
             "Client Secret (optional, press Enter to skip): "
         ).strip()
     except (EOFError, KeyboardInterrupt):
-        formatter.rich.info("")
+        info("")
         return ("", "")
 
     # Offer to persist credentials to .env
-    formatter.rich.info("")
+    info("")
     try:
         save = input("Save credentials to .env file? [Y/n] ")
     except (EOFError, KeyboardInterrupt):
-        formatter.rich.info("")
+        info("")
         return (client_id, client_secret)
 
     if save.strip().lower() != "n":
         _write_env_file(client_id, client_secret)
-        formatter.rich.info("[green]Credentials saved to .env[/green]")
+        info("[green]Credentials saved to .env[/green]")
 
-    formatter.rich.info("")
+    info("")
     return (client_id, client_secret)
 
 

@@ -31,7 +31,7 @@ class TestBuildAuthUrl:
     def test_build_auth_url(self) -> None:
         url = build_auth_url(
             client_id="cid",
-            redirect_uri="https://localhost/callback",
+            redirect_uri="http://localhost:8085/callback",
             scopes=["openid", "offline_access"],
             code_challenge="challenge123",
             state="state456",

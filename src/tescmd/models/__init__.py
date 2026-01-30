@@ -3,6 +3,7 @@ from __future__ import annotations
 from tescmd.models.auth import (
     AUTH_BASE_URL,
     AUTHORIZE_URL,
+    DEFAULT_PORT,
     DEFAULT_REDIRECT_URI,
     DEFAULT_SCOPES,
     TOKEN_URL,
@@ -26,6 +27,7 @@ from tescmd.models.vehicle import (
 __all__ = [
     "AUTHORIZE_URL",
     "AUTH_BASE_URL",
+    "DEFAULT_PORT",
     "DEFAULT_REDIRECT_URI",
     "DEFAULT_SCOPES",
     "TOKEN_URL",

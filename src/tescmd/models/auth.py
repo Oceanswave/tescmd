@@ -14,7 +14,8 @@ DEFAULT_SCOPES: list[str] = [
     "vehicle_charging_cmds",
 ]
 
-DEFAULT_REDIRECT_URI: str = "https://localhost/callback"
+DEFAULT_PORT: int = 8085
+DEFAULT_REDIRECT_URI: str = f"http://localhost:{DEFAULT_PORT}/callback"
 
 AUTH_BASE_URL: str = "https://auth.tesla.com"
 AUTHORIZE_URL: str = f"{AUTH_BASE_URL}/oauth2/v3/authorize"
