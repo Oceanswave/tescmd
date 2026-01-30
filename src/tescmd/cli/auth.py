@@ -271,8 +271,14 @@ def _interactive_setup(
     # Step 2 — Application Details
     info("[bold]Step 2 — Application Details[/bold]")
     info("  Application Name:  [cyan]tescmd[/cyan]  (or anything you like)")
-    info("  Description:       [cyan]Command line based automation[/cyan]")
-    info("  Purpose of Usage:  [cyan]Command line based automation[/cyan]")
+    info(
+        "  Description:       [cyan]Personal CLI tool for"
+        " vehicle status and control[/cyan]"
+    )
+    info(
+        "  Purpose of Usage:  [cyan]Query vehicle data and send"
+        " commands from the terminal[/cyan]"
+    )
     info("  Click Next.")
     info("")
 
