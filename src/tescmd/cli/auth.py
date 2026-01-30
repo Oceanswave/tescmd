@@ -469,20 +469,29 @@ def _prompt_for_domain(formatter: OutputFormatter) -> str:
     info = formatter.rich.info
     info("")
     info(
-        "Tesla requires a [bold]publicly accessible domain[/bold] to"
-        " register your app with the Fleet API."
+        "Tesla requires a [bold]registered domain[/bold] to activate"
+        " your Fleet API access."
+    )
+    info("")
+    info(
+        "  The easiest option is a free [cyan]GitHub Pages[/cyan] site:"
     )
     info(
-        "This can be any domain you own (e.g. [cyan]myapp.example.com[/cyan])."
+        "  1. Create a public repo named [cyan]<username>.github.io[/cyan]"
     )
+    info("  2. Enable GitHub Pages in the repo settings")
     info(
-        "[dim]Tip: a free GitHub Pages site works — the domain just"
-        " needs to exist.[/dim]"
+        "  3. Enter [cyan]<username>.github.io[/cyan] as your domain below"
+    )
+    info("")
+    info(
+        "[dim]Any domain you control works. For vehicle commands"
+        " (post-MVP) you'll also host a public key there.[/dim]"
     )
     info("")
 
     try:
-        domain = input("Domain (e.g. myapp.example.com): ").strip()
+        domain = input("Domain (e.g. yourname.github.io): ").strip()
     except (EOFError, KeyboardInterrupt):
         info("")
         return ""
