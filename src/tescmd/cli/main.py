@@ -136,18 +136,29 @@ def _handle_registration_required(
         )
         return
 
-    # Try auto-fix if we have the credentials
-    if settings.client_id and settings.client_secret:
+    can_register = settings.client_id and settings.client_secret
+    domain = settings.domain
+
+    # Prompt for domain if we have credentials but no domain
+    if can_register and not domain:
+        from tescmd.cli.auth import _prompt_for_domain
+
+        domain = _prompt_for_domain(formatter)
+
+    # Try auto-fix if we have everything
+    if can_register and domain:
+        assert settings.client_id is not None
+        assert settings.client_secret is not None
         formatter.rich.info(
             "[yellow]Your app is not yet registered with the Fleet API."
-            " Attempting to register now...[/yellow]"
+            " Registering now...[/yellow]"
         )
         try:
             run_async(
                 register_partner_account(
                     client_id=settings.client_id,
                     client_secret=settings.client_secret,
-                    domain="localhost",
+                    domain=domain,
                     region=region,
                 )
             )
@@ -158,8 +169,10 @@ def _handle_registration_required(
                 f"  [cyan]tescmd {cmd_name.replace('.', ' ')}[/cyan]"
             )
             return
-        except Exception:
-            pass  # Fall through to manual instructions
+        except Exception as reg_exc:
+            formatter.rich.info(
+                f"[red]Registration failed:[/red] {reg_exc}"
+            )
 
     formatter.rich.info("")
     formatter.rich.info(

@@ -123,15 +123,17 @@ async def cmd_login(args: argparse.Namespace, formatter: OutputFormatter) -> Non
     formatter.rich.info("")
     formatter.rich.info("[bold green]Login successful![/bold green]")
 
-    # Auto-register with the Fleet API (requires client_secret)
-    if client_secret:
-        await _auto_register(formatter, client_id, client_secret, region)
+    # Auto-register with the Fleet API (requires client_secret + domain)
+    if client_secret and settings.domain:
+        await _auto_register(
+            formatter, client_id, client_secret, settings.domain, region
+        )
     else:
         formatter.rich.info("")
         formatter.rich.info(
-            "[yellow]Note:[/yellow] Run [cyan]tescmd auth register[/cyan]"
-            " to register your app with the Fleet API."
+            "[yellow]Next step:[/yellow] Register your app with the Fleet API."
         )
+        formatter.rich.info("  [cyan]tescmd auth register[/cyan]")
 
     formatter.rich.info("")
     formatter.rich.info("Try it out:")
@@ -263,6 +265,19 @@ async def cmd_register(args: argparse.Namespace, formatter: OutputFormatter) -> 
         )
 
     region = getattr(args, "region", None) or settings.region
+    domain = settings.domain
+
+    # Prompt for domain if not configured
+    if not domain and formatter.format != "json":
+        domain = _prompt_for_domain(formatter)
+        if not domain:
+            return
+
+    if not domain:
+        raise ConfigError(
+            "TESLA_DOMAIN is required for Fleet API registration. "
+            "Set it in your .env file (e.g. TESLA_DOMAIN=myapp.example.com)."
+        )
 
     if formatter.format != "json":
         formatter.rich.info(
@@ -272,13 +287,13 @@ async def cmd_register(args: argparse.Namespace, formatter: OutputFormatter) -> 
     await register_partner_account(
         client_id=settings.client_id,
         client_secret=settings.client_secret,
-        domain="localhost",
+        domain=domain,
         region=region,
     )
 
     if formatter.format == "json":
         formatter.output(
-            {"status": "registered", "region": region},
+            {"status": "registered", "region": region, "domain": domain},
             command="auth.register",
         )
     else:
@@ -298,6 +313,7 @@ async def _auto_register(
     formatter: OutputFormatter,
     client_id: str,
     client_secret: str,
+    domain: str,
     region: str,
 ) -> None:
     """Attempt Fleet API registration silently after login."""
@@ -307,7 +323,7 @@ async def _auto_register(
         await register_partner_account(
             client_id=client_id,
             client_secret=client_secret,
-            domain="localhost",
+            domain=domain,
             region=region,
         )
         formatter.rich.info("[green]Registration successful.[/green]")
@@ -448,8 +464,61 @@ def _interactive_setup(
     return (client_id, client_secret)
 
 
-def _write_env_file(client_id: str, client_secret: str) -> None:
+def _prompt_for_domain(formatter: OutputFormatter) -> str:
+    """Prompt the user for a domain to use for Fleet API registration."""
+    info = formatter.rich.info
+    info("")
+    info(
+        "Tesla requires a [bold]publicly accessible domain[/bold] to"
+        " register your app with the Fleet API."
+    )
+    info(
+        "This can be any domain you own (e.g. [cyan]myapp.example.com[/cyan])."
+    )
+    info(
+        "[dim]Tip: a free GitHub Pages site works — the domain just"
+        " needs to exist.[/dim]"
+    )
+    info("")
+
+    try:
+        domain = input("Domain (e.g. myapp.example.com): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        info("")
+        return ""
+
+    if not domain:
+        info("[yellow]No domain provided. Registration cancelled.[/yellow]")
+        return ""
+
+    # Strip protocol if user included it
+    for prefix in ("https://", "http://"):
+        if domain.startswith(prefix):
+            domain = domain[len(prefix):]
+            break
+
+    # Strip trailing slash
+    domain = domain.rstrip("/")
+
+    # Save domain to .env for future use
+    _write_env_value("TESLA_DOMAIN", domain)
+    info(f"[green]Domain saved to .env: {domain}[/green]")
+
+    return domain
+
+
+def _write_env_file(
+    client_id: str,
+    client_secret: str,
+    domain: str = "",
+) -> None:
     """Write Tesla API credentials to a ``.env`` file in the working directory."""
+    values: dict[str, str] = {"TESLA_CLIENT_ID": client_id}
+    if client_secret:
+        values["TESLA_CLIENT_SECRET"] = client_secret
+    if domain:
+        values["TESLA_DOMAIN"] = domain
+
     env_path = Path(".env")
     lines: list[str] = []
 
@@ -457,15 +526,34 @@ def _write_env_file(client_id: str, client_secret: str) -> None:
         existing = env_path.read_text()
         for line in existing.splitlines():
             stripped = line.strip()
-            if stripped.startswith(("TESLA_CLIENT_ID=", "TESLA_CLIENT_SECRET=")):
+            if any(stripped.startswith(f"{k}=") for k in values):
                 continue
             lines.append(line)
         if lines and lines[-1] != "":
             lines.append("")
 
-    lines.append(f"TESLA_CLIENT_ID={client_id}")
-    if client_secret:
-        lines.append(f"TESLA_CLIENT_SECRET={client_secret}")
+    for key, val in values.items():
+        lines.append(f"{key}={val}")
+    lines.append("")
+
+    env_path.write_text("\n".join(lines))
+
+
+def _write_env_value(key: str, value: str) -> None:
+    """Write or update a single key in the ``.env`` file."""
+    env_path = Path(".env")
+    lines: list[str] = []
+
+    if env_path.exists():
+        existing = env_path.read_text()
+        for line in existing.splitlines():
+            if line.strip().startswith(f"{key}="):
+                continue
+            lines.append(line)
+        if lines and lines[-1] != "":
+            lines.append("")
+
+    lines.append(f"{key}={value}")
     lines.append("")
 
     env_path.write_text("\n".join(lines))

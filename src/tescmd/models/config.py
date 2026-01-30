@@ -25,6 +25,7 @@ class AppSettings(BaseSettings):
 
     client_id: str | None = None
     client_secret: str | None = None
+    domain: str | None = None
     vin: str | None = None
     region: str = "na"
     token_file: str | None = None
