@@ -6,6 +6,7 @@ import argparse
 from typing import NoReturn
 
 from tescmd._internal.async_utils import run_async
+from tescmd.api.errors import RegistrationRequiredError
 from tescmd.output.formatter import OutputFormatter
 
 
@@ -75,6 +76,11 @@ def main(argv: list[str] | None = None) -> NoReturn:
         cmd_name: str = args.command
         if hasattr(args, "subcommand") and args.subcommand:
             cmd_name = f"{args.command}.{args.subcommand}"
+
+        # Friendly handling for known error types
+        if _handle_known_error(exc, args, formatter, cmd_name):
+            raise SystemExit(1) from exc
+
         formatter.output_error(
             code=type(exc).__name__,
             message=str(exc),
@@ -83,3 +89,88 @@ def main(argv: list[str] | None = None) -> NoReturn:
         raise SystemExit(1) from exc
 
     raise SystemExit(0)
+
+
+# ---------------------------------------------------------------------------
+# Friendly error handlers
+# ---------------------------------------------------------------------------
+
+
+def _handle_known_error(
+    exc: Exception,
+    args: argparse.Namespace,
+    formatter: OutputFormatter,
+    cmd_name: str,
+) -> bool:
+    """Handle well-known errors with friendly output.
+
+    Returns ``True`` if the error was handled and the caller should exit.
+    """
+    if isinstance(exc, RegistrationRequiredError):
+        _handle_registration_required(exc, args, formatter, cmd_name)
+        return True
+    return False
+
+
+def _handle_registration_required(
+    exc: RegistrationRequiredError,
+    args: argparse.Namespace,
+    formatter: OutputFormatter,
+    cmd_name: str,
+) -> None:
+    """Try auto-registration, or show friendly instructions."""
+    from tescmd.auth.oauth import register_partner_account
+    from tescmd.models.config import AppSettings
+
+    settings = AppSettings()
+    region = getattr(args, "region", None) or settings.region
+
+    if formatter.format == "json":
+        formatter.output_error(
+            code="registration_required",
+            message=(
+                "Your application is not registered with the Fleet API. "
+                "Run 'tescmd auth register' to fix this."
+            ),
+            command=cmd_name,
+        )
+        return
+
+    # Try auto-fix if we have the credentials
+    if settings.client_id and settings.client_secret:
+        formatter.rich.info(
+            "[yellow]Your app is not yet registered with the Fleet API."
+            " Attempting to register now...[/yellow]"
+        )
+        try:
+            run_async(
+                register_partner_account(
+                    client_id=settings.client_id,
+                    client_secret=settings.client_secret,
+                    domain="localhost",
+                    region=region,
+                )
+            )
+            formatter.rich.info("[green]Registration successful![/green]")
+            formatter.rich.info("")
+            formatter.rich.info("Please re-run your command:")
+            formatter.rich.info(
+                f"  [cyan]tescmd {cmd_name.replace('.', ' ')}[/cyan]"
+            )
+            return
+        except Exception:
+            pass  # Fall through to manual instructions
+
+    formatter.rich.info("")
+    formatter.rich.info(
+        "[yellow]Your application is not registered with the"
+        " Tesla Fleet API for this region.[/yellow]"
+    )
+    formatter.rich.info("")
+    formatter.rich.info("To fix this, run:")
+    formatter.rich.info("  [cyan]tescmd auth register[/cyan]")
+    formatter.rich.info("")
+    formatter.rich.info(
+        "[dim]This is a one-time step after creating your"
+        " developer application.[/dim]"
+    )
