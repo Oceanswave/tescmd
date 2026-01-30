@@ -311,10 +311,14 @@ def _interactive_setup(
 
     # Post-creation
     info("[bold]Step 6 — Copy your credentials[/bold]")
-    info("  Back on Developer Applications, click [cyan]View Details[/cyan]")
-    info("  on your new app. Under the [cyan]Credentials & APIs[/cyan] tab")
-    info("  you'll see your Client ID (copy icon) and Client Secret")
-    info("  (click the eye icon to reveal).")
+    info(
+        "  Open your dashboard:"
+        " [link=https://developer.tesla.com/en_US/dashboard]"
+        "developer.tesla.com/dashboard[/link]"
+    )
+    info("  Click [cyan]View Details[/cyan] on your app.")
+    info("  Under the [cyan]Credentials & APIs[/cyan] tab you'll see your")
+    info("  Client ID (copy icon) and Client Secret (eye icon to reveal).")
     info("")
 
     # Prompt for Client ID
