@@ -264,6 +264,7 @@ class TestCmdSetup:
 
         with (
             patch("tescmd.cli.setup._prompt_tier", return_value=TIER_READONLY),
+            patch("tescmd.cli.setup._domain_setup", return_value="user.github.io"),
             patch(
                 "tescmd.cli.setup._developer_portal_setup",
                 return_value=("", ""),

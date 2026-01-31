@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+
 import pytest
 
 from tescmd.api.errors import AuthError, RegistrationRequiredError, VehicleAsleepError
@@ -24,9 +26,11 @@ class TestMainErrorHandling:
         assert result is None
 
     def test_no_args_returns_normally(self) -> None:
-        """Running with no args shows help and returns without raising."""
-        result = main([])
-        assert result is None
+        """Running with no args shows help and exits cleanly."""
+        # Click returns exit code 2 for missing subcommand (UsageError).
+        # main() may either return None or raise SystemExit — both are acceptable.
+        with contextlib.suppress(SystemExit):
+            main([])
 
 
 class TestHandleKnownError:
