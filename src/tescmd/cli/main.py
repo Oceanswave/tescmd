@@ -14,6 +14,7 @@ from tescmd.api.errors import (
     MissingScopesError,
     RegistrationRequiredError,
     SessionError,
+    TailscaleError,
     TierError,
     VehicleAsleepError,
 )
@@ -286,6 +287,9 @@ def _handle_known_error(
         return True
     if isinstance(exc, SessionError):
         _handle_session_error(exc, formatter, cmd_name)
+        return True
+    if isinstance(exc, TailscaleError):
+        _handle_tailscale_error(exc, formatter, cmd_name)
         return True
 
     # Keyring failures (e.g. headless Linux with no keyring daemon)
@@ -599,3 +603,33 @@ def _handle_keyring_error(
     formatter.rich.info(
         "[dim]Tokens will be stored in plaintext with restricted file permissions.[/dim]"
     )
+
+
+def _handle_tailscale_error(
+    exc: TailscaleError,
+    formatter: OutputFormatter,
+    cmd_name: str,
+) -> None:
+    """Show a friendly error when Tailscale is unavailable or misconfigured."""
+    message = str(exc) or "Tailscale is not available or Funnel setup failed."
+
+    if formatter.format == "json":
+        formatter.output_error(
+            code="tailscale_error",
+            message=message,
+            command=cmd_name,
+        )
+        return
+
+    formatter.rich.error(message)
+    formatter.rich.info("")
+    formatter.rich.info("Telemetry streaming requires Tailscale with Funnel enabled.")
+    formatter.rich.info("")
+    formatter.rich.info("Setup steps:")
+    formatter.rich.info("  1. Install Tailscale: [cyan]https://tailscale.com/download[/cyan]")
+    formatter.rich.info("  2. Authenticate: [cyan]tailscale up[/cyan]")
+    formatter.rich.info(
+        "  3. Enable Funnel in your tailnet ACL:"
+        " [cyan]https://login.tailscale.com/admin/acls[/cyan]"
+    )
+    formatter.rich.info("  4. Install telemetry deps: [cyan]pip install tescmd[telemetry][/cyan]")

@@ -78,9 +78,9 @@ The following tools should be installed and authenticated before running `tescmd
 |------|----------|---------|------|
 | **Git** | Yes | Version control, repo management | N/A |
 | **GitHub CLI** (`gh`) | Recommended | Auto-creates `*.github.io` domain for key hosting | `gh auth login` |
-| **Tailscale** | Optional | Secure remote access to vehicles via Fleet Telemetry | `tailscale login` |
+| **Tailscale** | Optional | Key hosting via Funnel + Fleet Telemetry streaming | `tailscale login` |
 
-Without the GitHub CLI, you'll need to manually host your public key at the Tesla-required `.well-known` path on your own domain. Tailscale is only needed if you plan to use Fleet Telemetry streaming for reduced API costs.
+Without the GitHub CLI, `tescmd setup` will try Tailscale Funnel for key hosting (requires Funnel enabled in your tailnet ACL). Without either, you'll need to manually host your public key at the Tesla-required `.well-known` path on your own domain.
 
 ## Installation
 
@@ -401,6 +401,15 @@ python scripts/validate_fleet_api.py --json      # Machine-readable
 Run this periodically or after modifying API methods to catch drift.
 
 See [docs/development.md](docs/development.md) for detailed contribution guidelines.
+
+## Documentation
+
+- [Setup Guide](docs/setup.md) — step-by-step walkthrough of `tescmd setup`
+- [FAQ](docs/faq.md) — common questions about tescmd, costs, hosting, and configuration
+- [API Costs](docs/api-costs.md) — detailed cost breakdown and savings calculations
+- [Bot Integration](docs/bot-integration.md) — JSON schema, exit codes, headless auth for agents
+- [Vehicle Command Protocol](docs/vehicle-command-protocol.md) — ECDH sessions and signed commands
+- [Development](docs/development.md) — contribution guidelines
 
 ## Changelog
 

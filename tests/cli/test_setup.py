@@ -12,10 +12,12 @@ from tescmd.cli.setup import (
     TIER_FULL,
     TIER_READONLY,
     _cmd_setup,
+    _domain_setup,
     _precheck_public_key,
     _print_next_steps,
     _prompt_tier,
     _registration_step,
+    _tailscale_domain_setup,
 )
 
 
@@ -262,6 +264,7 @@ class TestCmdSetup:
 
         with (
             patch("tescmd.cli.setup._prompt_tier", return_value=TIER_READONLY),
+            patch("tescmd.cli.setup._domain_setup", return_value="user.github.io"),
             patch(
                 "tescmd.cli.setup._developer_portal_setup",
                 return_value=("", ""),
@@ -559,3 +562,256 @@ class TestRegistrationStep:
         assert any("public key" in c.lower() for c in calls)
         assert any("tescmd key generate" in c for c in calls)
         assert any(".well-known" in c for c in calls)
+
+
+# ---------------------------------------------------------------------------
+# Tailscale domain setup
+# ---------------------------------------------------------------------------
+
+
+class TestTailscaleDomainSetup:
+    def test_accepts_tailscale_domain(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        formatter = _make_formatter()
+
+        with (
+            patch(
+                "tescmd.telemetry.tailscale.TailscaleManager.get_hostname",
+                new_callable=AsyncMock,
+                return_value="mybox.tail99.ts.net",
+            ),
+            patch("builtins.input", return_value="Y"),
+            patch("tescmd.cli.auth._write_env_value") as mock_write,
+        ):
+            domain = _tailscale_domain_setup(formatter, settings)
+
+        assert domain == "mybox.tail99.ts.net"
+        mock_write.assert_any_call("TESLA_DOMAIN", "mybox.tail99.ts.net")
+        mock_write.assert_any_call("TESLA_HOSTING_METHOD", "tailscale")
+
+    def test_declines_falls_to_manual(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        formatter = _make_formatter()
+
+        with (
+            patch(
+                "tescmd.telemetry.tailscale.TailscaleManager.get_hostname",
+                new_callable=AsyncMock,
+                return_value="mybox.tail99.ts.net",
+            ),
+            patch("builtins.input", return_value="n"),
+            patch("tescmd.cli.setup._manual_domain_setup", return_value="manual.example.com"),
+        ):
+            domain = _tailscale_domain_setup(formatter, settings)
+
+        assert domain == "manual.example.com"
+
+    def test_eof_returns_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        formatter = _make_formatter()
+
+        with (
+            patch(
+                "tescmd.telemetry.tailscale.TailscaleManager.get_hostname",
+                new_callable=AsyncMock,
+                return_value="mybox.tail99.ts.net",
+            ),
+            patch("builtins.input", side_effect=EOFError),
+        ):
+            domain = _tailscale_domain_setup(formatter, settings)
+
+        assert domain == ""
+
+    def test_trade_off_messaging(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Ensure the prompt explains Tailscale's limitations."""
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        formatter = _make_formatter()
+
+        with (
+            patch(
+                "tescmd.telemetry.tailscale.TailscaleManager.get_hostname",
+                new_callable=AsyncMock,
+                return_value="mybox.tail99.ts.net",
+            ),
+            patch("builtins.input", return_value="Y"),
+            patch("tescmd.cli.auth._write_env_value"),
+        ):
+            _tailscale_domain_setup(formatter, settings)
+
+        calls = [str(c) for c in formatter.rich.info.call_args_list]
+        # Verify trade-off warnings are present
+        assert any("machine" in c.lower() and "running" in c.lower() for c in calls)
+        assert any("GitHub Pages" in c for c in calls)
+
+
+class TestDomainSetupPriority:
+    def test_already_configured_returns_early(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("TESLA_DOMAIN", "existing.example.com")
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        formatter = _make_formatter()
+
+        domain = _domain_setup(formatter, settings)
+        assert domain == "existing.example.com"
+
+    def test_github_pages_preferred_over_tailscale(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        formatter = _make_formatter()
+
+        with (
+            patch("tescmd.deploy.github_pages.is_gh_available", return_value=True),
+            patch("tescmd.deploy.github_pages.is_gh_authenticated", return_value=True),
+            patch(
+                "tescmd.cli.setup._automated_domain_setup",
+                return_value="user.github.io",
+            ) as mock_gh,
+            # Tailscale also available — but should not be called
+            patch(
+                "tescmd.cli.setup._is_tailscale_ready",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+        ):
+            domain = _domain_setup(formatter, settings)
+
+        assert domain == "user.github.io"
+        mock_gh.assert_called_once()
+
+    def test_tailscale_when_no_github(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        formatter = _make_formatter()
+
+        with (
+            patch("tescmd.deploy.github_pages.is_gh_available", return_value=False),
+            patch(
+                "tescmd.cli.setup._is_tailscale_ready",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch(
+                "tescmd.cli.setup._tailscale_domain_setup",
+                return_value="box.ts.net",
+            ) as mock_ts,
+        ):
+            domain = _domain_setup(formatter, settings)
+
+        assert domain == "box.ts.net"
+        mock_ts.assert_called_once()
+
+    def test_manual_when_nothing_available(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        formatter = _make_formatter()
+
+        with (
+            patch("tescmd.deploy.github_pages.is_gh_available", return_value=False),
+            patch(
+                "tescmd.cli.setup._is_tailscale_ready",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch(
+                "tescmd.cli.setup._manual_domain_setup",
+                return_value="manual.example.com",
+            ) as mock_manual,
+        ):
+            domain = _domain_setup(formatter, settings)
+
+        assert domain == "manual.example.com"
+        mock_manual.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Key setup with Tailscale hosting
+# ---------------------------------------------------------------------------
+
+
+class TestKeySetupTailscale:
+    def test_key_setup_routes_to_tailscale(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("TESLA_HOSTING_METHOD", "tailscale")
+        monkeypatch.setenv("TESLA_CONFIG_DIR", "/tmp/test-tescmd")
+
+        from tescmd.cli.setup import _key_setup
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        formatter = _make_formatter()
+
+        with (
+            patch("tescmd.crypto.keys.has_key_pair", return_value=True),
+            patch("tescmd.crypto.keys.get_key_fingerprint", return_value="abc123"),
+            patch("tescmd.cli.setup._deploy_key_tailscale") as mock_ts_deploy,
+        ):
+            _key_setup(formatter, settings, "box.ts.net")
+
+        mock_ts_deploy.assert_called_once()
+
+    def test_key_setup_routes_to_github_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("TESLA_CONFIG_DIR", "/tmp/test-tescmd")
+
+        from tescmd.cli.setup import _key_setup
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        formatter = _make_formatter()
+
+        with (
+            patch("tescmd.crypto.keys.has_key_pair", return_value=True),
+            patch("tescmd.crypto.keys.get_key_fingerprint", return_value="abc123"),
+            patch("tescmd.cli.setup._deploy_key_github") as mock_gh_deploy,
+        ):
+            _key_setup(formatter, settings, "user.github.io")
+
+        mock_gh_deploy.assert_called_once()

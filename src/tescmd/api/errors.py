@@ -74,3 +74,7 @@ class MissingScopesError(AuthError):
 
 class KeyNotEnrolledError(TeslaAPIError):
     """Vehicle rejected the command — key not enrolled."""
+
+
+class TailscaleError(ConfigError):
+    """Tailscale not installed, not running, or Funnel setup failed."""

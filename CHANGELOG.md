@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - Unreleased
+
+### Added
+
+- **Fleet Telemetry Streaming** — `tescmd vehicle telemetry stream [VIN]` starts a local WebSocket server, exposes it via Tailscale Funnel, configures the vehicle to push real-time telemetry, and displays it in an interactive Rich Live dashboard (TTY) or JSONL stream (piped)
+- **Telemetry dashboard** — Rich Live TUI with field name, value, and last-update columns; unit conversion (°F/°C, mi/km, psi/bar); connection status; frame counter; uptime display
+- **Field presets** — `--fields` option accepts preset names (`default`, `driving`, `charging`, `climate`, `all`) or comma-separated field names with 120+ registered telemetry fields
+- **Interval override** — `--interval` option overrides the polling interval for all fields
+- **Tailscale Funnel integration** — automatic Funnel start/stop with cert retrieval for Fleet Telemetry HTTPS requirement
+- **JSONL output** — piped mode emits one JSON line per telemetry frame for scripting and log ingestion
+- **TailscaleError** — new error type with actionable install/setup guidance
+- **Optional dependency group** — `pip install tescmd[telemetry]` adds `websockets>=14.0`
+- **Tailscale key hosting** — `tescmd key deploy --method tailscale` hosts the public key via Tailscale Funnel at `https://<machine>.tailnet.ts.net/.well-known/appspecific/com.tesla.3p.public-key.pem`; auto-detected as second priority after GitHub Pages
+- **Key hosting priority chain** — setup wizard and `key deploy` auto-detect the best hosting method: GitHub Pages → Tailscale Funnel → manual; `--method` flag overrides auto-detection
+- **`TESLA_HOSTING_METHOD` setting** — persists the chosen key hosting method (`github`, `tailscale`) across sessions
+- **Setup guide** — `docs/setup.md` with step-by-step walkthrough of all 7 setup phases
+- **FAQ** — `docs/faq.md` covering common questions about tescmd, costs, hosting, and configuration
+- **CI/CD workflows** — GitHub Actions for test-on-push (Python 3.11–3.13) and publish-to-PyPI-on-release via trusted publishing
+
 ## [0.1.2] - 2025-01-31
 
 ### Added

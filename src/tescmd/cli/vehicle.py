@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import random
 from typing import TYPE_CHECKING
 
 import click
@@ -792,6 +793,163 @@ async def _cmd_telemetry_errors(app_ctx: AppContext, vin_positional: str | None)
         formatter.output(data, command="vehicle.telemetry.errors")
     else:
         formatter.rich.telemetry_errors(data)
+
+
+@telemetry_group.command("stream")
+@click.argument("vin_positional", required=False, default=None, metavar="VIN")
+@click.option("--port", type=int, default=None, help="Local server port (random if omitted)")
+@click.option("--fields", default="default", help="Field preset or comma-separated names")
+@click.option("--interval", type=int, default=None, help="Override interval for all fields")
+@global_options
+def telemetry_stream_cmd(
+    app_ctx: AppContext,
+    vin_positional: str | None,
+    port: int | None,
+    fields: str,
+    interval: int | None,
+) -> None:
+    """Stream real-time telemetry via Tailscale Funnel.
+
+    Starts a local WebSocket server, exposes it via Tailscale Funnel,
+    configures the vehicle to push telemetry, and displays it in an
+    interactive dashboard (TTY) or JSONL stream (piped).
+
+    Requires: pip install tescmd[telemetry] and Tailscale with Funnel enabled.
+    """
+    run_async(_cmd_telemetry_stream(app_ctx, vin_positional, port, fields, interval))
+
+
+async def _cmd_telemetry_stream(
+    app_ctx: AppContext,
+    vin_positional: str | None,
+    port: int | None,
+    fields_spec: str,
+    interval_override: int | None,
+) -> None:
+    from tescmd.telemetry.decoder import TelemetryDecoder
+    from tescmd.telemetry.fields import resolve_fields
+    from tescmd.telemetry.server import TelemetryServer
+    from tescmd.telemetry.tailscale import TailscaleManager
+
+    formatter = app_ctx.formatter
+    vin = require_vin(vin_positional, app_ctx.vin)
+
+    # Pick a random high port if none specified
+    if port is None:
+        port = random.randint(49152, 65535)
+
+    # 1. Tailscale checks
+    ts = TailscaleManager()
+    await ts.check_available()
+    await ts.check_running()
+
+    # 2. Resolve fields
+    field_config = resolve_fields(fields_spec, interval_override)
+
+    # 3. Build API client
+    client, api = get_vehicle_api(app_ctx)
+    decoder = TelemetryDecoder()
+
+    # 4. Output callback
+    if formatter.format == "json":
+        import json as json_mod
+
+        async def on_frame(frame: TelemetryDecoder | object) -> None:
+            from tescmd.telemetry.decoder import TelemetryFrame
+
+            assert isinstance(frame, TelemetryFrame)
+            line = json_mod.dumps(
+                {
+                    "vin": frame.vin,
+                    "timestamp": frame.created_at.isoformat(),
+                    "data": {d.field_name: d.value for d in frame.data},
+                },
+                default=str,
+            )
+            print(line, flush=True)
+
+        dashboard = None
+    else:
+        from tescmd.telemetry.dashboard import TelemetryDashboard
+
+        dashboard = TelemetryDashboard(formatter.console, formatter.rich._units)
+
+        async def on_frame(frame: TelemetryDecoder | object) -> None:
+            from tescmd.telemetry.decoder import TelemetryFrame
+
+            assert isinstance(frame, TelemetryFrame)
+            assert dashboard is not None
+            dashboard.update(frame)
+
+    # 5. Server + Funnel + Config with guaranteed cleanup
+    server = TelemetryServer(port=port, decoder=decoder, on_frame=on_frame)
+    funnel_url: str | None = None
+    config_created = False
+
+    try:
+        await server.start()
+
+        if formatter.format != "json":
+            formatter.rich.info(f"WebSocket server listening on port {port}")
+
+        funnel_url = await ts.start_funnel(port)
+        if formatter.format != "json":
+            formatter.rich.info(f"Tailscale Funnel active: {funnel_url}")
+
+        ca_pem = await ts.get_cert_pem()
+        hostname = await ts.get_hostname()
+
+        telemetry_config: dict[str, object] = {
+            "vins": [vin],
+            "config": {
+                "hostname": hostname,
+                "ca": ca_pem,
+                "fields": field_config,
+                "alert_types": ["service"],
+            },
+        }
+        await api.fleet_telemetry_config_create(config=telemetry_config)
+        config_created = True
+
+        if formatter.format != "json":
+            formatter.rich.info(f"Fleet telemetry configured for VIN {vin}")
+            formatter.rich.info("")
+
+        # Run dashboard or wait for interrupt
+        if dashboard is not None:
+            from rich.live import Live
+
+            dashboard.set_funnel_url(funnel_url)
+            with Live(
+                dashboard.render(),
+                console=formatter.console,
+                refresh_per_second=2,
+            ) as live:
+                dashboard.set_live(live)
+                await _wait_for_interrupt()
+        else:
+            await _wait_for_interrupt()
+
+    finally:
+        # Cleanup in reverse order — each tolerates failure
+        if config_created:
+            with contextlib.suppress(Exception):
+                await api.fleet_telemetry_config_delete(vin)
+        if funnel_url is not None:
+            with contextlib.suppress(Exception):
+                await ts.stop_funnel()
+        with contextlib.suppress(Exception):
+            await server.stop()
+        await client.close()
+
+
+async def _wait_for_interrupt() -> None:
+    """Block until cancelled (Ctrl+C)."""
+    try:
+        while True:
+            await asyncio.sleep(1)
+    except asyncio.CancelledError:
+        pass
 
 
 # ---------------------------------------------------------------------------

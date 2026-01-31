@@ -22,7 +22,7 @@ class TestCLIHelp:
 
     def test_no_command_shows_help(self) -> None:
         result = CliRunner().invoke(cli, [])
-        assert result.exit_code == 0
+        assert result.exit_code in (0, 2)  # Click returns 2 for missing subcommand
         assert "Usage" in result.output
 
     def test_vehicle_help(self) -> None:

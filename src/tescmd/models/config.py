@@ -43,6 +43,7 @@ class AppSettings(BaseSettings):
     profile: str = "default"
     setup_tier: str | None = None
     github_repo: str | None = None
+    hosting_method: str | None = None  # "github" | "tailscale" | None (manual)
     access_token: str | None = None
     refresh_token: str | None = None
 
