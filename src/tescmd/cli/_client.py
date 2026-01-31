@@ -14,12 +14,13 @@ from tescmd._internal.vin import resolve_vin
 from tescmd.api.client import TeslaFleetClient
 from tescmd.api.command import CommandAPI
 from tescmd.api.energy import EnergyAPI
-from tescmd.api.errors import ConfigError, VehicleAsleepError
+from tescmd.api.errors import ConfigError, KeyNotEnrolledError, TierError, VehicleAsleepError
 from tescmd.api.sharing import SharingAPI
 from tescmd.api.user import UserAPI
 from tescmd.api.vehicle import VehicleAPI
 from tescmd.auth.token_store import TokenStore
 from tescmd.cache import ResponseCache
+from tescmd.crypto.keys import has_key_pair, load_private_key
 from tescmd.models.config import AppSettings
 from tescmd.models.vehicle import VehicleData
 
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
 
     from rich.status import Status
 
+    from tescmd.api.signed_command import SignedCommandAPI
     from tescmd.cli.main import AppContext
     from tescmd.output.formatter import OutputFormatter
 
@@ -149,10 +151,39 @@ def get_vehicle_api(app_ctx: AppContext) -> tuple[TeslaFleetClient, VehicleAPI]:
 
 def get_command_api(
     app_ctx: AppContext,
-) -> tuple[TeslaFleetClient, VehicleAPI, CommandAPI]:
-    """Build a :class:`TeslaFleetClient` + :class:`VehicleAPI` + :class:`CommandAPI`."""
+) -> tuple[TeslaFleetClient, VehicleAPI, CommandAPI | SignedCommandAPI]:
+    """Build a :class:`TeslaFleetClient` + :class:`VehicleAPI` + :class:`CommandAPI`.
+
+    When keys are available and ``command_protocol`` is not ``"unsigned"``,
+    returns a :class:`SignedCommandAPI` that transparently routes signed
+    commands through the Vehicle Command Protocol.
+    """
+    settings = AppSettings()
     client = get_client(app_ctx)
-    return client, VehicleAPI(client), CommandAPI(client)
+    vehicle_api = VehicleAPI(client)
+    unsigned_api = CommandAPI(client)
+
+    protocol = settings.command_protocol
+    if protocol == "unsigned":
+        return client, vehicle_api, unsigned_api
+
+    key_dir = Path(settings.config_dir).expanduser() / "keys"
+    if has_key_pair(key_dir) and settings.setup_tier == "full":
+        from tescmd.api.signed_command import SignedCommandAPI
+        from tescmd.protocol.session import SessionManager
+
+        private_key = load_private_key(key_dir)
+        session_mgr = SessionManager(private_key, client)
+        return client, vehicle_api, SignedCommandAPI(client, session_mgr, unsigned_api)
+
+    if protocol == "signed":
+        raise ConfigError(
+            "command_protocol is 'signed' but no key pair found or tier is not 'full'. "
+            "Run 'tescmd setup' to configure full tier with key enrollment."
+        )
+
+    # protocol == "auto" with no keys → fall back to unsigned
+    return client, vehicle_api, unsigned_api
 
 
 def require_vin(vin_positional: str | None, vin_flag: str | None) -> str:
@@ -239,21 +270,74 @@ async def cached_vehicle_data(
     return vdata
 
 
+def _check_signing_requirement(
+    cmd_api: CommandAPI | SignedCommandAPI,
+    command_name: str,
+    settings: AppSettings,
+) -> None:
+    """Raise a clear error when a signing-required command would silently fall back to unsigned.
+
+    VCSEC commands (lock, unlock, trunk, window, remote_start) require the
+    Vehicle Command Protocol.  If keys are missing and ``command_protocol``
+    is ``"auto"``, the code falls back to ``CommandAPI`` (unsigned REST),
+    which will fail with a confusing API error.  This guard catches that
+    case early and gives actionable guidance.
+    """
+    from tescmd.api.signed_command import SignedCommandAPI as _SignedAPI
+    from tescmd.protocol.commands import get_command_spec
+    from tescmd.protocol.protobuf.messages import Domain
+
+    if isinstance(cmd_api, _SignedAPI):
+        return  # Already signed — nothing to guard
+
+    if settings.command_protocol == "unsigned":
+        return  # User explicitly chose unsigned — respect the override
+
+    spec = get_command_spec(command_name)
+    if spec is None or not spec.requires_signing:
+        return  # Unsigned command — no issue
+
+    if spec.domain == Domain.DOMAIN_VEHICLE_SECURITY:
+        key_dir = Path(settings.config_dir).expanduser() / "keys"
+        if not has_key_pair(key_dir):
+            raise ConfigError(
+                "This command requires a signed channel (Vehicle Command Protocol) "
+                "but no EC key pair was found. "
+                "Run 'tescmd key generate' then 'tescmd key deploy' and 'tescmd key enroll'."
+            )
+        raise KeyNotEnrolledError(
+            "This command requires a signed channel but the key is not active. "
+            "Enroll via 'tescmd key enroll' and approve in the Tesla app.",
+            status_code=422,
+        )
+
+
 async def execute_command(
     app_ctx: AppContext,
     vin_positional: str | None,
     method_name: str,
     cmd_name: str,
     body: dict[str, Any] | None = None,
+    *,
+    success_message: str = "",
 ) -> None:
     """Shared helper for simple vehicle commands (POST, no read data).
 
     Resolves the VIN, obtains a :class:`CommandAPI`, calls *method_name* with
     ``auto_wake``, invalidates the cache, and outputs the result.
     """
+    # Tier enforcement — readonly tier cannot execute write commands
+    settings = AppSettings()
+    if settings.setup_tier == "readonly":
+        raise TierError("This command requires 'full' tier setup. Run 'tescmd setup' to upgrade.")
+
     formatter = app_ctx.formatter
     vin = require_vin(vin_positional, app_ctx.vin)
     client, vehicle_api, cmd_api = get_command_api(app_ctx)
+
+    # Guard: VCSEC commands require signed channel — don't silently fall back
+    _check_signing_requirement(cmd_api, method_name, settings)
+
     try:
         method = getattr(cmd_api, method_name)
         result = await auto_wake(
@@ -271,7 +355,8 @@ async def execute_command(
     if formatter.format == "json":
         formatter.output(result, command=cmd_name)
     else:
-        formatter.rich.command_result(result.response.result, result.response.reason)
+        msg = result.response.reason or success_message
+        formatter.rich.command_result(result.response.result, msg)
 
 
 def invalidate_cache_for_vin(app_ctx: AppContext, vin: str) -> None:
@@ -318,9 +403,7 @@ async def auto_wake(
                 formatter.rich.info(
                     "  Waking via the Tesla app (iOS/Android) is [green]free[/green]."
                 )
-                formatter.rich.info(
-                    "  Sending a wake via the API is [yellow]billable[/yellow]."
-                )
+                formatter.rich.info("  Sending a wake via the API is [yellow]billable[/yellow].")
                 formatter.rich.info("")
                 choice = click.prompt(
                     "  [W] Wake via API    [R] Retry    [C] Cancel",

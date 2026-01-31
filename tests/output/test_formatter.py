@@ -57,6 +57,6 @@ class TestOutput:
 
         assert isinstance(capsys, _pytest.capture.CaptureFixture)
         captured = capsys.readouterr()
-        parsed = json.loads(captured.out)
+        parsed = json.loads(captured.err)
         assert parsed["ok"] is False
         assert parsed["error"]["code"] == "ERR"

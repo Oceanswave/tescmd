@@ -91,7 +91,15 @@ async def _cmd_status(app_ctx: AppContext, vin_positional: str | None) -> None:
 @global_options
 def on_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Turn on climate control (auto conditioning)."""
-    run_async(_cmd_simple(app_ctx, vin_positional, "auto_conditioning_start", "climate.on"))
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "auto_conditioning_start",
+            "climate.on",
+            success_message="Climate control turned on.",
+        )
+    )
 
 
 @climate_group.command("off")
@@ -99,16 +107,15 @@ def on_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 @global_options
 def off_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Turn off climate control (auto conditioning)."""
-    run_async(_cmd_simple(app_ctx, vin_positional, "auto_conditioning_stop", "climate.off"))
-
-
-async def _cmd_simple(
-    app_ctx: AppContext,
-    vin_positional: str | None,
-    api_method: str,
-    cmd_name: str,
-) -> None:
-    await execute_command(app_ctx, vin_positional, api_method, cmd_name)
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "auto_conditioning_stop",
+            "climate.off",
+            success_message="Climate control turned off.",
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +172,8 @@ async def _cmd_set(
     if formatter.format == "json":
         formatter.output(result, command="climate.set")
     else:
-        formatter.rich.command_result(result.response.result, result.response.reason)
+        msg = result.response.reason or "Temperature set."
+        formatter.rich.command_result(result.response.result, msg)
 
 
 @climate_group.command("precondition")
@@ -197,7 +205,9 @@ async def _cmd_precondition(app_ctx: AppContext, vin_positional: str | None, on:
     if formatter.format == "json":
         formatter.output(result, command="climate.precondition")
     else:
-        formatter.rich.command_result(result.response.result, result.response.reason)
+        state = "enabled" if on else "disabled"
+        msg = result.response.reason or f"Max preconditioning {state}."
+        formatter.rich.command_result(result.response.result, msg)
 
 
 @climate_group.command("seat")
@@ -235,7 +245,8 @@ async def _cmd_seat(
     if formatter.format == "json":
         formatter.output(result, command="climate.seat")
     else:
-        formatter.rich.command_result(result.response.result, result.response.reason)
+        msg = result.response.reason or f"Seat heater set for {seat} (level {level})."
+        formatter.rich.command_result(result.response.result, msg)
 
 
 @climate_group.command("seat-cool")
@@ -275,7 +286,8 @@ async def _cmd_seat_cool(
     if formatter.format == "json":
         formatter.output(result, command="climate.seat-cool")
     else:
-        formatter.rich.command_result(result.response.result, result.response.reason)
+        msg = result.response.reason or f"Seat cooler set for {seat} (level {level})."
+        formatter.rich.command_result(result.response.result, msg)
 
 
 @climate_group.command("wheel-heater")
@@ -307,7 +319,9 @@ async def _cmd_wheel_heater(app_ctx: AppContext, vin_positional: str | None, on:
     if formatter.format == "json":
         formatter.output(result, command="climate.wheel-heater")
     else:
-        formatter.rich.command_result(result.response.result, result.response.reason)
+        state = "enabled" if on else "disabled"
+        msg = result.response.reason or f"Steering wheel heater {state}."
+        formatter.rich.command_result(result.response.result, msg)
 
 
 @climate_group.command("overheat")
@@ -347,7 +361,9 @@ async def _cmd_overheat(
     if formatter.format == "json":
         formatter.output(result, command="climate.overheat")
     else:
-        formatter.rich.command_result(result.response.result, result.response.reason)
+        state = "enabled" if on else "disabled"
+        msg = result.response.reason or f"Cabin overheat protection {state}."
+        formatter.rich.command_result(result.response.result, msg)
 
 
 @climate_group.command("bioweapon")
@@ -359,6 +375,7 @@ def bioweapon_cmd(
     app_ctx: AppContext, vin_positional: str | None, on: bool, manual_override: bool
 ) -> None:
     """Enable or disable bioweapon defense mode."""
+    state = "enabled" if on else "disabled"
     run_async(
         execute_command(
             app_ctx,
@@ -366,6 +383,7 @@ def bioweapon_cmd(
             "set_bioweapon_mode",
             "climate.bioweapon",
             body={"on": on, "manual_override": manual_override},
+            success_message=f"Bioweapon defense mode {state}.",
         )
     )
 
@@ -378,7 +396,12 @@ def cop_temp_cmd(app_ctx: AppContext, vin_positional: str | None, level: int) ->
     """Set cabin overheat protection temperature (0=low, 1=medium, 2=high)."""
     run_async(
         execute_command(
-            app_ctx, vin_positional, "set_cop_temp", "climate.cop-temp", body={"cop_temp": level}
+            app_ctx,
+            vin_positional,
+            "set_cop_temp",
+            "climate.cop-temp",
+            body={"cop_temp": level},
+            success_message="Overheat protection temperature set.",
         )
     )
 
@@ -390,6 +413,7 @@ def cop_temp_cmd(app_ctx: AppContext, vin_positional: str | None, level: int) ->
 @global_options
 def auto_seat_cmd(app_ctx: AppContext, vin_positional: str | None, seat: str, on: bool) -> None:
     """Enable or disable auto seat climate for SEAT."""
+    state = "enabled" if on else "disabled"
     run_async(
         execute_command(
             app_ctx,
@@ -397,6 +421,7 @@ def auto_seat_cmd(app_ctx: AppContext, vin_positional: str | None, seat: str, on
             "remote_auto_seat_climate_request",
             "climate.auto-seat",
             body={"auto_seat_position": SEAT_MAP[seat], "on": on},
+            success_message=f"Auto seat climate {state} for {seat}.",
         )
     )
 
@@ -407,6 +432,7 @@ def auto_seat_cmd(app_ctx: AppContext, vin_positional: str | None, seat: str, on
 @global_options
 def auto_wheel_cmd(app_ctx: AppContext, vin_positional: str | None, on: bool) -> None:
     """Enable or disable auto steering wheel heat."""
+    state = "enabled" if on else "disabled"
     run_async(
         execute_command(
             app_ctx,
@@ -414,6 +440,7 @@ def auto_wheel_cmd(app_ctx: AppContext, vin_positional: str | None, on: bool) ->
             "remote_auto_steering_wheel_heat_climate_request",
             "climate.auto-wheel",
             body={"on": on},
+            success_message=f"Auto steering wheel heat {state}.",
         )
     )
 
@@ -424,6 +451,7 @@ def auto_wheel_cmd(app_ctx: AppContext, vin_positional: str | None, on: bool) ->
 @global_options
 def wheel_level_cmd(app_ctx: AppContext, vin_positional: str | None, level: int) -> None:
     """Set steering wheel heat level (0=off, 1=low, 2=med, 3=high)."""
+    level_names = {0: "off", 1: "low", 2: "medium", 3: "high"}
     run_async(
         execute_command(
             app_ctx,
@@ -431,6 +459,7 @@ def wheel_level_cmd(app_ctx: AppContext, vin_positional: str | None, level: int)
             "remote_steering_wheel_heat_level_request",
             "climate.wheel-level",
             body={"level": level},
+            success_message=f"Steering wheel heat set to {level_names.get(level, level)}.",
         )
     )
 
@@ -466,4 +495,5 @@ async def _cmd_keeper(app_ctx: AppContext, vin_positional: str | None, mode: str
     if formatter.format == "json":
         formatter.output(result, command="climate.keeper")
     else:
-        formatter.rich.command_result(result.response.result, result.response.reason)
+        msg = result.response.reason or f"Climate keeper mode set to {mode}."
+        formatter.rich.command_result(result.response.result, msg)

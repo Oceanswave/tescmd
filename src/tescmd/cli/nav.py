@@ -42,6 +42,7 @@ def send_cmd(app_ctx: AppContext, vin_positional: str | None, address: tuple[str
             "share",
             "nav.send",
             body={"address": full_address},
+            success_message="Destination sent to vehicle.",
         )
     )
 
@@ -60,6 +61,7 @@ def gps_cmd(app_ctx: AppContext, vin_positional: str | None, lat: float, lon: fl
             "navigation_gps_request",
             "nav.gps",
             body={"lat": lat, "lon": lon},
+            success_message="GPS coordinates sent to vehicle.",
         )
     )
 
@@ -70,7 +72,13 @@ def gps_cmd(app_ctx: AppContext, vin_positional: str | None, lat: float, lon: fl
 def supercharger_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Navigate to the nearest Supercharger."""
     run_async(
-        execute_command(app_ctx, vin_positional, "navigation_sc_request", "nav.supercharger")
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "navigation_sc_request",
+            "nav.supercharger",
+            success_message="Navigating to nearest Supercharger.",
+        )
     )
 
 
@@ -135,7 +143,8 @@ async def _cmd_homelink(
     if formatter.format == "json":
         formatter.output(result, command="nav.homelink")
     else:
-        formatter.rich.command_result(result.response.result, result.response.reason)
+        msg = result.response.reason or "HomeLink triggered."
+        formatter.rich.command_result(result.response.result, msg)
 
 
 @nav_group.command("waypoints")
@@ -152,5 +161,6 @@ def waypoints_cmd(app_ctx: AppContext, vin_positional: str | None, waypoints_jso
             "navigation_waypoints_request",
             "nav.waypoints",
             body={"waypoints": waypoints},
+            success_message="Waypoints sent to vehicle.",
         )
     )

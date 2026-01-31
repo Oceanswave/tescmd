@@ -4,7 +4,7 @@
 
 **tescmd** is a Python CLI application that queries data from and sends commands to Tesla vehicles via the [Tesla Fleet API](https://developer.tesla.com/docs/fleet-api). The current implementation covers OAuth2 authentication, key management, vehicle state queries (battery, location, climate, drive state, tire pressure, trunks, and more), and both human-friendly (Rich TUI) and machine-friendly (JSON) output with configurable display units.
 
-**Current scope:** auth, vehicle queries, vehicle commands (charge, climate, security, trunk, media, nav, software), energy product management, user account info, vehicle sharing, key management, initial setup, response caching with cost-aware wake confirmation, and Fleet Telemetry awareness.
+**Current scope:** auth, vehicle queries, vehicle commands (charge, climate, security, trunk, media, nav, software), energy product management, user account info, vehicle sharing, key management with enrollment, Vehicle Command Protocol (ECDH sessions + HMAC-signed commands), tier enforcement, initial setup, response caching with cost-aware wake confirmation, and Fleet Telemetry awareness.
 
 ## Tech Stack
 
@@ -13,7 +13,8 @@
 - **rich** — terminal tables, panels, spinners, progress bars
 - **click** — CLI argument parsing and command routing
 - **httpx** — async HTTP client for Fleet API calls
-- **cryptography** — EC key generation, PEM handling
+- **cryptography** — EC key generation, PEM handling, ECDH key exchange
+- **protobuf** — protobuf serialization for Vehicle Command Protocol messages
 - **keyring** — OS-level credential storage for tokens
 - **python-dotenv** — `.env` file loading
 - **bleak** — BLE communication for key enrollment (optional; portal enrollment is primary)
@@ -43,17 +44,18 @@ src/tescmd/
 │   ├── user.py            # user me, region, orders, features
 │   ├── sharing.py         # sharing add/remove driver, create/redeem/revoke/list invites
 │   ├── raw.py             # raw get, raw post (arbitrary Fleet API access)
-│   ├── key.py             # key generate, key register, key list
-│   └── setup.py           # setup (interactive first-run wizard, Fleet Telemetry awareness)
+│   ├── key.py             # key generate, deploy, validate, show, enroll
+│   └── setup.py           # setup (interactive first-run wizard, key enrollment, Fleet Telemetry awareness)
 ├── api/                   # API client layer
 │   ├── __init__.py
 │   ├── client.py          # TeslaFleetClient (base HTTP client)
 │   ├── vehicle.py         # VehicleAPI (vehicle data, nearby chargers, alerts, drivers)
-│   ├── command.py         # CommandAPI (~50 vehicle commands)
+│   ├── command.py         # CommandAPI (~50 vehicle commands, unsigned REST)
+│   ├── signed_command.py  # SignedCommandAPI (Vehicle Command Protocol routing)
 │   ├── energy.py          # EnergyAPI (Powerwall/energy product endpoints)
 │   ├── sharing.py         # SharingAPI (driver and invite management)
 │   ├── user.py            # UserAPI (account info, region, orders, features)
-│   └── errors.py          # API error types
+│   └── errors.py          # API error types (incl. TierError, SessionError, KeyNotEnrolledError)
 ├── cache/                 # Response caching
 │   ├── __init__.py        # Re-exports ResponseCache
 │   ├── response_cache.py  # ResponseCache (file-based JSON with TTL)
@@ -72,9 +74,20 @@ src/tescmd/
 │   ├── oauth.py           # OAuth2 PKCE flow, token refresh, partner registration
 │   ├── token_store.py     # Keyring-backed token persistence
 │   └── server.py          # Local callback server for OAuth redirect
-├── crypto/                # Key management
+├── protocol/              # Vehicle Command Protocol
+│   ├── __init__.py        # Re-exports: Session, SessionManager, CommandSpec, etc.
+│   ├── protobuf/          # Protobuf message definitions
+│   │   ├── __init__.py
+│   │   └── messages.py    # RoutableMessage, SessionInfo, Domain, SignatureData, etc.
+│   ├── session.py         # ECDH session management (SessionManager)
+│   ├── signer.py          # HMAC-SHA256 command signing
+│   ├── metadata.py        # TLV serialization for command metadata
+│   ├── commands.py        # Command registry (name → domain + signing requirement)
+│   └── encoder.py         # RoutableMessage assembly + base64 encoding
+├── crypto/                # Key management and ECDH
 │   ├── __init__.py
-│   └── keys.py            # EC key generation, loading, PEM export
+│   ├── keys.py            # EC key generation, loading, PEM export
+│   └── ecdh.py            # ECDH key exchange, session key derivation
 ├── output/                # Output formatting
 │   ├── __init__.py
 │   ├── formatter.py       # OutputFormatter (auto-detect TTY vs pipe)
@@ -204,7 +217,7 @@ The `[R] Retry` option allows users to wake the vehicle for free via the Tesla m
 - Test files mirror source: `tests/cli/test_auth.py`, `tests/api/test_client.py`, etc.
 - Use `pytest-httpx` to mock HTTP responses (no live API calls in tests)
 - Async tests use `@pytest.mark.asyncio`
-- Current count: ~682 tests
+- Current count: ~827 tests
 
 ## Linting & Formatting
 
@@ -217,15 +230,19 @@ The `[R] Retry` option allows users to wake the vehicle for free via the Tesla m
 1. **Composition over inheritance** — API classes wrap `TeslaFleetClient` via constructor injection
 2. **REST-first with portal key enrollment** — all commands go over REST; key enrollment uses Tesla Developer Portal (remote, confirmed via Tesla app); BLE enrollment is an optional alternative requiring physical proximity
 3. **Output auto-detection** — TTY → Rich panels/tables; piped → JSON; `--quiet` → minimal stderr only
-4. **Smart VIN resolution** — positional arg > `--vin` flag > profile default > interactive picker
-5. **Settings resolution** — CLI args > env vars (`.env` loaded via python-dotenv) > `config.toml` profile > defaults
-6. **click** — works well with command structure, async patterns
-7. **httpx async** — clean async API, good type stubs, easily testable with pytest-httpx
-8. **Browser-based auth** — `tescmd auth login` opens system browser for OAuth2 PKCE flow with local callback server
-9. **Display-layer unit conversion** — models retain raw API values (Celsius, miles, bar); conversion to user-preferred units happens in `RichOutput` via `DisplayUnits`
-10. **Response caching** — file-based JSON cache under `~/.cache/tescmd/` with per-entry TTL. Read-commands check cache first; write-commands invalidate after success. No new dependencies (stdlib `json`, `hashlib`, `time`, `pathlib`).
-11. **Cost-aware wake** — `auto_wake()` prompts before sending billable wake API calls. TTY users get an interactive choice; JSON/piped consumers get structured errors. The `--wake` flag opts in to auto-wake for scripts that accept the cost.
-12. **Smart wake state** — wake state is cached separately (30s TTL). If the vehicle was recently confirmed online, both the prompt and the wake API call are skipped entirely.
+4. **Error output stream routing** — JSON/piped mode writes errors to **stderr** so stdout stays clean for machine-parseable data (scripts can safely `| jq`). TTY/Rich mode keeps errors on **stdout** because the user is looking at the terminal directly — splitting streams would be worse UX there. This split lives in `OutputFormatter.output_error()` and the error handlers in `cli/main.py`. Interactive prompts (wake confirmation spinner, enrollment approval) always use stdout via Rich since they are inherently TTY-only.
+5. **Smart VIN resolution** — positional arg > `--vin` flag > profile default > interactive picker
+6. **Settings resolution** — CLI args > env vars (`.env` loaded via python-dotenv) > `config.toml` profile > defaults
+7. **click** — works well with command structure, async patterns
+8. **httpx async** — clean async API, good type stubs, easily testable with pytest-httpx
+9. **Browser-based auth** — `tescmd auth login` opens system browser for OAuth2 PKCE flow with local callback server
+10. **Display-layer unit conversion** — models retain raw API values (Celsius, miles, bar); conversion to user-preferred units happens in `RichOutput` via `DisplayUnits`
+11. **Response caching** — file-based JSON cache under `~/.cache/tescmd/` with per-entry TTL. Read-commands check cache first; write-commands invalidate after success. No new dependencies (stdlib `json`, `hashlib`, `time`, `pathlib`).
+12. **Cost-aware wake** — `auto_wake()` prompts before sending billable wake API calls. TTY users get an interactive choice; JSON/piped consumers get structured errors. The `--wake` flag opts in to auto-wake for scripts that accept the cost.
+13. **Smart wake state** — wake state is cached separately (30s TTL). If the vehicle was recently confirmed online, both the prompt and the wake API call are skipped entirely.
+14. **Vehicle Command Protocol** — `SignedCommandAPI` wraps `CommandAPI` via composition. When keys are enrolled and tier is `full`, `get_command_api()` returns `SignedCommandAPI` which transparently routes signed commands through ECDH session + HMAC path. Unsigned commands (`wake_up`) pass through to legacy REST. The `command_protocol` setting (`auto`/`signed`/`unsigned`) controls routing.
+15. **Tier enforcement** — `execute_command()` checks `setup_tier` before running write commands. Readonly tier raises `TierError` with guidance to upgrade via `tescmd setup`.
+16. **Key enrollment** — `tescmd key enroll <VIN>` sends the public key to the vehicle via the unsigned `add_key_request` endpoint, then guides the user through Tesla app approval with an interactive prompt or `--wait` auto-polling.
 
 ## Environment Variables
 
@@ -242,6 +259,7 @@ The `[R] Retry` option allows users to wake the vehicle for free via the Tesla m
 | `TESLA_CACHE_ENABLED` | Enable/disable response cache | `true` |
 | `TESLA_CACHE_TTL` | Cache entry time-to-live (seconds) | `60` |
 | `TESLA_CACHE_DIR` | Cache directory path | `~/.cache/tescmd` |
+| `TESLA_COMMAND_PROTOCOL` | Command signing: `auto`, `signed`, `unsigned` | `auto` |
 
 All variables can also be set in a `.env` file in the working directory or `$TESLA_CONFIG_DIR/.env`.
 

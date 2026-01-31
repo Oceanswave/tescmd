@@ -8,12 +8,20 @@ tescmd follows a layered architecture with strict separation of concerns. Each l
 ┌─────────────────────────────────────────────────┐
 │                    CLI Layer                     │
 │  cli/main.py ─ cli/auth.py ─ cli/vehicle.py     │
-│  cli/key.py ─ cli/setup.py                      │
+│  cli/charge.py ─ cli/climate.py ─ cli/key.py    │
+│  cli/security.py ─ cli/setup.py ─ cli/trunk.py  │
 │        (Click groups, dispatch, output)          │
 ├─────────────────────────────────────────────────┤
 │                   API Layer                      │
-│              api/vehicle.py                      │
-│       (domain methods, request building)         │
+│  api/vehicle.py ─ api/command.py                 │
+│  api/signed_command.py ─ api/energy.py           │
+│  (domain methods, command routing, signing)      │
+├─────────────────────────────────────────────────┤
+│              Protocol Layer                      │
+│  protocol/session.py ─ protocol/signer.py        │
+│  protocol/encoder.py ─ protocol/metadata.py      │
+│  protocol/commands.py ─ protocol/protobuf/       │
+│  (ECDH sessions, HMAC signing, protobuf)         │
 ├─────────────────────────────────────────────────┤
 │                  Client Layer                    │
 │              api/client.py                       │
@@ -24,8 +32,8 @@ tescmd follows a layered architecture with strict separation of concerns. Each l
 │    (OAuth2 PKCE, token refresh, keyring)         │
 ├─────────────────────────────────────────────────┤
 │               Infrastructure                     │
-│    output/ ─ crypto/ ─ models/ ─ _internal/      │
-│  (formatting, units, keys, schemas, helpers)     │
+│  output/ ─ crypto/ ─ models/ ─ _internal/        │
+│  cache/ ─ (formatting, keys, schemas, helpers)   │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -107,15 +115,32 @@ CLI modules do **not** construct HTTP requests or handle auth tokens directly.
 
 **Currently implemented command groups:**
 - `auth` — login, logout, status, refresh, register
-- `vehicle` — list, info, data, location, wake
-- `key` — generate, register, list
-- `setup` — interactive first-run configuration wizard
+- `vehicle` — list, info, data, location, wake, alerts, release-notes, service, drivers
+- `charge` — status, start, stop, limit, amps, schedule, departure, precondition
+- `climate` — status, on, off, set, seat, keeper, cop-temp, auto-seat, auto-wheel, wheel-level
+- `security` — status, lock, unlock, sentry, valet, remote-start, flash, honk, speed-limit, pin management
+- `trunk` — open, close, frunk, window
+- `media` — play-pause, next/prev track, next/prev fav, volume
+- `nav` — send, gps, supercharger, homelink, waypoints
+- `software` — status, schedule, cancel
+- `energy` — list, status, live, backup, mode, storm, tou, history, off-grid, grid-config, calendar
+- `user` — me, region, orders, features
+- `sharing` — add/remove driver, create/redeem/revoke/list invites
+- `key` — generate, deploy, validate, show, enroll
+- `cache` — status, clear
+- `raw` — get, post
+- `setup` — interactive first-run configuration wizard with key enrollment
 
 ### `api/` — API Client
 
 - **`client.py`** (`TeslaFleetClient`) — Base HTTP client. Manages httpx session, auth headers, base URL, retries, token refresh.
-- **`vehicle.py`** (`VehicleAPI`) — Vehicle data endpoints (list, info, data, location, wake).
-- **`errors.py`** — Typed exceptions: `AuthError`, `VehicleAsleepError`, `RegistrationRequiredError`, `RateLimitError`, etc.
+- **`vehicle.py`** (`VehicleAPI`) — Vehicle data endpoints (list, info, data, location, wake, alerts, drivers).
+- **`command.py`** (`CommandAPI`) — Vehicle command endpoints (~50 commands via POST).
+- **`signed_command.py`** (`SignedCommandAPI`) — Vehicle Command Protocol wrapper. Routes signed commands through ECDH session + HMAC path; delegates unsigned commands to `CommandAPI`.
+- **`energy.py`** (`EnergyAPI`) — Energy product endpoints (Powerwall, solar).
+- **`sharing.py`** (`SharingAPI`) — Driver and invite management.
+- **`user.py`** (`UserAPI`) — Account info, region, orders, features.
+- **`errors.py`** — Typed exceptions: `AuthError`, `VehicleAsleepError`, `SessionError`, `KeyNotEnrolledError`, `TierError`, `RateLimitError`, etc.
 
 API classes use **composition**: they receive a `TeslaFleetClient` instance, not extend it.
 
@@ -146,9 +171,23 @@ Models serve as the **contract** between layers. API methods return models; CLI 
 - **`token_store.py`** — Wraps `keyring` for OS-native credential storage. Stores access token, refresh token, expiry, and metadata.
 - **`server.py`** — Ephemeral local HTTP server that receives the OAuth redirect callback.
 
-### `crypto/` — Key Management
+### `protocol/` — Vehicle Command Protocol
+
+Implements Tesla's signed command protocol (ECDH + HMAC-SHA256):
+
+- **`session.py`** (`SessionManager`) — Manages per-(VIN, domain) ECDH sessions with in-memory caching, counter management, and automatic re-handshake on expiry.
+- **`signer.py`** — HMAC-SHA256 key derivation and command tag computation. VCSEC tags are truncated to 17 bytes.
+- **`encoder.py`** — Builds `RoutableMessage` protobuf envelopes for session handshakes and signed commands. Handles base64 encoding for the API.
+- **`metadata.py`** — TLV (tag-length-value) serialization for command metadata (epoch, expiry, counter, flags).
+- **`commands.py`** — Command registry mapping REST command names to protocol domain + signing requirements.
+- **`protobuf/messages.py`** — Hand-written protobuf dataclasses (`RoutableMessage`, `SessionInfo`, `Destination`, `SignatureData`, etc.) with `serialize()` and `parse()` methods.
+
+See [vehicle-command-protocol.md](vehicle-command-protocol.md) for the full protocol specification.
+
+### `crypto/` — Key Management and ECDH
 
 - **`keys.py`** — EC P-256 key generation, PEM export/import, public key extraction.
+- **`ecdh.py`** — ECDH key exchange (`derive_session_key`) and uncompressed public key extraction.
 
 ### `output/` — Output Formatting
 
@@ -182,6 +221,14 @@ API classes (`VehicleAPI`) wrap a `TeslaFleetClient` instance rather than inheri
 ### Why REST-First with Portal Key Enrollment
 
 Tesla's Fleet API handles all vehicle commands over REST. Key enrollment (registering a public key on the vehicle) is the only operation outside the REST API. The primary enrollment path uses the Tesla Developer Portal — a web-based flow where the vehicle receives the key over cellular and the owner confirms via the Tesla app. BLE enrollment is an alternative for offline provisioning.
+
+### Why Transparent Command Signing
+
+The `SignedCommandAPI` wraps `CommandAPI` using composition, not inheritance. `get_command_api()` returns whichever is appropriate based on available keys and the `command_protocol` setting. CLI command modules call methods by name on the returned API object and never need to know whether signing is active. This means:
+
+- Zero code changes needed in CLI modules when signing is enabled
+- `wake_up` and unknown commands pass through to unsigned REST automatically
+- The `command_protocol` setting provides an escape hatch for debugging
 
 ### Why Auto-Detect Output Format
 

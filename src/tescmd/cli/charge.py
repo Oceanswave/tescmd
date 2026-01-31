@@ -70,7 +70,15 @@ async def _cmd_status(app_ctx: AppContext, vin_positional: str | None) -> None:
 @global_options
 def start_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Start charging."""
-    run_async(_cmd_simple(app_ctx, vin_positional, "charge_start", "charge.start"))
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "charge_start",
+            "charge.start",
+            success_message="Charging started.",
+        )
+    )
 
 
 @charge_group.command("stop")
@@ -78,7 +86,15 @@ def start_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 @global_options
 def stop_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Stop charging."""
-    run_async(_cmd_simple(app_ctx, vin_positional, "charge_stop", "charge.stop"))
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "charge_stop",
+            "charge.stop",
+            success_message="Charging stopped.",
+        )
+    )
 
 
 @charge_group.command("limit-max")
@@ -86,7 +102,15 @@ def stop_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 @global_options
 def limit_max_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Set charge limit to maximum range."""
-    run_async(_cmd_simple(app_ctx, vin_positional, "charge_max_range", "charge.limit-max"))
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "charge_max_range",
+            "charge.limit-max",
+            success_message="Charge limit set to maximum range.",
+        )
+    )
 
 
 @charge_group.command("limit-std")
@@ -94,7 +118,15 @@ def limit_max_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 @global_options
 def limit_std_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Set charge limit to standard range."""
-    run_async(_cmd_simple(app_ctx, vin_positional, "charge_standard", "charge.limit-std"))
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "charge_standard",
+            "charge.limit-std",
+            success_message="Charge limit set to standard range.",
+        )
+    )
 
 
 @charge_group.command("port-open")
@@ -102,7 +134,15 @@ def limit_std_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 @global_options
 def port_open_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Open the charge port door."""
-    run_async(_cmd_simple(app_ctx, vin_positional, "charge_port_door_open", "charge.port-open"))
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "charge_port_door_open",
+            "charge.port-open",
+            success_message="Charge port opened.",
+        )
+    )
 
 
 @charge_group.command("port-close")
@@ -110,16 +150,15 @@ def port_open_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 @global_options
 def port_close_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Close the charge port door."""
-    run_async(_cmd_simple(app_ctx, vin_positional, "charge_port_door_close", "charge.port-close"))
-
-
-async def _cmd_simple(
-    app_ctx: AppContext,
-    vin_positional: str | None,
-    api_method: str,
-    cmd_name: str,
-) -> None:
-    await execute_command(app_ctx, vin_positional, api_method, cmd_name)
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "charge_port_door_close",
+            "charge.port-close",
+            success_message="Charge port closed.",
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +195,8 @@ async def _cmd_limit(app_ctx: AppContext, vin_positional: str | None, percent: i
     if formatter.format == "json":
         formatter.output(result, command="charge.limit")
     else:
-        formatter.rich.command_result(result.response.result, result.response.reason)
+        msg = result.response.reason or f"Charge limit set to {percent}%."
+        formatter.rich.command_result(result.response.result, msg)
 
 
 @charge_group.command("amps")
@@ -188,7 +228,8 @@ async def _cmd_amps(app_ctx: AppContext, vin_positional: str | None, amps: int) 
     if formatter.format == "json":
         formatter.output(result, command="charge.amps")
     else:
-        formatter.rich.command_result(result.response.result, result.response.reason)
+        msg = result.response.reason or f"Charging current set to {amps}A."
+        formatter.rich.command_result(result.response.result, msg)
 
 
 @charge_group.command("schedule")
@@ -237,7 +278,9 @@ async def _cmd_schedule(
     if formatter.format == "json":
         formatter.output(result, command="charge.schedule")
     else:
-        formatter.rich.command_result(result.response.result, result.response.reason)
+        state = "enabled" if enable else "disabled"
+        msg = result.response.reason or f"Scheduled charging {state}."
+        formatter.rich.command_result(result.response.result, msg)
 
 
 # ---------------------------------------------------------------------------
@@ -325,7 +368,9 @@ async def _cmd_departure(
     if formatter.format == "json":
         formatter.output(result, command="charge.departure")
     else:
-        formatter.rich.command_result(result.response.result, result.response.reason)
+        state = "enabled" if enable else "disabled"
+        msg = result.response.reason or f"Scheduled departure {state}."
+        formatter.rich.command_result(result.response.result, msg)
 
 
 @charge_group.command("precondition-add")
@@ -344,6 +389,7 @@ def precondition_add_cmd(
             "add_precondition_schedule",
             "charge.precondition-add",
             body=schedule,
+            success_message="Precondition schedule added.",
         )
     )
 
@@ -363,6 +409,7 @@ def precondition_remove_cmd(
             "remove_precondition_schedule",
             "charge.precondition-remove",
             body={"id": schedule_id},
+            success_message="Precondition schedule removed.",
         )
     )
 
@@ -416,6 +463,7 @@ def add_schedule_cmd(
             "add_charge_schedule",
             "charge.add-schedule",
             body={"schedule": json.dumps(schedule)},
+            success_message="Charge schedule updated.",
         )
     )
 
@@ -433,5 +481,6 @@ def remove_schedule_cmd(app_ctx: AppContext, vin_positional: str | None, schedul
             "remove_charge_schedule",
             "charge.remove-schedule",
             body={"id": schedule_id},
+            success_message="Charge schedule removed.",
         )
     )

@@ -3,9 +3,7 @@
 Reference for all currently implemented tescmd commands. Commands fall into two categories:
 
 - **Queries** — read vehicle state (location, battery, temperature, etc.). Require OAuth token only.
-- **Actions** — send commands to the vehicle (wake, key enrollment). Require OAuth token and may require enrolled EC key.
-
-> **Note:** Vehicle command groups (charge, climate, security, media, nav, trunk, software, fleet, raw) are planned but not yet implemented. See the roadmap section at the bottom.
+- **Actions** — send commands to the vehicle (charge, climate, security, trunk, media, nav, software, wake, key enrollment). Require OAuth token and may require enrolled EC key for signed commands.
 
 ## Global Options
 
@@ -112,7 +110,7 @@ tescmd vehicle data      — view detailed vehicle data
 tescmd vehicle location  — view vehicle location
 ```
 
-For full-tier users, it also reminds you to approve the key enrollment in the Tesla app (Security → Third-Party Access).
+For full-tier users, it also reminds you to approve the key enrollment in the Tesla app (Profile > Security & Privacy > Third-Party Apps).
 
 ### Re-running Setup
 
@@ -248,40 +246,576 @@ Generate a new EC P-256 key pair.
 
 ```bash
 tescmd key generate
-tescmd key generate --output ~/my-keys/  # custom output directory
+tescmd key generate --force  # overwrite existing keys
 ```
 
-### `key register [VIN]`
+### `key enroll`
 
-Enroll the public key on a vehicle.
+Opens the Tesla enrollment URL so you can add your virtual key via the Tesla app.
 
 ```bash
-tescmd key register --portal       # via Tesla Developer Portal (recommended)
-tescmd key register --ble          # BLE enrollment (proximity required, alternative)
+tescmd key enroll            # open enrollment URL in browser
+tescmd key enroll --no-open  # print URL without opening browser
 ```
 
-### `key list`
+**Rich mode (TTY):** Validates that keys exist, domain is configured, and the public key is accessible, then displays the enrollment URL with step-by-step instructions:
 
-List generated keys and their enrollment status.
+```
+ACTION REQUIRED: Add virtual key in the Tesla app
+
+  Enrollment URL: https://tesla.com/_ak/yourdomain.github.io
+
+  1. Open the URL above on your phone
+  2. Tap Finish Setup on the web page
+  3. The Tesla app will show an Add Virtual Key prompt
+  4. Approve it
+```
+
+**JSON mode:** Returns a single envelope with `"status": "ready"`, `enroll_url`, and instructions.
+
+### `key deploy`
+
+Deploy the public key to GitHub Pages (at the `.well-known` path Tesla requires).
 
 ```bash
-tescmd key list
+tescmd key deploy
+tescmd key deploy --repo user/user.github.io  # explicit repo
+```
+
+### `key validate`
+
+Check that the public key is accessible at the expected URL.
+
+```bash
+tescmd key validate
+```
+
+### `key show`
+
+Display key path, fingerprint, and expected URL.
+
+```bash
+tescmd key show
 ```
 
 ---
 
-## Roadmap — Planned Command Groups
+## `charge` — Charging Control
 
-The following command groups are planned but not yet implemented:
+Manage charging state, limits, current, schedules, and charge port.
 
-| Group | Description |
-|---|---|
-| `charge` | Charge queries and control (start, stop, limit, port, schedule) |
-| `climate` | Climate control (on, off, set temp, precondition, defrost, seat heaters, bioweapon) |
-| `security` | Lock, unlock, remote-start, speed-limit, valet, sentry |
-| `media` | Media playback (play, pause, next, prev, volume) |
-| `nav` | Navigation destinations (address, waypoint, supercharger, home, work) |
-| `trunk` | Trunk and frunk control (open, close) |
-| `software` | Software update queries and management |
-| `fleet` | Fleet-wide operations and telemetry |
-| `raw` | Arbitrary Fleet API endpoint access (get, post) |
+### `charge status [VIN]`
+
+Show current charging status (battery level, range, charge rate, port state).
+
+```bash
+tescmd charge status
+```
+
+### `charge start [VIN]`
+
+Start charging.
+
+```bash
+tescmd charge start
+```
+
+### `charge stop [VIN]`
+
+Stop charging.
+
+```bash
+tescmd charge stop
+```
+
+### `charge limit [VIN] PERCENT`
+
+Set charge limit to a specific percentage (50-100).
+
+```bash
+tescmd charge limit 80
+```
+
+### `charge limit-max [VIN]`
+
+Set charge limit to maximum range.
+
+```bash
+tescmd charge limit-max
+```
+
+### `charge limit-std [VIN]`
+
+Set charge limit to standard range.
+
+```bash
+tescmd charge limit-std
+```
+
+### `charge amps [VIN] AMPS`
+
+Set charging current (0-48 amps).
+
+```bash
+tescmd charge amps 32
+```
+
+### `charge port-open [VIN]`
+
+Open the charge port door.
+
+```bash
+tescmd charge port-open
+```
+
+### `charge port-close [VIN]`
+
+Close the charge port door.
+
+```bash
+tescmd charge port-close
+```
+
+### `charge schedule [VIN]`
+
+Configure scheduled charging.
+
+```bash
+tescmd charge schedule --time 420          # 7:00 AM (minutes past midnight)
+tescmd charge schedule --disable           # disable scheduled charging
+```
+
+### `charge departure [VIN]`
+
+Configure scheduled departure with preconditioning and off-peak charging.
+
+```bash
+tescmd charge departure --time 480         # depart at 8:00 AM
+tescmd charge departure --time 480 --precondition --off-peak
+tescmd charge departure --off              # disable
+```
+
+### `charge add-schedule [VIN]`
+
+Add or update a charge schedule (firmware 2024.26+).
+
+```bash
+tescmd charge add-schedule --id 1 --name "Weeknights" --start-time 1380 --end-time 420
+```
+
+### `charge remove-schedule [VIN]`
+
+Remove a charge schedule by ID.
+
+```bash
+tescmd charge remove-schedule --id 1
+```
+
+---
+
+## `climate` — Climate and Comfort
+
+Control HVAC, seat heaters, steering wheel heater, and cabin overheat protection.
+
+### `climate status [VIN]`
+
+Show current climate state (temperatures, HVAC, seat heaters, fan speed).
+
+```bash
+tescmd climate status
+```
+
+### `climate on [VIN]`
+
+Turn climate control on.
+
+```bash
+tescmd climate on
+```
+
+### `climate off [VIN]`
+
+Turn climate control off.
+
+```bash
+tescmd climate off
+```
+
+### `climate set [VIN] TEMP`
+
+Set cabin temperature (in Fahrenheit or Celsius depending on vehicle settings).
+
+```bash
+tescmd climate set 72
+```
+
+### `climate seat [VIN] POSITION LEVEL`
+
+Set seat heater level for a specific seat.
+
+```bash
+tescmd climate seat driver 2              # driver seat, level 2 (0-3)
+tescmd climate seat passenger 0           # passenger seat off
+tescmd climate seat rear-left 1           # rear left
+```
+
+Positions: `driver`, `passenger`, `rear-left`, `rear-center`, `rear-right`, `third-left`, `third-right`
+
+### `climate wheel-heater [VIN]`
+
+Control the steering wheel heater.
+
+```bash
+tescmd climate wheel-heater --on
+tescmd climate wheel-heater --off
+```
+
+### `climate keeper [VIN]`
+
+Set cabin overheat protection (Keep Climate, Dog Mode, Camp Mode).
+
+```bash
+tescmd climate keeper --on --mode keep     # keep climate
+tescmd climate keeper --on --mode dog      # dog mode
+tescmd climate keeper --on --mode camp     # camp mode
+tescmd climate keeper --off                # disable
+```
+
+### `climate cop-temp [VIN]`
+
+Set cabin overheat protection temperature.
+
+```bash
+tescmd climate cop-temp 90                 # 90°F
+```
+
+### `climate bioweapon [VIN]`
+
+Control Bioweapon Defense Mode.
+
+```bash
+tescmd climate bioweapon --on
+tescmd climate bioweapon --off
+```
+
+### `climate defrost [VIN]`
+
+Control preconditioning/defrost.
+
+```bash
+tescmd climate defrost --on
+tescmd climate defrost --off
+```
+
+---
+
+## `security` — Security and Access
+
+Lock/unlock doors, sentry mode, valet mode, speed limits, and more.
+
+### `security status [VIN]`
+
+Show current security status (locks, sentry, doors, windows).
+
+```bash
+tescmd security status
+```
+
+### `security lock [VIN]`
+
+Lock all doors.
+
+```bash
+tescmd security lock
+```
+
+### `security unlock [VIN]`
+
+Unlock all doors.
+
+```bash
+tescmd security unlock
+```
+
+### `security flash [VIN]`
+
+Flash the vehicle lights.
+
+```bash
+tescmd security flash
+```
+
+### `security honk [VIN]`
+
+Honk the horn.
+
+```bash
+tescmd security honk
+```
+
+### `security sentry [VIN]`
+
+Enable or disable sentry mode.
+
+```bash
+tescmd security sentry --on
+tescmd security sentry --off
+```
+
+### `security valet [VIN]`
+
+Enable or disable valet mode.
+
+```bash
+tescmd security valet --on
+tescmd security valet --on --password 1234
+tescmd security valet --off
+```
+
+### `security remote-start [VIN]`
+
+Enable remote start.
+
+```bash
+tescmd security remote-start
+```
+
+### `security speed-limit [VIN]`
+
+Manage speed limit mode.
+
+```bash
+tescmd security speed-limit --set 65       # set to 65 MPH
+tescmd security speed-limit --activate 1234  # activate with PIN
+tescmd security speed-limit --deactivate 1234
+```
+
+### `security pin-to-drive [VIN]`
+
+Enable or disable PIN to Drive.
+
+```bash
+tescmd security pin-to-drive --on --password 1234
+tescmd security pin-to-drive --off
+```
+
+### `security guest-mode [VIN]`
+
+Enable or disable guest mode.
+
+```bash
+tescmd security guest-mode --on
+tescmd security guest-mode --off
+```
+
+### `security erase-data [VIN]`
+
+Erase all user data from the vehicle. Requires `--confirm` flag.
+
+```bash
+tescmd security erase-data --confirm
+```
+
+### `security boombox [VIN]`
+
+Activate the boombox (external speaker).
+
+```bash
+tescmd security boombox
+```
+
+---
+
+## `trunk` — Trunk and Window Control
+
+Operate trunks, frunk, sunroof, and windows.
+
+### `trunk open [VIN]`
+
+Open (toggle) the rear trunk.
+
+```bash
+tescmd trunk open
+```
+
+### `trunk close [VIN]`
+
+Close (toggle) the rear trunk.
+
+```bash
+tescmd trunk close
+```
+
+### `trunk frunk [VIN]`
+
+Open the front trunk (frunk).
+
+```bash
+tescmd trunk frunk
+```
+
+### `trunk sunroof [VIN]`
+
+Vent or close the panoramic sunroof.
+
+```bash
+tescmd trunk sunroof --vent
+tescmd trunk sunroof --close
+```
+
+### `trunk window [VIN]`
+
+Vent or close all windows. Closing requires vehicle coordinates (auto-detected if not provided).
+
+```bash
+tescmd trunk window --vent
+tescmd trunk window --close
+tescmd trunk window --close --lat 37.38 --lon -122.08
+```
+
+---
+
+## `media` — Media Playback
+
+Control media playback and volume.
+
+### `media play-pause [VIN]`
+
+Toggle media playback (play/pause).
+
+```bash
+tescmd media play-pause
+```
+
+### `media next-track [VIN]`
+
+Skip to the next track.
+
+```bash
+tescmd media next-track
+```
+
+### `media prev-track [VIN]`
+
+Skip to the previous track.
+
+```bash
+tescmd media prev-track
+```
+
+### `media next-fav [VIN]`
+
+Skip to the next favorite.
+
+```bash
+tescmd media next-fav
+```
+
+### `media prev-fav [VIN]`
+
+Skip to the previous favorite.
+
+```bash
+tescmd media prev-fav
+```
+
+### `media volume-up [VIN]`
+
+Increase volume by one step.
+
+```bash
+tescmd media volume-up
+```
+
+### `media volume-down [VIN]`
+
+Decrease volume by one step.
+
+```bash
+tescmd media volume-down
+```
+
+### `media adjust-volume [VIN] VOLUME`
+
+Set volume to a specific level (0-11).
+
+```bash
+tescmd media adjust-volume 5
+```
+
+---
+
+## `nav` — Navigation
+
+Send destinations, coordinates, and trigger HomeLink.
+
+### `nav send [VIN] ADDRESS`
+
+Send an address to the vehicle navigation.
+
+```bash
+tescmd nav send "1 Infinite Loop, Cupertino, CA"
+```
+
+### `nav gps [VIN] LAT LON`
+
+Navigate to GPS coordinates.
+
+```bash
+tescmd nav gps 37.3861 -122.0839
+```
+
+### `nav supercharger [VIN]`
+
+Navigate to the nearest Supercharger.
+
+```bash
+tescmd nav supercharger
+```
+
+### `nav homelink [VIN]`
+
+Trigger HomeLink (garage door). Auto-detects vehicle location unless `--lat`/`--lon` provided.
+
+```bash
+tescmd nav homelink
+tescmd nav homelink --lat 37.38 --lon -122.08
+```
+
+### `nav waypoints [VIN] WAYPOINTS_JSON`
+
+Send multi-stop waypoints as a JSON array.
+
+```bash
+tescmd nav waypoints '[{"lat": 37.38, "lon": -122.08}, {"lat": 37.40, "lon": -122.10}]'
+```
+
+---
+
+## `software` — Software Updates
+
+Check and manage software updates.
+
+### `software status [VIN]`
+
+Show current firmware version and update status.
+
+```bash
+tescmd software status
+```
+
+### `software schedule [VIN] SECONDS`
+
+Schedule a pending software update to install in SECONDS from now.
+
+```bash
+tescmd software schedule 7200             # install in 2 hours
+```
+
+### `software cancel [VIN]`
+
+Cancel a scheduled software update.
+
+```bash
+tescmd software cancel
+```

@@ -49,7 +49,10 @@ tescmd/
 │   ├── auth/
 │   ├── crypto/
 │   ├── output/
+│   ├── protocol/        # Vehicle Command Protocol tests
 │   └── conftest.py      # Shared fixtures
+├── scripts/             # Developer scripts
+│   └── e2e_test.py      # Interactive E2E test runner
 ├── docs/                # Documentation
 ├── pyproject.toml       # Build config, deps, tool config
 ├── CLAUDE.md            # Claude Code context
@@ -400,6 +403,37 @@ def test_charge_status(httpx_mock):
 - [ ] Tests in `tests/` mirroring source structure
 - [ ] Docs updated: `docs/commands.md` and `README.md` command table
 - [ ] `ruff check`, `mypy`, `pytest` all pass
+
+## E2E Testing Against a Live Vehicle
+
+The `scripts/e2e_test.py` script runs each tescmd command interactively against a real vehicle. It pauses between commands so you can observe the vehicle's response.
+
+```bash
+# Run all tests (uses $TESLA_VIN)
+python scripts/e2e_test.py
+
+# Specify VIN explicitly
+python scripts/e2e_test.py --vin 5YJ3E1EA1NF000000
+
+# Skip physical actions (frunk/trunk open)
+python scripts/e2e_test.py --skip-destructive
+
+# Run only one category
+python scripts/e2e_test.py --category climate
+python scripts/e2e_test.py --category charge
+
+# Don't auto-wake between commands
+python scripts/e2e_test.py --no-wake
+```
+
+For each command, the script shows what it will run and prompts:
+- **Enter** — execute the command
+- **s** — skip this command
+- **q** — quit the test run
+
+Results are color-coded (PASS/FAIL/SKIP) with a summary at the end.
+
+**Available categories:** `climate`, `charge`, `security`, `trunk`, `media`, `nav`, `software`, `vehicle`
 
 ## Building
 

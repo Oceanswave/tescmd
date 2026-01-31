@@ -60,6 +60,7 @@ def schedule_cmd(app_ctx: AppContext, vin_positional: str | None, seconds: int) 
             "schedule_software_update",
             "software.schedule",
             body={"offset_sec": seconds},
+            success_message=f"Software update scheduled in {seconds}s.",
         )
     )
 
@@ -70,5 +71,11 @@ def schedule_cmd(app_ctx: AppContext, vin_positional: str | None, seconds: int) 
 def cancel_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Cancel a pending software update."""
     run_async(
-        execute_command(app_ctx, vin_positional, "cancel_software_update", "software.cancel")
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "cancel_software_update",
+            "software.cancel",
+            success_message="Software update cancelled.",
+        )
     )

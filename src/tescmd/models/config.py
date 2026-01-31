@@ -50,3 +50,9 @@ class AppSettings(BaseSettings):
     cache_enabled: bool = True
     cache_ttl: int = 60
     cache_dir: str = "~/.cache/tescmd"
+
+    # Command protocol: auto | signed | unsigned
+    # auto = use signed when keys available, fall back to unsigned
+    # signed = require signed (error if no keys)
+    # unsigned = force legacy REST path
+    command_protocol: str = "auto"

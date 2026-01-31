@@ -70,7 +70,15 @@ async def _cmd_status(app_ctx: AppContext, vin_positional: str | None) -> None:
 @global_options
 def lock_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Lock all doors."""
-    run_async(_cmd_simple(app_ctx, vin_positional, "door_lock", "security.lock"))
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "door_lock",
+            "security.lock",
+            success_message="Doors locked.",
+        )
+    )
 
 
 @security_group.command("unlock")
@@ -78,7 +86,15 @@ def lock_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 @global_options
 def unlock_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Unlock all doors."""
-    run_async(_cmd_simple(app_ctx, vin_positional, "door_unlock", "security.unlock"))
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "door_unlock",
+            "security.unlock",
+            success_message="Doors unlocked.",
+        )
+    )
 
 
 @security_group.command("valet-reset")
@@ -86,7 +102,15 @@ def unlock_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 @global_options
 def valet_reset_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Reset valet PIN."""
-    run_async(_cmd_simple(app_ctx, vin_positional, "reset_valet_pin", "security.valet-reset"))
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "reset_valet_pin",
+            "security.valet-reset",
+            success_message="Valet PIN reset.",
+        )
+    )
 
 
 @security_group.command("remote-start")
@@ -94,7 +118,15 @@ def valet_reset_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 @global_options
 def remote_start_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Enable remote start."""
-    run_async(_cmd_simple(app_ctx, vin_positional, "remote_start_drive", "security.remote-start"))
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "remote_start_drive",
+            "security.remote-start",
+            success_message="Remote start enabled.",
+        )
+    )
 
 
 @security_group.command("flash")
@@ -102,7 +134,15 @@ def remote_start_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 @global_options
 def flash_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Flash the vehicle lights."""
-    run_async(_cmd_simple(app_ctx, vin_positional, "flash_lights", "security.flash"))
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "flash_lights",
+            "security.flash",
+            success_message="Lights flashed.",
+        )
+    )
 
 
 @security_group.command("honk")
@@ -110,16 +150,15 @@ def flash_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 @global_options
 def honk_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Honk the horn."""
-    run_async(_cmd_simple(app_ctx, vin_positional, "honk_horn", "security.honk"))
-
-
-async def _cmd_simple(
-    app_ctx: AppContext,
-    vin_positional: str | None,
-    api_method: str,
-    cmd_name: str,
-) -> None:
-    await execute_command(app_ctx, vin_positional, api_method, cmd_name)
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "honk_horn",
+            "security.honk",
+            success_message="Horn honked.",
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +195,9 @@ async def _cmd_sentry(app_ctx: AppContext, vin_positional: str | None, on: bool)
     if formatter.format == "json":
         formatter.output(result, command="security.sentry")
     else:
-        formatter.rich.command_result(result.response.result, result.response.reason)
+        state = "enabled" if on else "disabled"
+        msg = result.response.reason or f"Sentry mode {state}."
+        formatter.rich.command_result(result.response.result, msg)
 
 
 @security_group.command("valet")
@@ -199,7 +240,9 @@ async def _cmd_valet(
     if formatter.format == "json":
         formatter.output(result, command="security.valet")
     else:
-        formatter.rich.command_result(result.response.result, result.response.reason)
+        state = "enabled" if on else "disabled"
+        msg = result.response.reason or f"Valet mode {state}."
+        formatter.rich.command_result(result.response.result, msg)
 
 
 @security_group.command("pin-to-drive")
@@ -214,6 +257,7 @@ def pin_to_drive_cmd(
     body: dict[str, object] = {"on": on}
     if password is not None:
         body["password"] = password
+    state = "enabled" if on else "disabled"
     run_async(
         execute_command(
             app_ctx,
@@ -221,6 +265,7 @@ def pin_to_drive_cmd(
             "set_pin_to_drive",
             "security.pin-to-drive",
             body=body,
+            success_message=f"PIN to Drive {state}.",
         )
     )
 
@@ -231,6 +276,7 @@ def pin_to_drive_cmd(
 @global_options
 def guest_mode_cmd(app_ctx: AppContext, vin_positional: str | None, enable: bool) -> None:
     """Enable or disable guest mode."""
+    state = "enabled" if enable else "disabled"
     run_async(
         execute_command(
             app_ctx,
@@ -238,6 +284,7 @@ def guest_mode_cmd(app_ctx: AppContext, vin_positional: str | None, enable: bool
             "guest_mode",
             "security.guest-mode",
             body={"enable": enable},
+            success_message=f"Guest mode {state}.",
         )
     )
 
@@ -256,7 +303,15 @@ def erase_data_cmd(app_ctx: AppContext, vin_positional: str | None, confirm: boo
 
     Requires --confirm flag.
     """
-    run_async(execute_command(app_ctx, vin_positional, "erase_user_data", "security.erase-data"))
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "erase_user_data",
+            "security.erase-data",
+            success_message="User data erased.",
+        )
+    )
 
 
 @security_group.command("boombox")
@@ -264,7 +319,15 @@ def erase_data_cmd(app_ctx: AppContext, vin_positional: str | None, confirm: boo
 @global_options
 def boombox_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Activate the boombox (external speaker)."""
-    run_async(execute_command(app_ctx, vin_positional, "remote_boombox", "security.boombox"))
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "remote_boombox",
+            "security.boombox",
+            success_message="Boombox activated.",
+        )
+    )
 
 
 @security_group.command("pin-reset")
@@ -272,7 +335,15 @@ def boombox_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 @global_options
 def pin_reset_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Reset PIN to Drive."""
-    run_async(_cmd_simple(app_ctx, vin_positional, "reset_pin_to_drive_pin", "security.pin-reset"))
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "reset_pin_to_drive_pin",
+            "security.pin-reset",
+            success_message="PIN to Drive reset.",
+        )
+    )
 
 
 @security_group.command("pin-clear-admin")
@@ -281,8 +352,12 @@ def pin_reset_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 def pin_clear_admin_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Admin clear PIN to Drive (fleet manager only)."""
     run_async(
-        _cmd_simple(
-            app_ctx, vin_positional, "clear_pin_to_drive_admin", "security.pin-clear-admin"
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "clear_pin_to_drive_admin",
+            "security.pin-clear-admin",
+            success_message="PIN cleared (admin).",
         )
     )
 
@@ -300,6 +375,7 @@ def speed_clear_cmd(app_ctx: AppContext, vin_positional: str | None, pin: str) -
             "speed_limit_clear_pin",
             "security.speed-clear",
             body={"pin": pin},
+            success_message="Speed limit PIN cleared.",
         )
     )
 
@@ -310,8 +386,12 @@ def speed_clear_cmd(app_ctx: AppContext, vin_positional: str | None, pin: str) -
 def speed_clear_admin_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Admin clear speed limit PIN (fleet manager only)."""
     run_async(
-        _cmd_simple(
-            app_ctx, vin_positional, "speed_limit_clear_pin_admin", "security.speed-clear-admin"
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "speed_limit_clear_pin_admin",
+            "security.speed-clear-admin",
+            success_message="Speed limit PIN cleared (admin).",
         )
     )
 
@@ -387,4 +467,5 @@ async def _cmd_speed_limit(
     if formatter.format == "json":
         formatter.output(result, command=cmd_name)
     else:
-        formatter.rich.command_result(result.response.result, result.response.reason)
+        msg = result.response.reason or "Speed limit updated."
+        formatter.rich.command_result(result.response.result, msg)

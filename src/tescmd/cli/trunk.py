@@ -33,7 +33,16 @@ trunk_group = click.Group("trunk", help="Trunk and window commands")
 @global_options
 def open_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Open (toggle) the rear trunk."""
-    run_async(_cmd_trunk(app_ctx, vin_positional, "rear", "trunk.open"))
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "actuate_trunk",
+            "trunk.open",
+            body={"which_trunk": "rear"},
+            success_message="Rear trunk opened.",
+        )
+    )
 
 
 @trunk_group.command("close")
@@ -44,7 +53,16 @@ def close_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 
     Note: actuate_trunk is a toggle — open and close both call the same endpoint.
     """
-    run_async(_cmd_trunk(app_ctx, vin_positional, "rear", "trunk.close"))
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "actuate_trunk",
+            "trunk.close",
+            body={"which_trunk": "rear"},
+            success_message="Rear trunk closed.",
+        )
+    )
 
 
 @trunk_group.command("frunk")
@@ -52,21 +70,15 @@ def close_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 @global_options
 def frunk_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Open the front trunk (frunk)."""
-    run_async(_cmd_trunk(app_ctx, vin_positional, "front", "trunk.frunk"))
-
-
-async def _cmd_trunk(
-    app_ctx: AppContext,
-    vin_positional: str | None,
-    which_trunk: str,
-    cmd_name: str,
-) -> None:
-    await execute_command(
-        app_ctx,
-        vin_positional,
-        "actuate_trunk",
-        cmd_name,
-        body={"which_trunk": which_trunk},
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "actuate_trunk",
+            "trunk.frunk",
+            body={"which_trunk": "front"},
+            success_message="Frunk opened.",
+        )
     )
 
 
@@ -82,6 +94,7 @@ async def _cmd_trunk(
 def sunroof_cmd(app_ctx: AppContext, vin_positional: str | None, vent: bool) -> None:
     """Vent or close the panoramic sunroof."""
     state = "vent" if vent else "close"
+    msg = "Sunroof vented." if vent else "Sunroof closed."
     run_async(
         execute_command(
             app_ctx,
@@ -89,6 +102,7 @@ def sunroof_cmd(app_ctx: AppContext, vin_positional: str | None, vent: bool) -> 
             "sun_roof_control",
             "trunk.sunroof",
             body={"state": state},
+            success_message=msg,
         )
     )
 
@@ -164,4 +178,6 @@ async def _cmd_window(
     if formatter.format == "json":
         formatter.output(result, command="trunk.window")
     else:
-        formatter.rich.command_result(result.response.result, result.response.reason)
+        action = "vented" if vent else "closed"
+        msg = result.response.reason or f"Windows {action}."
+        formatter.rich.command_result(result.response.result, msg)

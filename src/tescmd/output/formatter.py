@@ -23,6 +23,15 @@ class OutputFormatter:
 
     When the format is ``"quiet"``, a :class:`rich.console.Console` writing to
     *stderr* is used so that normal stdout stays empty.
+
+    Error stream routing:
+
+    * **JSON / piped** — errors go to **stderr** so stdout stays clean for
+      machine-parseable data (callers can safely ``| jq``).
+    * **Rich / TTY** — errors stay on **stdout** because the user is looking
+      at the terminal directly; splitting streams would be worse UX.
+    * Interactive prompts (wake confirmation, enrollment approval) always use
+      stdout via Rich since they are inherently TTY-only.
     """
 
     def __init__(
@@ -44,6 +53,10 @@ class OutputFormatter:
             self._console = Console(stderr=True)
         else:
             self._console = Console()
+
+        # Separate stderr console for error output so stdout stays clean
+        # for machine-parseable data (JSON, piped workflows).
+        self._error_console = Console(stderr=True)
 
         self._rich = RichOutput(self._console)
         self._cache_meta: dict[str, Any] | None = None
@@ -97,13 +110,22 @@ class OutputFormatter:
             # for typed output; this is a catch-all.
             self._rich.info(str(data))
 
+    @property
+    def error_console(self) -> Console:
+        """Return the stderr :class:`Console` for error output."""
+        return self._error_console
+
     def output_error(self, *, code: str, message: str, command: str) -> None:
         """Emit an error using the current format.
 
-        * **json** — prints :func:`format_json_error` to stdout.
-        * **rich** / **quiet** — prints via :meth:`RichOutput.error`.
+        * **json** — prints :func:`format_json_error` to stderr.
+        * **rich** / **quiet** — prints via :meth:`RichOutput.error` (stdout,
+          since TTY users see the terminal directly).
         """
         if self._format == "json":
-            print(format_json_error(code=code, message=message, command=command))
+            print(
+                format_json_error(code=code, message=message, command=command),
+                file=sys.stderr,
+            )
         else:
             self._rich.error(message)

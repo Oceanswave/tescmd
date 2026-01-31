@@ -27,6 +27,15 @@ class CommandAPI:
         return CommandResponse.model_validate(data)
 
     # ------------------------------------------------------------------
+    # Key enrollment
+    # ------------------------------------------------------------------
+    # Note: Initial key enrollment is NOT available via REST or signed_command.
+    # The Tesla Go SDK explicitly blocks add_key_request for Fleet API with
+    # ErrRequiresBLE. For Fleet API apps, enrollment happens through the
+    # Tesla app portal flow: https://tesla.com/_ak/<domain>
+    # See cli/key.py for the enrollment flow implementation.
+
+    # ------------------------------------------------------------------
     # Charging commands
     # ------------------------------------------------------------------
 

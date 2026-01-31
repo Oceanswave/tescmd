@@ -33,6 +33,7 @@ dependencies = [
     "keyring>=25.0",
     "python-dotenv>=1.0",
     "cryptography>=42.0",
+    "protobuf>=5.29",
 ]
 
 [project.optional-dependencies]
@@ -44,6 +45,8 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.8",
     "mypy>=1.13",
+    "mypy-protobuf>=3.6",
+    "grpcio-tools>=1.68",
     "build>=1.0",
 ]
 
@@ -77,6 +80,15 @@ plugins = ["pydantic.mypy"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[[tool.mypy.overrides]]
+module = "tescmd.protocol.protobuf.*"
+ignore_missing_imports = true
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "google.protobuf.*"
+ignore_missing_imports = true
 
 [tool.pydantic-mypy]
 init_forbid_extra = true

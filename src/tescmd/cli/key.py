@@ -1,4 +1,4 @@
-"""CLI commands for EC key management (generate, deploy, validate, show)."""
+"""CLI commands for EC key management (generate, deploy, validate, show, enroll)."""
 
 from __future__ import annotations
 
@@ -300,3 +300,312 @@ async def _cmd_show(app_ctx: AppContext) -> None:
         domain = settings.domain
         if domain:
             formatter.rich.info(f"Expected URL:  {get_key_url(domain)}")
+
+
+# ---------------------------------------------------------------------------
+# Enroll command
+# ---------------------------------------------------------------------------
+
+# Tesla app portal URL for key enrollment.
+# Initial key enrollment is NOT available via REST API or signed_command.
+# Tesla's Go SDK explicitly blocks add_key_request for Fleet API connections
+# (ErrRequiresBLE).  For Fleet API apps, enrollment happens through the
+# Tesla app portal: the user opens https://tesla.com/_ak/<domain> on their
+# phone, and the Tesla app handles the actual key pairing with the vehicle.
+_TESLA_APP_KEY_URL = "https://tesla.com/_ak/{domain}"
+
+# Tesla consent revocation URL.  Revoking consent removes the app's
+# OAuth access and its virtual key from all vehicles on the account.
+# There is no Fleet API endpoint to remove a virtual key — Tesla requires
+# the owner to revoke access through their account or the vehicle itself.
+_TESLA_CONSENT_REVOKE_URL = (
+    "https://auth.tesla.com/user/revoke/consent"
+    "?revoke_client_id={client_id}&back_url=https://tesla.com"
+)
+
+
+@key_group.command("enroll")
+@click.option(
+    "--open/--no-open",
+    default=True,
+    help="Open the enrollment URL in the default browser (default: open)",
+)
+@global_options
+def enroll_cmd(
+    app_ctx: AppContext,
+    open: bool,
+) -> None:
+    """Enroll your EC key on a vehicle via the Tesla app.
+
+    Opens the Tesla app enrollment page for your domain.  The vehicle
+    owner approves the key in the Tesla app (Profile >
+    Security & Privacy > Third-Party Apps).  Once approved, signed commands work
+    automatically.
+    """
+    run_async(_cmd_enroll(app_ctx, open_browser=open))
+
+
+async def _cmd_enroll(
+    app_ctx: AppContext,
+    *,
+    open_browser: bool,
+) -> None:
+    import webbrowser
+
+    formatter = app_ctx.formatter
+    settings = AppSettings()
+    key_dir = Path(settings.config_dir).expanduser() / "keys"
+
+    # Step 1: Check key pair
+    if not has_key_pair(key_dir):
+        if formatter.format == "json":
+            formatter.output_error(
+                code="no_keys",
+                message="No key pair found. Run 'tescmd key generate' first.",
+                command="key.enroll",
+            )
+        else:
+            formatter.rich.error("No key pair found. Run [cyan]tescmd key generate[/cyan] first.")
+        raise SystemExit(1)
+
+    fingerprint = get_key_fingerprint(key_dir)
+
+    if formatter.format != "json":
+        formatter.rich.info("[bold]Step 1: Checking key pair…[/bold]")
+        formatter.rich.info(f"  [green]✓[/green] Key pair found (fingerprint: {fingerprint[:8]}…)")
+        formatter.rich.info("")
+
+    # Step 2: Check domain is configured
+    domain = settings.domain
+    if not domain:
+        if formatter.format == "json":
+            formatter.output_error(
+                code="no_domain",
+                message=(
+                    "No domain configured. Run 'tescmd setup' or set TESLA_DOMAIN"
+                    " in your .env file."
+                ),
+                command="key.enroll",
+            )
+        else:
+            formatter.rich.error(
+                "No domain configured. Run [cyan]tescmd setup[/cyan]"
+                " or set TESLA_DOMAIN in your .env file."
+            )
+        raise SystemExit(1)
+
+    if formatter.format != "json":
+        formatter.rich.info("[bold]Step 2: Checking domain & public key…[/bold]")
+
+    # Step 3: Verify public key is accessible
+    key_accessible = validate_key_url(domain)
+    key_url = get_key_url(domain)
+
+    if not key_accessible:
+        if formatter.format == "json":
+            formatter.output_error(
+                code="key_not_accessible",
+                message=(
+                    f"Public key not accessible at {key_url}. "
+                    "Deploy with 'tescmd key deploy' first."
+                ),
+                command="key.enroll",
+            )
+        else:
+            formatter.rich.error(f"Public key not accessible at [cyan]{key_url}[/cyan]")
+            formatter.rich.info("  Deploy with [cyan]tescmd key deploy[/cyan] first.")
+        raise SystemExit(1)
+
+    if formatter.format != "json":
+        formatter.rich.info(f"  [green]✓[/green] Domain: {domain}")
+        formatter.rich.info(f"  [green]✓[/green] Public key accessible at {key_url}")
+        formatter.rich.info("")
+
+    # Step 4: Build enrollment URL and guide user
+    enroll_url = _TESLA_APP_KEY_URL.format(domain=domain)
+
+    if formatter.format == "json":
+        formatter.output(
+            {
+                "status": "ready",
+                "domain": domain,
+                "fingerprint": fingerprint,
+                "enroll_url": enroll_url,
+                "key_url": key_url,
+                "message": (
+                    f"Open {enroll_url} on your phone."
+                    " Tap 'Finish Setup', then approve 'Add Virtual Key' in the Tesla app."
+                ),
+            },
+            command="key.enroll",
+        )
+        return
+
+    formatter.rich.info("[bold]Step 3: Key enrollment[/bold]")
+    formatter.rich.info("")
+    formatter.rich.info("━" * 55)
+    formatter.rich.info(
+        "  [bold yellow]ACTION REQUIRED: Add virtual key in the Tesla app[/bold yellow]"
+    )
+    formatter.rich.info("")
+    formatter.rich.info(f"  Enrollment URL: [link={enroll_url}]{enroll_url}[/link]")
+    formatter.rich.info("")
+    formatter.rich.info("  1. Open the URL above [bold]on your phone[/bold]")
+    formatter.rich.info("  2. Tap [bold]Finish Setup[/bold] on the web page")
+    formatter.rich.info("  3. The Tesla app will show an [bold]Add Virtual Key[/bold] prompt")
+    formatter.rich.info("  4. Approve it")
+    formatter.rich.info("")
+    formatter.rich.info("  [dim]If the prompt doesn't appear, force-quit the Tesla app,")
+    formatter.rich.info("  go back to your browser, and tap Finish Setup again.[/dim]")
+    formatter.rich.info("━" * 55)
+    formatter.rich.info("")
+
+    if open_browser:
+        formatter.rich.info("Opening enrollment URL in browser…")
+        webbrowser.open(enroll_url)
+        formatter.rich.info("")
+
+    formatter.rich.info("After approving in the Tesla app, try a command:")
+    formatter.rich.info("  [cyan]tescmd security lock --wake[/cyan]")
+    formatter.rich.info("  [cyan]tescmd charge status --wake[/cyan]")
+    formatter.rich.info("")
+    formatter.rich.info(
+        "[dim]Tip: This URL must be opened on your phone, not a desktop browser.[/dim]"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Unenroll command
+# ---------------------------------------------------------------------------
+
+
+@key_group.command("unenroll")
+@click.option(
+    "--open/--no-open",
+    default=True,
+    help="Open the revocation URL in the default browser (default: open)",
+)
+@global_options
+def unenroll_cmd(
+    app_ctx: AppContext,
+    open: bool,
+) -> None:
+    """Remove your virtual key and revoke app access.
+
+    Shows instructions for removing the tescmd virtual key from your
+    vehicle(s) and optionally opens the Tesla consent revocation page
+    to revoke OAuth access entirely.
+    """
+    run_async(_cmd_unenroll(app_ctx, open_browser=open))
+
+
+async def _cmd_unenroll(
+    app_ctx: AppContext,
+    *,
+    open_browser: bool,
+) -> None:
+    import webbrowser
+
+    formatter = app_ctx.formatter
+    settings = AppSettings()
+    client_id = settings.client_id
+
+    # Build revocation URL if client_id is available
+    revoke_url: str | None = None
+    if client_id:
+        revoke_url = _TESLA_CONSENT_REVOKE_URL.format(client_id=client_id)
+
+    if formatter.format == "json":
+        data: dict[str, object] = {
+            "status": "instructions",
+            "revoke_url": revoke_url,
+            "methods": [
+                {
+                    "name": "vehicle_touchscreen",
+                    "steps": "Controls > Locks > tap trash icon on key > scan key card",
+                    "speed": "immediate",
+                },
+                {
+                    "name": "tesla_app",
+                    "steps": "Profile > Security & Privacy > Third-Party Apps > Remove",
+                    "speed": "up to 2 hours",
+                },
+                {
+                    "name": "tesla_account_web",
+                    "steps": "accounts.tesla.com > Security > Third Party Apps > Manage",
+                    "speed": "up to 2 hours",
+                },
+            ],
+            "message": (
+                "Remove the virtual key via the vehicle touchscreen, Tesla app, "
+                "or accounts.tesla.com. "
+                + (
+                    f"Revoke OAuth access at {revoke_url}"
+                    if revoke_url
+                    else "Set TESLA_CLIENT_ID to generate a consent revocation URL."
+                )
+            ),
+        }
+        formatter.output(data, command="key.unenroll")
+        return
+
+    formatter.rich.info("[bold]How to remove the tescmd virtual key[/bold]")
+    formatter.rich.info("")
+    formatter.rich.info("━" * 55)
+    formatter.rich.info("")
+
+    # Method 1: Vehicle touchscreen (immediate)
+    formatter.rich.info("  [bold]Option 1: Vehicle touchscreen[/bold] [green](immediate)[/green]")
+    formatter.rich.info("  1. On the vehicle touchscreen, tap [bold]Controls > Locks[/bold]")
+    formatter.rich.info("  2. Find the tescmd key in the key list")
+    formatter.rich.info("  3. Tap the [bold]trash icon[/bold] next to it")
+    formatter.rich.info("  4. Scan your [bold]key card[/bold] on the card reader to confirm")
+    formatter.rich.info("")
+
+    # Method 2: Tesla app
+    formatter.rich.info(
+        "  [bold]Option 2: Tesla app[/bold] [yellow](may take up to 2 hours)[/yellow]"
+    )
+    formatter.rich.info("  1. Open the Tesla app > [bold]Profile > Security & Privacy[/bold]")
+    formatter.rich.info("  2. Tap [bold]Third-Party Apps[/bold]")
+    formatter.rich.info("  3. Find tescmd and tap [bold]Remove[/bold]")
+    formatter.rich.info("")
+
+    # Method 3: Tesla account website
+    formatter.rich.info(
+        "  [bold]Option 3: Tesla account website[/bold] [yellow](may take up to 2 hours)[/yellow]"
+    )
+    formatter.rich.info(
+        "  1. Sign in at [link=https://accounts.tesla.com]accounts.tesla.com[/link]"
+    )
+    formatter.rich.info("  2. Go to [bold]Security > Third Party Apps[/bold]")
+    formatter.rich.info("  3. Find tescmd and tap [bold]Manage > Remove[/bold]")
+    formatter.rich.info("")
+    formatter.rich.info("━" * 55)
+    formatter.rich.info("")
+
+    # OAuth consent revocation
+    if revoke_url:
+        formatter.rich.info("[bold]Revoke OAuth access entirely[/bold]")
+        formatter.rich.info("")
+        formatter.rich.info("  To also revoke this app's OAuth access to your Tesla account:")
+        formatter.rich.info(f"  [link={revoke_url}]{revoke_url}[/link]")
+        formatter.rich.info("")
+
+        if open_browser:
+            formatter.rich.info("Opening revocation page in browser…")
+            webbrowser.open(revoke_url)
+            formatter.rich.info("")
+    else:
+        formatter.rich.info("[dim]Set TESLA_CLIENT_ID to generate a consent revocation URL.[/dim]")
+        formatter.rich.info("")
+
+    # Cleanup guidance
+    formatter.rich.info("[bold]Local cleanup[/bold]")
+    formatter.rich.info("")
+    formatter.rich.info("  To also remove local credentials and keys:")
+    formatter.rich.info("  [cyan]tescmd auth logout[/cyan]     — clear stored OAuth tokens")
+    formatter.rich.info("  [cyan]tescmd cache clear[/cyan]     — clear cached API responses")
+    formatter.rich.info(
+        f"  [dim]Key files are stored in: {Path(settings.config_dir).expanduser() / 'keys'}[/dim]"
+    )

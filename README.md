@@ -10,12 +10,15 @@ A Python CLI for querying and controlling Tesla vehicles via the Fleet API — b
 
 Tesla's Fleet API gives developers full access to vehicle data and commands, but working with it directly means juggling OAuth2 PKCE flows, token refresh, regional endpoints, key enrollment, and raw JSON responses. tescmd wraps all of that into a single command-line tool that handles authentication, token management, and output formatting so you can focus on what you actually want to do — check your battery, find your car, or control your vehicle.
 
-tescmd is designed to work as a tool that AI agents can invoke directly. Platforms like [OpenClaude](https://github.com/anthropics/claude-code), [Claude Desktop](https://claude.ai), and other agent frameworks can call tescmd commands, parse the structured JSON output, and take actions on your behalf — "lock my car", "what's my battery at?", "start climate control". The deterministic JSON output, meaningful exit codes, cost-aware wake confirmation, and `--wake` opt-in flag make it safe for autonomous agent use without surprise billing.
+tescmd is designed to work as a tool that AI agents can invoke directly. Platforms like [OpenClaw](https://openclaw.ai/), [Claude Desktop](https://claude.ai), and other agent frameworks can call tescmd commands, parse the structured JSON output, and take actions on your behalf — "lock my car", "what's my battery at?", "start climate control". The deterministic JSON output, meaningful exit codes, cost-aware wake confirmation, and `--wake` opt-in flag make it safe for autonomous agent use without surprise billing.
 
 ## Features
 
 - **Vehicle state queries** — battery, range, charge status, climate, location, doors, windows, trunks, tire pressure, dashcam, sentry mode, and more
 - **Vehicle commands** — charge start/stop/limit/departure scheduling, climate on/off/set temp/seats/steering wheel, lock/unlock, sentry mode, trunk/frunk, windows, HomeLink, navigation waypoints, media playback, speed limits, PIN management
+- **Vehicle Command Protocol** — ECDH session management with HMAC-SHA256 signed commands via the `signed_command` endpoint; automatically used when keys are enrolled
+- **Key enrollment** — `tescmd key enroll <VIN>` sends your public key to the vehicle and guides you through Tesla app approval
+- **Tier enforcement** — readonly tier blocks write commands with clear guidance to upgrade
 - **Energy products** — Powerwall live status, site info, backup reserve, operation mode, storm mode, time-of-use settings, charging history, calendar history, grid import/export
 - **User & sharing** — account info, region, orders, feature flags, driver management, vehicle sharing invites
 - **Fleet Telemetry awareness** — setup wizard highlights Fleet Telemetry streaming for up to 97% API cost reduction
@@ -58,6 +61,9 @@ tescmd climate set 72
 
 # Lock the car
 tescmd security lock --wake
+
+# Enroll your key on a vehicle (required for signed commands)
+tescmd key enroll 5YJ3E1EA1NF000000
 
 # Cache management
 tescmd cache status
@@ -103,6 +109,9 @@ TESLA_REGION=na
 TESLA_CACHE_ENABLED=true
 TESLA_CACHE_TTL=60
 TESLA_CACHE_DIR=~/.cache/tescmd
+
+# Command protocol: auto | signed | unsigned (optional)
+TESLA_COMMAND_PROTOCOL=auto
 ```
 
 ### Config File
@@ -126,7 +135,7 @@ Switch profiles: `tescmd --profile work-car vehicle info`
 
 | Group | Commands | Description |
 |---|---|---|
-| `setup` | *(interactive wizard)* | First-run configuration: client ID, secret, region, domain |
+| `setup` | *(interactive wizard)* | First-run configuration: client ID, secret, region, domain, key enrollment |
 | `auth` | `login`, `logout`, `status`, `refresh`, `register`, `export`, `import` | OAuth2 authentication lifecycle |
 | `vehicle` | `list`, `info`, `data`, `location`, `wake`, `alerts`, `release-notes`, `service`, `drivers` | Vehicle discovery, state queries, wake, service data |
 | `charge` | `status`, `start`, `stop`, `limit`, `limit-max`, `limit-std`, `amps`, `schedule`, `port-open`, `port-close`, `departure`, `precondition-add`, `precondition-remove` | Charge queries, control, and scheduling |
@@ -139,7 +148,7 @@ Switch profiles: `tescmd --profile work-car vehicle info`
 | `energy` | `list`, `status`, `live`, `backup`, `mode`, `storm`, `tou`, `history`, `off-grid`, `grid-config`, `calendar` | Energy product (Powerwall) management |
 | `user` | `me`, `region`, `orders`, `features` | User account information |
 | `sharing` | `add-driver`, `remove-driver`, `create-invite`, `redeem-invite`, `revoke-invite`, `list-invites` | Vehicle sharing and driver management |
-| `key` | `generate`, `register`, `list` | Key management and enrollment |
+| `key` | `generate`, `deploy`, `validate`, `show`, `enroll` | Key management and enrollment |
 | `cache` | `status`, `clear` | Response cache management |
 | `raw` | `get`, `post` | Arbitrary Fleet API endpoint access |
 
@@ -194,19 +203,37 @@ Rich output displays values in US units by default (°F, miles, PSI). The displa
 
 The Tesla API returns Celsius, miles, and bar — conversions happen in the display layer only.
 
-## Response Cache
+## Tesla Fleet API Costs
 
-Tesla's Fleet API is pay-per-use — every call with status < 500 is billable. Wake requests are the most expensive category (3/min rate limit). tescmd reduces costs with a three-layer optimization:
+Tesla's Fleet API is **pay-per-use** — every request returning a status code below 500 is billable, including 4xx errors like "vehicle asleep" (408) and rate limits (429). Wake requests are the most expensive category and are rate-limited to 3/min. There is no free tier (the $10/month credit is being discontinued).
 
-1. **Disk cache** — API responses are cached as JSON files under `~/.cache/tescmd/` with a configurable TTL (default 60s). Repeated queries within the TTL window return instantly from disk.
-2. **Wake state cache** — Tracks whether the vehicle was recently confirmed online (30s TTL). If the vehicle is known to be awake, the cache skips the wake attempt entirely.
-3. **Wake confirmation** — Before sending a billable wake API call, tescmd prompts for confirmation in interactive mode, or returns a structured error in JSON/piped mode.
+> **Official pricing:** [Tesla Fleet API — Billing and Limits](https://developer.tesla.com/docs/fleet-api/billing-and-limits)
+
+### Why This Matters
+
+A naive script that polls `vehicle_data` every 5 minutes generates **4-5 billable requests per check** (asleep error + wake + poll + data fetch). That's **1,000+ billable requests per day** from a single cron job. At roughly $1 per 500 data requests, monitoring one vehicle costs around $60/month before you even count wake requests (the most expensive tier).
+
+### Cost Example: Battery Check
+
+| | Without tescmd | With tescmd |
+|---|---|---|
+| Vehicle asleep, check battery | 408 error (billable) + wake (billable) + poll (billable) + data (billable) = **4+ requests** | Cache miss → prompt user → user wakes via Tesla app (free) → retry → data (billable) = **1 request** |
+| Check battery again 30s later | Another 4+ requests | **0 requests** (cache hit) |
+| 10 checks in 1 minute | **40+ billable requests** | **1 billable request** + 9 cache hits |
+
+### How tescmd Reduces Costs
+
+tescmd implements three layers of cost protection:
+
+1. **Response cache** — API responses are cached to disk (default 60s TTL). Repeated queries within the window return instantly with zero API calls.
+2. **Wake state cache** — Tracks whether the vehicle was recently confirmed online (30s TTL). Skips redundant wake attempts.
+3. **Wake confirmation prompt** — Prompts before sending billable wake calls in interactive mode. JSON/piped mode returns a structured error with `--wake` guidance.
 
 ```bash
 # First call: hits API, caches response
 tescmd charge status
 
-# Second call within 60s: instant cache hit
+# Second call within 60s: instant cache hit, no API call
 tescmd charge status
 
 # Bypass cache when you need fresh data
@@ -223,6 +250,8 @@ tescmd cache clear --vin VIN     # clear for one vehicle
 
 Write-commands (`charge start`, `climate on`, `security lock`, etc.) automatically invalidate the cache after success so that subsequent reads reflect the new state.
 
+For the full cost breakdown with more examples, savings calculations, and Fleet Telemetry streaming comparison, see [docs/api-costs.md](docs/api-costs.md).
+
 Configure via environment variables:
 
 | Variable | Default | Description |
@@ -230,6 +259,37 @@ Configure via environment variables:
 | `TESLA_CACHE_ENABLED` | `true` | Enable/disable the cache |
 | `TESLA_CACHE_TTL` | `60` | Time-to-live in seconds |
 | `TESLA_CACHE_DIR` | `~/.cache/tescmd` | Cache directory path |
+
+## Key Enrollment & Vehicle Command Protocol
+
+Newer Tesla vehicles require commands to be signed using the [Vehicle Command Protocol](https://github.com/teslamotors/vehicle-command). tescmd handles this transparently:
+
+1. **Generate a key pair** — `tescmd key generate` creates an EC P-256 key pair
+2. **Enroll on vehicle** — `tescmd key enroll <VIN>` sends the public key to the vehicle; approve in the Tesla app
+3. **Commands are signed automatically** — once enrolled, tescmd uses ECDH sessions + HMAC-SHA256 to sign commands via the `signed_command` endpoint
+
+```bash
+# Generate EC key pair
+tescmd key generate
+
+# Enroll on a vehicle (interactive approval via Tesla app)
+tescmd key enroll 5YJ3E1EA1NF000000
+
+# Commands are now signed automatically
+tescmd security lock --wake
+```
+
+The `command_protocol` setting controls routing:
+
+| Value | Behavior |
+|---|---|
+| `auto` (default) | Use signed path when keys are enrolled; fall back to unsigned |
+| `signed` | Require signed commands (error if no keys) |
+| `unsigned` | Force legacy REST path (skip signing) |
+
+Set via `TESLA_COMMAND_PROTOCOL` environment variable or in your config.
+
+See [docs/vehicle-command-protocol.md](docs/vehicle-command-protocol.md) for the full protocol architecture.
 
 ## Agent Integration
 
@@ -242,6 +302,7 @@ tescmd is designed for use by AI agents and automation platforms. Agents like [C
 - **Cache-aware** — repeated queries from an agent within the TTL window cost nothing
 - **Meaningful exit codes** — agents can branch on success/failure without parsing output
 - **Stateless invocations** — each command is self-contained; no session state to manage
+- **Signed commands** — when keys are enrolled, commands are signed transparently; no agent-side crypto needed
 
 **Example agent workflow:**
 

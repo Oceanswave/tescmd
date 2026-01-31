@@ -22,7 +22,13 @@ media_group = click.Group("media", help="Media playback commands")
 def play_pause_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Toggle media playback."""
     run_async(
-        execute_command(app_ctx, vin_positional, "media_toggle_playback", "media.play-pause")
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "media_toggle_playback",
+            "media.play-pause",
+            success_message="Media playback toggled.",
+        )
     )
 
 
@@ -31,7 +37,15 @@ def play_pause_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 @global_options
 def next_track_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Skip to next track."""
-    run_async(execute_command(app_ctx, vin_positional, "media_next_track", "media.next-track"))
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "media_next_track",
+            "media.next-track",
+            success_message="Skipped to next track.",
+        )
+    )
 
 
 @media_group.command("prev-track")
@@ -39,7 +53,15 @@ def next_track_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 @global_options
 def prev_track_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Skip to previous track."""
-    run_async(execute_command(app_ctx, vin_positional, "media_prev_track", "media.prev-track"))
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "media_prev_track",
+            "media.prev-track",
+            success_message="Skipped to previous track.",
+        )
+    )
 
 
 @media_group.command("next-fav")
@@ -47,7 +69,15 @@ def prev_track_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 @global_options
 def next_fav_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Skip to next favourite."""
-    run_async(execute_command(app_ctx, vin_positional, "media_next_fav", "media.next-fav"))
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "media_next_fav",
+            "media.next-fav",
+            success_message="Skipped to next favorite.",
+        )
+    )
 
 
 @media_group.command("prev-fav")
@@ -55,7 +85,15 @@ def next_fav_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 @global_options
 def prev_fav_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Skip to previous favourite."""
-    run_async(execute_command(app_ctx, vin_positional, "media_prev_fav", "media.prev-fav"))
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "media_prev_fav",
+            "media.prev-fav",
+            success_message="Skipped to previous favorite.",
+        )
+    )
 
 
 @media_group.command("volume-up")
@@ -63,7 +101,15 @@ def prev_fav_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 @global_options
 def volume_up_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Increase volume by one step."""
-    run_async(execute_command(app_ctx, vin_positional, "media_volume_up", "media.volume-up"))
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "media_volume_up",
+            "media.volume-up",
+            success_message="Volume increased.",
+        )
+    )
 
 
 @media_group.command("volume-down")
@@ -71,7 +117,15 @@ def volume_up_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 @global_options
 def volume_down_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     """Decrease volume by one step."""
-    run_async(execute_command(app_ctx, vin_positional, "media_volume_down", "media.volume-down"))
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "media_volume_down",
+            "media.volume-down",
+            success_message="Volume decreased.",
+        )
+    )
 
 
 @media_group.command("adjust-volume")
@@ -87,5 +141,6 @@ def adjust_volume_cmd(app_ctx: AppContext, vin_positional: str | None, volume: i
             "adjust_volume",
             "media.adjust-volume",
             body={"volume": volume},
+            success_message=f"Volume set to {volume}.",
         )
     )

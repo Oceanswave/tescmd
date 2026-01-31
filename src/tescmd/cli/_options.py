@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import logging
 from typing import TYPE_CHECKING, Any
 
 import click
@@ -92,6 +93,10 @@ def global_options(f: Any) -> Any:
             app_ctx.region = local_region
         if local_verbose:
             app_ctx.verbose = True
+            logging.basicConfig(
+                level=logging.DEBUG,
+                format="%(name)s %(levelname)s: %(message)s",
+            )
         if local_no_cache:
             app_ctx.no_cache = True
         if local_wake:
