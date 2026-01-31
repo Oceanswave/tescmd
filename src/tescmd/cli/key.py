@@ -25,6 +25,7 @@ from tescmd.models.config import AppSettings
 
 if TYPE_CHECKING:
     from tescmd.cli.main import AppContext
+    from tescmd.output.formatter import OutputFormatter
 
 
 # ---------------------------------------------------------------------------
@@ -95,22 +96,19 @@ async def _cmd_generate(app_ctx: AppContext, force: bool) -> None:
     default=None,
     help="GitHub repo (e.g. user/user.github.io). Auto-detected if omitted.",
 )
+@click.option(
+    "--method",
+    type=click.Choice(["auto", "github", "tailscale"]),
+    default="auto",
+    help="Deployment method (default: auto-detect).",
+)
 @global_options
-def deploy_cmd(app_ctx: AppContext, repo: str | None) -> None:
-    """Deploy the public key to GitHub Pages."""
-    run_async(_cmd_deploy(app_ctx, repo))
+def deploy_cmd(app_ctx: AppContext, repo: str | None, method: str) -> None:
+    """Deploy the public key to GitHub Pages or via Tailscale Funnel."""
+    run_async(_cmd_deploy(app_ctx, repo, method=method))
 
 
-async def _cmd_deploy(app_ctx: AppContext, repo: str | None) -> None:
-    from tescmd.deploy.github_pages import (
-        create_pages_repo,
-        deploy_public_key,
-        get_gh_username,
-        get_pages_domain,
-        is_gh_authenticated,
-        is_gh_available,
-    )
-
+async def _cmd_deploy(app_ctx: AppContext, repo: str | None, *, method: str = "auto") -> None:
     formatter = app_ctx.formatter
     settings = AppSettings()
     key_dir = Path(settings.config_dir).expanduser() / "keys"
@@ -126,6 +124,144 @@ async def _cmd_deploy(app_ctx: AppContext, repo: str | None) -> None:
         else:
             formatter.rich.error("No key pair found. Run [cyan]tescmd key generate[/cyan] first.")
         return
+
+    # Resolve method
+    resolved = _resolve_deploy_method(method, settings)
+
+    if resolved == "tailscale":
+        await _cmd_deploy_tailscale(formatter, key_dir)
+    elif resolved == "github":
+        await _cmd_deploy_github(formatter, settings, key_dir, repo)
+    else:
+        if formatter.format == "json":
+            formatter.output_error(
+                code="no_deploy_method",
+                message=(
+                    "No deployment method available. Install 'gh' CLI for GitHub Pages"
+                    " or Tailscale for Funnel hosting."
+                ),
+                command="key.deploy",
+            )
+        else:
+            formatter.rich.error(
+                "No deployment method available. Install [cyan]gh[/cyan] CLI"
+                " (GitHub Pages) or [cyan]tailscale[/cyan] (Funnel hosting)."
+            )
+
+
+def _resolve_deploy_method(method: str, settings: AppSettings) -> str | None:
+    """Resolve 'auto' to a concrete method, or validate explicit choice."""
+    if method == "tailscale":
+        return "tailscale"
+    if method == "github":
+        return "github"
+
+    # Auto-detect: GitHub Pages first, then Tailscale
+    from tescmd.deploy.github_pages import is_gh_authenticated, is_gh_available
+
+    if is_gh_available() and is_gh_authenticated():
+        return "github"
+
+    from tescmd.deploy.tailscale_serve import is_tailscale_serve_ready
+
+    if run_async(is_tailscale_serve_ready()):
+        return "tailscale"
+
+    # Check saved hosting method as last resort
+    if settings.hosting_method == "tailscale":
+        return "tailscale"
+    if settings.hosting_method == "github":
+        return "github"
+
+    return None
+
+
+async def _cmd_deploy_tailscale(
+    formatter: OutputFormatter,
+    key_dir: Path,
+) -> None:
+    """Deploy public key via Tailscale Funnel."""
+    from tescmd.deploy.tailscale_serve import (
+        deploy_public_key_tailscale,
+        get_key_url,
+        is_tailscale_serve_ready,
+        start_key_serving,
+        wait_for_tailscale_deployment,
+    )
+
+    # Verify Tailscale is ready
+    if not await is_tailscale_serve_ready():
+        if formatter.format == "json":
+            formatter.output_error(
+                code="tailscale_not_ready",
+                message=(
+                    "Tailscale is not available or Funnel is not enabled."
+                    " Ensure Tailscale is running and Funnel is enabled in your tailnet ACL."
+                ),
+                command="key.deploy",
+            )
+        else:
+            formatter.rich.error(
+                "Tailscale is not available or Funnel is not enabled.\n"
+                "  Ensure Tailscale is running and Funnel is enabled in your tailnet ACL."
+            )
+        return
+
+    if formatter.format != "json":
+        formatter.rich.info("Deploying public key via Tailscale Funnel...")
+
+    pem = load_public_key_pem(key_dir)
+    await deploy_public_key_tailscale(pem)
+    hostname = await start_key_serving()
+
+    url = get_key_url(hostname)
+    if formatter.format != "json":
+        formatter.rich.info("[green]Tailscale serve + Funnel started.[/green]")
+        formatter.rich.info(f"  URL: {url}")
+        formatter.rich.info("")
+        formatter.rich.info("Waiting for key to become accessible...")
+
+    deployed = await wait_for_tailscale_deployment(hostname)
+
+    if formatter.format == "json":
+        formatter.output(
+            {
+                "status": "deployed" if deployed else "pending",
+                "method": "tailscale",
+                "hostname": hostname,
+                "url": url,
+                "accessible": deployed,
+            },
+            command="key.deploy",
+        )
+    elif deployed:
+        formatter.rich.info("[green]Key is live and accessible.[/green]")
+        formatter.rich.info("")
+        formatter.rich.info(
+            "[yellow]Note:[/yellow] The key is served by the Tailscale daemon."
+            " If your machine is off or Tailscale stops,"
+            " Tesla cannot reach your public key."
+        )
+    else:
+        formatter.rich.info("[yellow]Key deployed but not yet accessible.[/yellow]")
+        formatter.rich.info("  Run [cyan]tescmd key validate[/cyan] to check again later.")
+
+
+async def _cmd_deploy_github(
+    formatter: OutputFormatter,
+    settings: AppSettings,
+    key_dir: Path,
+    repo: str | None,
+) -> None:
+    """Deploy public key via GitHub Pages."""
+    from tescmd.deploy.github_pages import (
+        create_pages_repo,
+        deploy_public_key,
+        get_gh_username,
+        get_pages_domain,
+        is_gh_authenticated,
+        is_gh_available,
+    )
 
     # Check gh CLI
     if not is_gh_available():
@@ -180,7 +316,7 @@ async def _cmd_deploy(app_ctx: AppContext, repo: str | None) -> None:
         formatter.rich.info("[green]Key deployed.[/green]")
         formatter.rich.info(f"  URL: {get_key_url(domain)}")
         formatter.rich.info("")
-        formatter.rich.info("Waiting for GitHub Pages to publish (this may take a few minutes)...")
+        formatter.rich.info("Waiting for GitHub Pages to publish...")
 
     deployed = wait_for_pages_deployment(domain)
 
@@ -188,6 +324,7 @@ async def _cmd_deploy(app_ctx: AppContext, repo: str | None) -> None:
         formatter.output(
             {
                 "status": "deployed" if deployed else "pending",
+                "method": "github",
                 "repo": repo_name,
                 "domain": domain,
                 "url": get_key_url(domain),

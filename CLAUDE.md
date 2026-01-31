@@ -4,7 +4,7 @@
 
 **tescmd** is a Python CLI application that queries data from and sends commands to Tesla vehicles via the [Tesla Fleet API](https://developer.tesla.com/docs/fleet-api). The current implementation covers OAuth2 authentication, key management, vehicle state queries (battery, location, climate, drive state, tire pressure, trunks, and more), and both human-friendly (Rich TUI) and machine-friendly (JSON) output with configurable display units.
 
-**Current scope:** auth, vehicle queries, vehicle commands (charge, climate, security, trunk, media, nav, software), energy product management (including telemetry), Supercharger charging history and invoices, user account info, vehicle sharing, partner account endpoints (public key, fleet telemetry errors), key management with enrollment and unenrollment, Vehicle Command Protocol (ECDH sessions + HMAC-signed protobuf commands), tier enforcement, initial setup, response caching with cost-aware wake confirmation, Fleet Telemetry configuration management (create/delete/errors), configuration status dashboard, and GitHub Pages key deployment.
+**Current scope:** auth, vehicle queries, vehicle commands (charge, climate, security, trunk, media, nav, software), energy product management (including telemetry), Supercharger charging history and invoices, user account info, vehicle sharing, partner account endpoints (public key, fleet telemetry errors), key management with enrollment and unenrollment, Vehicle Command Protocol (ECDH sessions + HMAC-signed protobuf commands), tier enforcement, initial setup, response caching with cost-aware wake confirmation, Fleet Telemetry configuration management (create/delete/errors), real-time telemetry streaming via Tailscale Funnel, configuration status dashboard, key deployment via GitHub Pages or Tailscale Funnel (auto-detected priority chain).
 
 ## Tech Stack
 
@@ -17,6 +17,7 @@
 - **protobuf** — protobuf serialization for Vehicle Command Protocol messages
 - **keyring** — OS-level credential storage for tokens
 - **python-dotenv** — `.env` file loading
+- **websockets** — async WebSocket server for telemetry streaming (optional: `[telemetry]`)
 - **bleak** — BLE communication for key enrollment (optional; portal enrollment is primary)
 
 ## Project Structure
@@ -38,7 +39,7 @@ src/tescmd/
 │   ├── security.py        # security status, lock, auto-secure, unlock, sentry, valet, valet-reset, remote-start, flash, honk, boombox, pin-to-drive, pin-reset, pin-clear-admin, speed-limit, speed-clear, speed-clear-admin, guest-mode, erase-data
 │   ├── status.py          # status (show config, auth, and cache status)
 │   ├── trunk.py           # trunk open, close, frunk, window, sunroof, tonneau-open/close/stop
-│   ├── vehicle.py         # vehicle list, get, info, data, location, wake, rename, mobile-access, nearby-chargers, alerts, release-notes, service, drivers, calendar, subscriptions, upgrades, options, specs, warranty, fleet-status, low-power, accessory-power; telemetry subgroup: config, create, delete, errors
+│   ├── vehicle.py         # vehicle list, get, info, data, location, wake, rename, mobile-access, nearby-chargers, alerts, release-notes, service, drivers, calendar, subscriptions, upgrades, options, specs, warranty, fleet-status, low-power, accessory-power; telemetry subgroup: config, create, delete, errors, stream
 │   ├── media.py           # media play-pause, next/prev track, next/prev fav, volume
 │   ├── nav.py             # nav send, gps, supercharger, homelink, waypoints
 │   ├── partner.py         # partner public-key, telemetry-error-vins, telemetry-errors
@@ -60,7 +61,7 @@ src/tescmd/
 │   ├── partner.py         # PartnerAPI (public key, fleet telemetry errors — requires partner token)
 │   ├── sharing.py         # SharingAPI (driver and invite management)
 │   ├── user.py            # UserAPI (account info, region, orders, features)
-│   └── errors.py          # API error types (incl. TierError, SessionError, KeyNotEnrolledError)
+│   └── errors.py          # API error types (incl. TierError, SessionError, KeyNotEnrolledError, TailscaleError)
 ├── cache/                 # Response caching
 │   ├── __init__.py        # Re-exports ResponseCache, generic_cache_key
 │   ├── response_cache.py  # ResponseCache (file-based JSON with TTL, generic cache)
@@ -99,11 +100,19 @@ src/tescmd/
 │   ├── formatter.py       # OutputFormatter (auto-detect TTY vs pipe)
 │   ├── rich_output.py     # Rich tables, panels, status displays, DisplayUnits
 │   └── json_output.py     # Structured JSON output
+├── telemetry/             # Fleet Telemetry streaming
+│   ├── __init__.py        # Re-exports
+│   ├── tailscale.py       # TailscaleManager: check presence, start/stop funnel, get cert, serve/funnel for key hosting
+│   ├── server.py          # TelemetryServer: async WebSocket server
+│   ├── decoder.py         # TelemetryDecoder: protobuf to TelemetryFrame dataclass
+│   ├── fields.py          # Field name registry (120+ fields) and preset configs
+│   └── dashboard.py       # TelemetryDashboard: Rich Live TUI renderer
 ├── ble/                   # BLE communication (stub — enrollment not yet wired)
 │   └── __init__.py
 ├── deploy/                # Key deployment helpers
 │   ├── __init__.py
-│   └── github_pages.py    # GitHub Pages deployment for public key hosting
+│   ├── github_pages.py    # GitHub Pages deployment for public key hosting
+│   └── tailscale_serve.py # Tailscale Funnel deployment for public key hosting
 ├── config/                # Configuration (stub — settings in models/config.py)
 │   └── __init__.py
 └── _internal/             # Shared utilities
@@ -117,6 +126,15 @@ spec/
 
 scripts/
 └── validate_fleet_api.py      # Spec-driven API coverage validator (AST-based)
+
+tests/telemetry/
+├── conftest.py            # Shared fixtures (cli_env)
+├── test_tailscale.py      # Mocked subprocess tests for TailscaleManager
+├── test_decoder.py        # Protobuf decode with crafted bytes
+├── test_fields.py         # Field registry and preset resolution
+├── test_server.py         # WebSocket client integration tests
+├── test_dashboard.py      # Rich Live render output verification
+└── test_stream_cmd.py     # CLI integration tests for stream command
 ```
 
 ### Key Models (`models/vehicle.py`)
@@ -308,6 +326,8 @@ The `[R] Retry` option allows users to wake the vehicle for free via the Tesla m
 16. **Key enrollment** — `tescmd key enroll <VIN>` sends the public key to the vehicle via the unsigned `add_key_request` endpoint, then guides the user through Tesla app approval with an interactive prompt or `--wait` auto-polling.
 17. **Cross-platform token storage** — `TokenStore` uses a `_TokenBackend` protocol with two implementations: `_KeyringBackend` (OS keyring) and `_FileBackend` (JSON file with atomic writes and restricted permissions). Backend selection: explicit `TESLA_TOKEN_FILE` → file; keyring probe success → keyring; probe failure → file fallback at `{config_dir}/tokens.json` with one-time warning.
 18. **Cross-platform file permissions** — `_internal/permissions.py` provides `secure_file()` which uses `chmod 0600` on Unix and `icacls` on Windows. Used by both token storage and key generation. Failures are silently ignored (Docker volumes, network mounts, etc.).
+19. **Fleet Telemetry streaming** — `tescmd vehicle telemetry stream [VIN]` starts a local WebSocket server, exposes it via Tailscale Funnel (TLS-terminating reverse proxy), configures the vehicle's fleet telemetry config to push to it, and displays data in a Rich Live dashboard (TTY) or JSONL stream (piped). The `telemetry/` package has five modules: `TailscaleManager` (subprocess-based — Funnel has no Python API), `TelemetryServer` (websockets async server on `0.0.0.0`), `TelemetryDecoder` (reuses `protocol/protobuf/messages._decode_field` for wire-format parsing), `fields.py` (120+ field name registry with presets), and `TelemetryDashboard` (Rich Live TUI with unit conversion via `DisplayUnits`). Port is randomly selected from ephemeral range (49152–65535). Cleanup is guaranteed via try/finally (telemetry config delete → funnel stop → server stop). Optional dependency: `pip install tescmd[telemetry]` adds `websockets>=14.0`.
+20. **Key hosting priority chain** — `tescmd setup` and `tescmd key deploy` auto-detect the best hosting method for the public key: GitHub Pages (always-on, free) → Tailscale Funnel (requires machine running) → manual. The `--method` flag on `key deploy` overrides auto-detection. `TESLA_HOSTING_METHOD` persists the choice. Tailscale key hosting uses path-based `tailscale serve --bg --set-path /.well-known/ <dir>` + `tailscale funnel --bg 443`. Note: Tailscale key hosting may conflict with telemetry streaming's funnel usage — run `tescmd key deploy --method tailscale` to re-enable after streaming.
 
 ## Environment Variables
 
@@ -333,6 +353,7 @@ The `[R] Retry` option allows users to wake the vehicle for free via the Tesla m
 | `TESLA_DOMAIN` | Domain for Fleet API key hosting | — |
 | `TESLA_SETUP_TIER` | Setup tier (`readonly` or `full`) | — |
 | `TESLA_GITHUB_REPO` | GitHub repo for key deployment (e.g., `user/user.github.io`) | — |
+| `TESLA_HOSTING_METHOD` | Key hosting method (`github`, `tailscale`, or unset for manual) | — |
 
 All variables can also be set in a `.env` file in the working directory or `$TESLA_CONFIG_DIR/.env`.
 
@@ -398,4 +419,12 @@ tescmd cache clear --scope account  # Clear account-level entries
 tescmd charge status             # Uses cache, prompts before wake
 tescmd charge status --fresh     # Bypasses cache, still prompts before wake
 tescmd charge status --wake      # Auto-wakes without prompting (billable)
+
+# Telemetry streaming (requires: pip install tescmd[telemetry] + Tailscale)
+tescmd vehicle telemetry stream VIN                     # Rich Live dashboard
+tescmd vehicle telemetry stream VIN --fields driving    # Driving preset
+tescmd vehicle telemetry stream VIN --fields charging   # Charging preset
+tescmd vehicle telemetry stream VIN --interval 5        # Override all field intervals to 5s
+tescmd vehicle telemetry stream VIN --format json       # JSONL output for scripting
+pytest tests/telemetry/                                 # Telemetry-specific tests
 ```

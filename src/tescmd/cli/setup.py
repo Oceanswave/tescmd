@@ -197,7 +197,7 @@ def _developer_portal_setup(
 
 
 def _domain_setup(formatter: OutputFormatter, settings: AppSettings) -> str:
-    """Set up a domain via GitHub Pages or manual entry."""
+    """Set up a domain via GitHub Pages, Tailscale Funnel, or manual entry."""
     info = formatter.rich.info
 
     if settings.domain:
@@ -207,20 +207,28 @@ def _domain_setup(formatter: OutputFormatter, settings: AppSettings) -> str:
 
     info("[bold]Phase 1: Domain Setup[/bold]")
     info("")
-    info(
-        "Tesla requires a registered domain for Fleet API access."
-        " The easiest approach is a free GitHub Pages site."
-    )
+    info("Tesla requires a registered domain for Fleet API access.")
     info("")
 
-    # Try automated GitHub Pages setup
+    # Priority 1: GitHub Pages (always-on hosting)
     from tescmd.deploy.github_pages import is_gh_authenticated, is_gh_available
 
     if is_gh_available() and is_gh_authenticated():
         return _automated_domain_setup(formatter, settings)
 
-    # Fall back to manual domain entry
+    # Priority 2: Tailscale Funnel (requires local machine running)
+    if run_async(_is_tailscale_ready()):
+        return _tailscale_domain_setup(formatter, settings)
+
+    # Priority 3: Manual
     return _manual_domain_setup(formatter)
+
+
+async def _is_tailscale_ready() -> bool:
+    """Wrapper to check Tailscale readiness without raising."""
+    from tescmd.deploy.tailscale_serve import is_tailscale_serve_ready
+
+    return await is_tailscale_serve_ready()
 
 
 def _automated_domain_setup(formatter: OutputFormatter, settings: AppSettings) -> str:
@@ -266,6 +274,51 @@ def _automated_domain_setup(formatter: OutputFormatter, settings: AppSettings) -
     return domain
 
 
+def _tailscale_domain_setup(formatter: OutputFormatter, settings: AppSettings) -> str:
+    """Offer to use Tailscale Funnel for key hosting."""
+    info = formatter.rich.info
+
+    from tescmd.telemetry.tailscale import TailscaleManager
+
+    hostname: str = run_async(TailscaleManager().get_hostname())
+
+    info("Tailscale detected. Your key would be hosted at:")
+    info(f"  [cyan]https://{hostname}/{_WELL_KNOWN_PATH}[/cyan]")
+    info("")
+    info("[yellow]Important:[/yellow] Tailscale Funnel requires your machine to be running.")
+    info("If your machine is off or Tailscale stops, Tesla cannot reach your")
+    info("public key. This is fine for development and testing.")
+    info("For always-on hosting, use GitHub Pages instead (install gh CLI).")
+    info("")
+
+    try:
+        answer = input(f"Use {hostname} as your domain? [Y/n] ").strip()
+    except (EOFError, KeyboardInterrupt):
+        info("")
+        return ""
+
+    if answer.lower() == "n":
+        return _manual_domain_setup(formatter)
+
+    domain = hostname
+
+    # Persist domain and hosting method to .env
+    from tescmd.cli.auth import _write_env_value
+
+    _write_env_value("TESLA_DOMAIN", domain)
+    _write_env_value("TESLA_HOSTING_METHOD", "tailscale")
+
+    info(f"[green]Domain configured: {domain}[/green]")
+    info("[green]Hosting method: Tailscale Funnel[/green]")
+    info("")
+
+    return domain
+
+
+# Well-known path constant (shared with deploy modules)
+_WELL_KNOWN_PATH = ".well-known/appspecific/com.tesla.3p.public-key.pem"
+
+
 def _manual_domain_setup(formatter: OutputFormatter) -> str:
     """Prompt for a domain manually."""
     from tescmd.cli.auth import _prompt_for_domain
@@ -279,7 +332,7 @@ def _manual_domain_setup(formatter: OutputFormatter) -> str:
 
 
 def _key_setup(formatter: OutputFormatter, settings: AppSettings, domain: str) -> None:
-    """Generate keys and deploy to GitHub Pages (full tier only)."""
+    """Generate keys and deploy via the configured hosting method (full tier only)."""
     info = formatter.rich.info
 
     info("[bold]Phase 3: EC Key Generation & Deployment[/bold]")
@@ -291,7 +344,6 @@ def _key_setup(formatter: OutputFormatter, settings: AppSettings, domain: str) -
         generate_ec_key_pair,
         get_key_fingerprint,
         has_key_pair,
-        load_public_key_pem,
     )
 
     # Generate keys if needed
@@ -305,7 +357,69 @@ def _key_setup(formatter: OutputFormatter, settings: AppSettings, domain: str) -
 
     info("")
 
-    # Deploy key via GitHub Pages if gh is available
+    # Branch on hosting method
+    hosting = settings.hosting_method
+
+    if hosting == "tailscale":
+        _deploy_key_tailscale(formatter, settings, key_dir, domain)
+    else:
+        _deploy_key_github(formatter, settings, key_dir, domain)
+
+
+def _deploy_key_tailscale(
+    formatter: OutputFormatter,
+    settings: AppSettings,
+    key_dir: Path,
+    domain: str,
+) -> None:
+    """Deploy key via Tailscale Funnel."""
+    info = formatter.rich.info
+
+    from tescmd.crypto.keys import load_public_key_pem
+    from tescmd.deploy.tailscale_serve import (
+        deploy_public_key_tailscale,
+        get_key_url,
+        start_key_serving,
+        validate_tailscale_key_url,
+        wait_for_tailscale_deployment,
+    )
+
+    # Check if key is already deployed
+    if run_async(validate_tailscale_key_url(domain)):
+        info(f"Public key: [green]already accessible[/green] at {get_key_url(domain)}")
+        info("")
+        return
+
+    info("Deploying public key via Tailscale Funnel...")
+    pem = load_public_key_pem(key_dir)
+    run_async(deploy_public_key_tailscale(pem))
+    run_async(start_key_serving())
+
+    info("[green]Tailscale serve + Funnel started.[/green]")
+    info("Waiting for key to become accessible...")
+
+    deployed = run_async(wait_for_tailscale_deployment(domain))
+    if deployed:
+        info(f"[green]Key is live at:[/green] {get_key_url(domain)}")
+    else:
+        info(
+            "[yellow]Key deployed but not yet accessible."
+            " Tailscale Funnel may still be propagating.[/yellow]"
+        )
+        info("  Run [cyan]tescmd key validate[/cyan] to check later.")
+    info("")
+
+
+def _deploy_key_github(
+    formatter: OutputFormatter,
+    settings: AppSettings,
+    key_dir: Path,
+    domain: str,
+) -> None:
+    """Deploy key via GitHub Pages."""
+    info = formatter.rich.info
+
+    from tescmd.crypto.keys import load_public_key_pem
     from tescmd.deploy.github_pages import (
         deploy_public_key,
         get_key_url,
@@ -367,7 +481,6 @@ async def _enrollment_step(
     import webbrowser
 
     from tescmd.crypto.keys import get_key_fingerprint, has_key_pair
-    from tescmd.deploy.github_pages import get_key_url, validate_key_url
 
     info = formatter.rich.info
     key_dir = Path(settings.config_dir).expanduser() / "keys"
@@ -388,9 +501,21 @@ async def _enrollment_step(
     info("  must also be enrolled via the Tesla app.")
     info("")
 
-    # Verify the public key is accessible
-    key_url = get_key_url(domain)
-    key_accessible = validate_key_url(domain)
+    # Verify the public key is accessible (method-aware)
+    if settings.hosting_method == "tailscale":
+        from tescmd.deploy.tailscale_serve import get_key_url
+        from tescmd.deploy.tailscale_serve import (
+            validate_tailscale_key_url as _validate,
+        )
+
+        key_url = get_key_url(domain)
+        key_accessible = await _validate(domain)
+    else:
+        from tescmd.deploy.github_pages import get_key_url as gh_get_key_url
+        from tescmd.deploy.github_pages import validate_key_url
+
+        key_url = gh_get_key_url(domain)
+        key_accessible = validate_key_url(domain)
     if not key_accessible:
         info(f"  [yellow]Public key not accessible at {key_url}[/yellow]")
         info("  Enrollment requires the key to be live. Skipping for now.")
@@ -509,16 +634,30 @@ def _precheck_public_key(
     """
     info = formatter.rich.info
 
-    from tescmd.deploy.github_pages import get_key_url, validate_key_url
-
     info("Checking public key availability...")
 
-    if validate_key_url(domain):
-        info(f"  Public key: [green]accessible[/green] at {get_key_url(domain)}")
+    # Check accessibility via the appropriate method
+    if settings.hosting_method == "tailscale":
+        from tescmd.deploy.tailscale_serve import (
+            get_key_url,
+            validate_tailscale_key_url,
+        )
+
+        key_url = get_key_url(domain)
+        accessible = run_async(validate_tailscale_key_url(domain))
+    else:
+        from tescmd.deploy.github_pages import get_key_url as gh_get_key_url
+        from tescmd.deploy.github_pages import validate_key_url
+
+        key_url = gh_get_key_url(domain)
+        accessible = validate_key_url(domain)
+
+    if accessible:
+        info(f"  Public key: [green]accessible[/green] at {key_url}")
         info("")
         return True
 
-    info(f"  Public key: [yellow]not found[/yellow] at {get_key_url(domain)}")
+    info(f"  Public key: [yellow]not found[/yellow] at {key_url}")
     info("")
     info("  Tesla requires your public key to be accessible before registration will succeed.")
     info("")
@@ -543,7 +682,7 @@ def _auto_deploy_key(
     settings: AppSettings,
     domain: str,
 ) -> bool:
-    """Generate a key pair (if needed), deploy to GitHub Pages, and wait.
+    """Generate a key pair (if needed), deploy via configured method, and wait.
 
     Returns True when the key is confirmed accessible, False otherwise.
     """
@@ -554,7 +693,6 @@ def _auto_deploy_key(
         generate_ec_key_pair,
         get_key_fingerprint,
         has_key_pair,
-        load_public_key_pem,
     )
 
     # 1. Generate keys if needed
@@ -566,7 +704,63 @@ def _auto_deploy_key(
         info(f"[green]Key pair generated.[/green] Fingerprint: {get_key_fingerprint(key_dir)}")
     info("")
 
-    # 2. Deploy to GitHub Pages
+    # 2. Deploy via the appropriate method
+    if settings.hosting_method == "tailscale":
+        return _auto_deploy_key_tailscale(info, key_dir, domain)
+    return _auto_deploy_key_github(info, settings, key_dir, domain)
+
+
+def _auto_deploy_key_tailscale(
+    info: _InfoFn,
+    key_dir: Path,
+    domain: str,
+) -> bool:
+    """Deploy key via Tailscale Funnel and wait."""
+    from tescmd.crypto.keys import load_public_key_pem
+    from tescmd.deploy.tailscale_serve import (
+        deploy_public_key_tailscale,
+        get_key_url,
+        start_key_serving,
+        validate_tailscale_key_url,
+        wait_for_tailscale_deployment,
+    )
+
+    # Already deployed?
+    if run_async(validate_tailscale_key_url(domain)):
+        info(f"Public key: [green]already accessible[/green] at {get_key_url(domain)}")
+        info("")
+        return True
+
+    info("Deploying public key via Tailscale Funnel...")
+    pem = load_public_key_pem(key_dir)
+    run_async(deploy_public_key_tailscale(pem))
+    run_async(start_key_serving())
+
+    info("[green]Tailscale serve + Funnel started.[/green]")
+    info("Waiting for key to become accessible...")
+
+    deployed = run_async(wait_for_tailscale_deployment(domain))
+    if deployed:
+        info(f"[green]Key is live at:[/green] {get_key_url(domain)}")
+        info("")
+        return True
+
+    info("[yellow]Key deployed but not yet accessible.[/yellow]")
+    info(
+        "  Run [cyan]tescmd key validate[/cyan] to check, then [cyan]tescmd auth register[/cyan]."
+    )
+    info("")
+    return False
+
+
+def _auto_deploy_key_github(
+    info: _InfoFn,
+    settings: AppSettings,
+    key_dir: Path,
+    domain: str,
+) -> bool:
+    """Deploy key via GitHub Pages and wait."""
+    from tescmd.crypto.keys import load_public_key_pem
     from tescmd.deploy.github_pages import (
         deploy_public_key,
         get_key_url,

@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import os
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from tescmd.cli.key import _cmd_deploy, _cmd_generate, _cmd_show, _cmd_validate
+from tescmd.cli.key import (
+    _cmd_deploy,
+    _cmd_generate,
+    _cmd_show,
+    _cmd_validate,
+    _resolve_deploy_method,
+)
 from tescmd.cli.main import AppContext
 
 if TYPE_CHECKING:
@@ -233,7 +239,7 @@ class TestCmdDeploy:
         monkeypatch.setenv("TESLA_CONFIG_DIR", str(tmp_path))
 
         app_ctx = _make_app_ctx("rich")
-        await _cmd_deploy(app_ctx, repo=None)
+        await _cmd_deploy(app_ctx, repo=None, method="auto")
 
         app_ctx.formatter.rich.error.assert_called()
 
@@ -248,8 +254,166 @@ class TestCmdDeploy:
 
         generate_ec_key_pair(tmp_path / "keys")
 
-        with patch("tescmd.deploy.github_pages.shutil.which", return_value=None):
+        with (
+            patch("tescmd.deploy.github_pages.shutil.which", return_value=None),
+            patch("tescmd.cli.key._resolve_deploy_method", return_value="github"),
+        ):
             app_ctx = _make_app_ctx("rich")
-            await _cmd_deploy(app_ctx, repo=None)
+            await _cmd_deploy(app_ctx, repo=None, method="github")
+
+        app_ctx.formatter.rich.error.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# Deploy method resolution
+# ---------------------------------------------------------------------------
+
+
+class TestResolveDeployMethod:
+    def test_explicit_github(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        assert _resolve_deploy_method("github", settings) == "github"
+
+    def test_explicit_tailscale(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        assert _resolve_deploy_method("tailscale", settings) == "tailscale"
+
+    def test_auto_prefers_github(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        with (
+            patch("tescmd.deploy.github_pages.is_gh_available", return_value=True),
+            patch("tescmd.deploy.github_pages.is_gh_authenticated", return_value=True),
+        ):
+            assert _resolve_deploy_method("auto", settings) == "github"
+
+    def test_auto_falls_to_tailscale(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        with (
+            patch("tescmd.deploy.github_pages.is_gh_available", return_value=False),
+            patch(
+                "tescmd.deploy.tailscale_serve.is_tailscale_serve_ready",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+        ):
+            assert _resolve_deploy_method("auto", settings) == "tailscale"
+
+    def test_auto_returns_none_when_nothing_available(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        with (
+            patch("tescmd.deploy.github_pages.is_gh_available", return_value=False),
+            patch(
+                "tescmd.deploy.tailscale_serve.is_tailscale_serve_ready",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+        ):
+            assert _resolve_deploy_method("auto", settings) is None
+
+    def test_auto_falls_to_saved_hosting_method(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("TESLA_HOSTING_METHOD", "tailscale")
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        with (
+            patch("tescmd.deploy.github_pages.is_gh_available", return_value=False),
+            patch(
+                "tescmd.deploy.tailscale_serve.is_tailscale_serve_ready",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+        ):
+            assert _resolve_deploy_method("auto", settings) == "tailscale"
+
+
+class TestCmdDeployTailscale:
+    @pytest.mark.asyncio
+    async def test_no_keys_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("TESLA_CONFIG_DIR", str(tmp_path))
+
+        app_ctx = _make_app_ctx("rich")
+        await _cmd_deploy(app_ctx, repo=None, method="tailscale")
+
+        app_ctx.formatter.rich.error.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_tailscale_not_ready(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("TESLA_CONFIG_DIR", str(tmp_path))
+
+        from tescmd.crypto.keys import generate_ec_key_pair
+
+        generate_ec_key_pair(tmp_path / "keys")
+
+        with patch(
+            "tescmd.deploy.tailscale_serve.is_tailscale_serve_ready",
+            new_callable=AsyncMock,
+            return_value=False,
+        ):
+            app_ctx = _make_app_ctx("rich")
+            await _cmd_deploy(app_ctx, repo=None, method="tailscale")
+
+        app_ctx.formatter.rich.error.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_no_deploy_method_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("TESLA_CONFIG_DIR", str(tmp_path))
+
+        from tescmd.crypto.keys import generate_ec_key_pair
+
+        generate_ec_key_pair(tmp_path / "keys")
+
+        with (
+            patch("tescmd.deploy.github_pages.is_gh_available", return_value=False),
+            patch(
+                "tescmd.deploy.tailscale_serve.is_tailscale_serve_ready",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+        ):
+            app_ctx = _make_app_ctx("rich")
+            await _cmd_deploy(app_ctx, repo=None, method="auto")
 
         app_ctx.formatter.rich.error.assert_called()
