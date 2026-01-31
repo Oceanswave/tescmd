@@ -455,8 +455,8 @@ async def _cmd_enroll(
     formatter.rich.info("  3. The Tesla app will show an [bold]Add Virtual Key[/bold] prompt")
     formatter.rich.info("  4. Approve it")
     formatter.rich.info("")
-    formatter.rich.info("  [dim]If the prompt doesn't appear, force-quit the Tesla app,")
-    formatter.rich.info("  go back to your browser, and tap Finish Setup again.[/dim]")
+    formatter.rich.info("  [dim]If the prompt doesn't appear, force-quit the Tesla app,[/dim]")
+    formatter.rich.info("  [dim]go back to your browser, and tap Finish Setup again.[/dim]")
     formatter.rich.info("━" * 55)
     formatter.rich.info("")
 

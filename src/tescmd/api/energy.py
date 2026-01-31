@@ -98,6 +98,29 @@ class EnergyAPI:
         result: dict[str, Any] = data.get("response", {})
         return result
 
+    async def telemetry_history(
+        self,
+        site_id: int,
+        *,
+        kind: str = "charge",
+        start_date: str | None = None,
+        end_date: str | None = None,
+        time_zone: str | None = None,
+    ) -> CalendarHistory:
+        """Fetch telemetry-based charge history for a site."""
+        params: dict[str, str] = {"kind": kind}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+        if time_zone:
+            params["time_zone"] = time_zone
+        data = await self._client.get(
+            f"/api/1/energy_sites/{site_id}/telemetry_history",
+            params=params,
+        )
+        return CalendarHistory.model_validate(data.get("response", {}))
+
     async def calendar_history(
         self,
         site_id: int,

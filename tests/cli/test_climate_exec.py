@@ -198,7 +198,7 @@ class TestClimateSeat:
         assert result.exit_code == 0, result.output
 
         body = _request_body(httpx_mock)
-        assert body["heater"] == 0  # driver -> seat index 0
+        assert body["seat_position"] == 0  # driver -> seat index 0
         assert body["level"] == 3
 
     def test_seat_rear_left_level_2(self, httpx_mock: HTTPXMock, cli_env: dict[str, str]) -> None:
@@ -213,7 +213,7 @@ class TestClimateSeat:
         assert result.exit_code == 0, result.output
 
         body = _request_body(httpx_mock)
-        assert body["heater"] == 2  # rear-left -> seat index 2
+        assert body["seat_position"] == 2  # rear-left -> seat index 2
         assert body["level"] == 2
 
 
@@ -369,7 +369,7 @@ class TestClimateAutoSeat:
 
         body = _request_body(httpx_mock)
         assert body["auto_seat_position"] == 0  # driver -> seat index 0
-        assert body["on"] is True
+        assert body["auto_climate_on"] is True
 
 
 # ---------------------------------------------------------------------------

@@ -109,10 +109,10 @@ class TestClimateCommands:
     ) -> None:
         httpx_mock.add_response(json=_OK_RESPONSE)
         api = CommandAPI(mock_client)
-        await api.remote_seat_heater_request(VIN, heater=0, level=3)
+        await api.remote_seat_heater_request(VIN, seat_position=0, level=3)
 
         body = _body(httpx_mock)
-        assert body["heater"] == 0
+        assert body["seat_position"] == 0
         assert body["level"] == 3
 
     @pytest.mark.asyncio
@@ -289,11 +289,11 @@ class TestClimateNewCommands:
     ) -> None:
         httpx_mock.add_response(json=_OK_RESPONSE)
         api = CommandAPI(mock_client)
-        await api.remote_auto_seat_climate_request(VIN, auto_seat_position=0, on=True)
+        await api.remote_auto_seat_climate_request(VIN, auto_seat_position=0, auto_climate_on=True)
 
         body = _body(httpx_mock)
         assert body["auto_seat_position"] == 0
-        assert body["on"] is True
+        assert body["auto_climate_on"] is True
 
     @pytest.mark.asyncio
     async def test_remote_auto_steering_wheel_heat(
@@ -468,10 +468,10 @@ class TestPowerManagementCommands:
     ) -> None:
         httpx_mock.add_response(json=_OK_RESPONSE)
         api = CommandAPI(mock_client)
-        result = await api.set_low_power_mode(VIN, on=True)
+        result = await api.set_low_power_mode(VIN, enable=True)
 
         assert result.response.result is True
-        assert _body(httpx_mock)["on"] is True
+        assert _body(httpx_mock)["enable"] is True
 
     @pytest.mark.asyncio
     async def test_set_low_power_mode_off(
@@ -479,9 +479,9 @@ class TestPowerManagementCommands:
     ) -> None:
         httpx_mock.add_response(json=_OK_RESPONSE)
         api = CommandAPI(mock_client)
-        await api.set_low_power_mode(VIN, on=False)
+        await api.set_low_power_mode(VIN, enable=False)
 
-        assert _body(httpx_mock)["on"] is False
+        assert _body(httpx_mock)["enable"] is False
 
     @pytest.mark.asyncio
     async def test_keep_accessory_power_mode_on(
@@ -489,10 +489,10 @@ class TestPowerManagementCommands:
     ) -> None:
         httpx_mock.add_response(json=_OK_RESPONSE)
         api = CommandAPI(mock_client)
-        result = await api.keep_accessory_power_mode(VIN, on=True)
+        result = await api.keep_accessory_power_mode(VIN, enable=True)
 
         assert result.response.result is True
-        assert _body(httpx_mock)["on"] is True
+        assert _body(httpx_mock)["enable"] is True
 
     @pytest.mark.asyncio
     async def test_keep_accessory_power_mode_off(
@@ -500,9 +500,9 @@ class TestPowerManagementCommands:
     ) -> None:
         httpx_mock.add_response(json=_OK_RESPONSE)
         api = CommandAPI(mock_client)
-        await api.keep_accessory_power_mode(VIN, on=False)
+        await api.keep_accessory_power_mode(VIN, enable=False)
 
-        assert _body(httpx_mock)["on"] is False
+        assert _body(httpx_mock)["enable"] is False
 
 
 class TestManagedChargingCommand:
@@ -518,3 +518,99 @@ class TestManagedChargingCommand:
         body = _body(httpx_mock)
         assert body["charging_amps"] == 16
         assert "set_managed_charge_current_request" in str(httpx_mock.get_requests()[0].url)
+
+
+class TestNavigationRequest:
+    @pytest.mark.asyncio
+    async def test_navigation_request_sends_correct_body(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        result = await api.navigation_request(
+            VIN, value={"android.intent.extra.TEXT": "123 Main St"}
+        )
+
+        assert result.response.result is True
+        body = _body(httpx_mock)
+        assert body["type"] == "share_ext_content_raw"
+        assert body["locale"] == "en-US"
+        assert "timestamp_ms" in body
+        assert body["value"] == {"android.intent.extra.TEXT": "123 Main St"}
+        request = httpx_mock.get_requests()[0]
+        assert request.url.path == f"/api/1/vehicles/{VIN}/command/navigation_request"
+
+
+class TestManagedChargingExtended:
+    @pytest.mark.asyncio
+    async def test_set_managed_charger_location(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        result = await api.set_managed_charger_location(
+            VIN, location={"lat": 37.77, "lon": -122.42}
+        )
+
+        assert result.response.result is True
+        body = _body(httpx_mock)
+        assert body["lat"] == 37.77
+        assert body["lon"] == -122.42
+        assert "set_managed_charger_location" in str(httpx_mock.get_requests()[0].url)
+
+    @pytest.mark.asyncio
+    async def test_set_managed_scheduled_charging_time(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        result = await api.set_managed_scheduled_charging_time(VIN, time=480)
+
+        assert result.response.result is True
+        assert _body(httpx_mock) == {"time": 480}
+
+
+class TestAdjustVolumeFloat:
+    @pytest.mark.asyncio
+    async def test_adjust_volume_sends_float(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        await api.adjust_volume(VIN, volume=5.5)
+
+        body = _body(httpx_mock)
+        assert body["volume"] == 5.5
+        assert isinstance(body["volume"], float)
+
+
+class TestPreconditioningManualOverride:
+    @pytest.mark.asyncio
+    async def test_set_preconditioning_max_with_manual_override(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        result = await api.set_preconditioning_max(VIN, on=True, manual_override=True)
+
+        assert result.response.result is True
+        body = _body(httpx_mock)
+        assert body["on"] is True
+        assert body["manual_override"] is True
+
+
+class TestClimateKeeperManualOverride:
+    @pytest.mark.asyncio
+    async def test_set_climate_keeper_mode_with_manual_override(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        result = await api.set_climate_keeper_mode(
+            VIN, climate_keeper_mode=2, manual_override=True
+        )
+
+        assert result.response.result is True
+        body = _body(httpx_mock)
+        assert body["climate_keeper_mode"] == 2
+        assert body["manual_override"] is True

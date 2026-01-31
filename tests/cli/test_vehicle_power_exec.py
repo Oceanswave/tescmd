@@ -50,7 +50,7 @@ class TestVehicleLowPower:
         assert parsed["ok"] is True
         assert parsed["command"] == "vehicle.low-power"
         body = _cmd_request(httpx_mock, "set_low_power_mode")
-        assert body["on"] is True
+        assert body["enable"] is True
 
     def test_low_power_off(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
@@ -65,7 +65,7 @@ class TestVehicleLowPower:
         )
         assert result.exit_code == 0
         body = _cmd_request(httpx_mock, "set_low_power_mode")
-        assert body["on"] is False
+        assert body["enable"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +90,7 @@ class TestVehicleAccessoryPower:
         assert parsed["ok"] is True
         assert parsed["command"] == "vehicle.accessory-power"
         body = _cmd_request(httpx_mock, "keep_accessory_power_mode")
-        assert body["on"] is True
+        assert body["enable"] is True
 
     def test_accessory_power_off(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
@@ -105,4 +105,4 @@ class TestVehicleAccessoryPower:
         )
         assert result.exit_code == 0
         body = _cmd_request(httpx_mock, "keep_accessory_power_mode")
-        assert body["on"] is False
+        assert body["enable"] is False

@@ -551,7 +551,10 @@ Control Bioweapon Defense Mode.
 ```bash
 tescmd climate bioweapon --on
 tescmd climate bioweapon --off
+tescmd climate bioweapon --on --manual-override  # force manual override
 ```
+
+**`--manual-override`** — Force manual override of automatic behavior.
 
 ### `climate defrost [VIN]`
 
@@ -824,10 +827,11 @@ tescmd media volume-down
 
 ### `media adjust-volume [VIN] VOLUME`
 
-Set volume to a specific level (0-11).
+Set volume to a specific level (0.0–11.0). Accepts fractional values for fine-grained control.
 
 ```bash
 tescmd media adjust-volume 5
+tescmd media adjust-volume 7.5
 ```
 
 ---
@@ -916,3 +920,273 @@ Cancel a scheduled software update.
 ```bash
 tescmd software cancel
 ```
+
+---
+
+## `energy` — Energy Products
+
+Manage Tesla energy products (Powerwall, Solar, etc.).
+
+### `energy list`
+
+List all energy products on the account.
+
+```bash
+tescmd energy list
+```
+
+### `energy status SITE_ID`
+
+Show energy site status and configuration.
+
+```bash
+tescmd energy status 12345
+```
+
+### `energy live SITE_ID`
+
+Show real-time energy site data (solar production, battery level, grid usage).
+
+```bash
+tescmd energy live 12345
+```
+
+### `energy backup SITE_ID PERCENT`
+
+Set backup reserve percentage (0-100).
+
+```bash
+tescmd energy backup 12345 20
+```
+
+### `energy mode SITE_ID MODE`
+
+Set the operation mode.
+
+```bash
+tescmd energy mode 12345 self_consumption
+tescmd energy mode 12345 autonomous
+```
+
+### `energy storm SITE_ID`
+
+Enable or disable Storm Watch mode.
+
+```bash
+tescmd energy storm 12345 --on
+tescmd energy storm 12345 --off
+```
+
+### `energy tou SITE_ID`
+
+Configure time-of-use schedule.
+
+```bash
+tescmd energy tou 12345 --schedule '{"tou_settings": {...}}'
+```
+
+### `energy history SITE_ID`
+
+View energy charging history.
+
+```bash
+tescmd energy history 12345
+```
+
+### `energy off-grid SITE_ID`
+
+Enable or disable off-grid vehicle charging.
+
+```bash
+tescmd energy off-grid 12345 --on
+tescmd energy off-grid 12345 --off
+```
+
+### `energy grid-config SITE_ID`
+
+Manage grid import/export configuration.
+
+```bash
+tescmd energy grid-config 12345
+```
+
+### `energy calendar SITE_ID`
+
+View calendar-based energy history.
+
+```bash
+tescmd energy calendar 12345
+tescmd energy calendar 12345 --kind power --period month
+```
+
+---
+
+## `user` — User Account
+
+Query user account information.
+
+### `user me`
+
+Display current user account details.
+
+```bash
+tescmd user me
+```
+
+### `user region`
+
+Show the user's assigned API region.
+
+```bash
+tescmd user region
+```
+
+### `user orders`
+
+List vehicle orders on the account.
+
+```bash
+tescmd user orders
+```
+
+### `user features`
+
+Show available feature flags for the account.
+
+```bash
+tescmd user features
+```
+
+---
+
+## `sharing` — Vehicle Sharing
+
+Manage vehicle sharing and driver invitations.
+
+### `sharing add-driver [VIN]`
+
+Add a driver to a vehicle.
+
+```bash
+tescmd sharing add-driver --email driver@example.com
+```
+
+### `sharing remove-driver [VIN]`
+
+Remove a driver from a vehicle.
+
+```bash
+tescmd sharing remove-driver --share-user-id USER_ID
+```
+
+### `sharing create-invite [VIN]`
+
+Create a vehicle sharing invitation.
+
+```bash
+tescmd sharing create-invite
+```
+
+### `sharing redeem-invite`
+
+Redeem a vehicle sharing invitation code.
+
+```bash
+tescmd sharing redeem-invite --code INVITE_CODE
+```
+
+### `sharing revoke-invite [VIN]`
+
+Revoke an existing sharing invitation.
+
+```bash
+tescmd sharing revoke-invite --invite-id INVITE_ID
+```
+
+### `sharing list-invites [VIN]`
+
+List all active sharing invitations.
+
+```bash
+tescmd sharing list-invites
+```
+
+---
+
+## `cache` — Response Cache
+
+Manage the local response cache.
+
+### `cache status`
+
+Show cache statistics (entry count, disk usage, hit rate).
+
+```bash
+tescmd cache status
+```
+
+### `cache clear`
+
+Clear cached responses.
+
+```bash
+tescmd cache clear               # clear all entries
+tescmd cache clear --vin VIN     # clear for a specific vehicle
+```
+
+---
+
+## `raw` — Arbitrary API Access
+
+Access any Fleet API endpoint directly. Use this for endpoints not yet covered by a dedicated command.
+
+### `raw get PATH`
+
+Make a GET request to any Fleet API path.
+
+```bash
+tescmd raw get /api/1/vehicles
+tescmd raw get "/api/1/vehicles/{VIN}/vehicle_data"
+```
+
+### `raw post PATH`
+
+Make a POST request to any Fleet API path with an optional JSON body.
+
+```bash
+tescmd raw post "/api/1/vehicles/{VIN}/command/flash_lights"
+tescmd raw post "/api/1/vehicles/{VIN}/command/set_temps" --body '{"driver_temp": 22}'
+```
+
+---
+
+## API-Only Endpoints
+
+The following endpoints are implemented in the API layer but not yet exposed as dedicated CLI commands. They can be accessed via `tescmd raw get` or `tescmd raw post`.
+
+### Vehicle Endpoints
+
+| Endpoint | API Method | Description |
+|----------|-----------|-------------|
+| `GET /dx/vehicles/subscriptions/eligibility` | `VehicleAPI.eligible_subscriptions()` | Check subscription eligibility |
+| `GET /dx/vehicles/upgrades/eligibility` | `VehicleAPI.eligible_upgrades()` | Check upgrade eligibility |
+| `GET /dx/vehicles/options` | `VehicleAPI.options()` | Get vehicle options |
+| `GET /vehicles/{vin}/specs` | `VehicleAPI.specs()` | Get vehicle specifications |
+| `GET /dx/warranty/details` | `VehicleAPI.warranty_details()` | Get warranty details |
+| `POST /vehicles/fleet_status` | `VehicleAPI.fleet_status()` | Get fleet status |
+| `GET /vehicles/{vin}/fleet_telemetry_config` | `VehicleAPI.fleet_telemetry_config()` | Get Fleet Telemetry config |
+| `GET /vehicles/{vin}/fleet_telemetry_errors` | `VehicleAPI.fleet_telemetry_errors()` | Get Fleet Telemetry errors |
+
+### Energy Endpoints
+
+| Endpoint | API Method | Description |
+|----------|-----------|-------------|
+| `GET /energy_sites/{id}/telemetry_history` | `EnergyAPI.telemetry_history()` | Telemetry-based charge history |
+
+### Vehicle Commands (Fleet Management)
+
+| Command | API Method | Description |
+|---------|-----------|-------------|
+| `navigation_request` | `CommandAPI.navigation_request()` | Legacy navigation (REST-only, share endpoint preferred) |
+| `set_managed_charger_location` | `CommandAPI.set_managed_charger_location()` | Set managed charger location (fleet) |
+| `set_managed_scheduled_charging_time` | `CommandAPI.set_managed_scheduled_charging_time()` | Set managed scheduled charging time (fleet) |

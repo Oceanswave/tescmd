@@ -80,3 +80,59 @@ class VehicleAPI:
         data = await self._client.get(f"/api/1/vehicles/{vin}/drivers")
         raw_list: list[dict[str, Any]] = data.get("response", [])
         return [ShareDriverInfo.model_validate(d) for d in raw_list]
+
+    # ------------------------------------------------------------------
+    # Extended vehicle data endpoints
+    # ------------------------------------------------------------------
+
+    async def eligible_subscriptions(self, vin: str) -> dict[str, Any]:
+        """Check subscription eligibility for the vehicle."""
+        data = await self._client.get(
+            "/api/1/dx/vehicles/subscriptions/eligibility", params={"vin": vin}
+        )
+        result: dict[str, Any] = data.get("response", {})
+        return result
+
+    async def eligible_upgrades(self, vin: str) -> dict[str, Any]:
+        """Check upgrade eligibility for the vehicle."""
+        data = await self._client.get(
+            "/api/1/dx/vehicles/upgrades/eligibility", params={"vin": vin}
+        )
+        result: dict[str, Any] = data.get("response", {})
+        return result
+
+    async def options(self, vin: str) -> dict[str, Any]:
+        """Fetch vehicle option codes."""
+        data = await self._client.get("/api/1/dx/vehicles/options", params={"vin": vin})
+        result: dict[str, Any] = data.get("response", {})
+        return result
+
+    async def specs(self, vin: str) -> dict[str, Any]:
+        """Fetch vehicle specifications."""
+        data = await self._client.get(f"/api/1/vehicles/{vin}/specs")
+        result: dict[str, Any] = data.get("response", {})
+        return result
+
+    async def warranty_details(self) -> dict[str, Any]:
+        """Fetch warranty details."""
+        data = await self._client.get("/api/1/dx/warranty/details")
+        result: dict[str, Any] = data.get("response", {})
+        return result
+
+    async def fleet_status(self) -> dict[str, Any]:
+        """Fetch fleet status for all vehicles."""
+        data = await self._client.post("/api/1/vehicles/fleet_status")
+        result: dict[str, Any] = data.get("response", {})
+        return result
+
+    async def fleet_telemetry_config(self, vin: str) -> dict[str, Any]:
+        """Fetch fleet telemetry configuration."""
+        data = await self._client.get(f"/api/1/vehicles/{vin}/fleet_telemetry_config")
+        result: dict[str, Any] = data.get("response", {})
+        return result
+
+    async def fleet_telemetry_errors(self, vin: str) -> dict[str, Any]:
+        """Fetch fleet telemetry errors."""
+        data = await self._client.get(f"/api/1/vehicles/{vin}/fleet_telemetry_errors")
+        result: dict[str, Any] = data.get("response", {})
+        return result

@@ -411,7 +411,7 @@ def low_power_cmd(app_ctx: AppContext, vin_positional: str | None, on: bool) -> 
             vin_positional,
             "set_low_power_mode",
             "vehicle.low-power",
-            body={"on": on},
+            body={"enable": on},
             success_message=f"Low power mode {state}.",
         )
     )
@@ -430,7 +430,7 @@ def accessory_power_cmd(app_ctx: AppContext, vin_positional: str | None, on: boo
             vin_positional,
             "keep_accessory_power_mode",
             "vehicle.accessory-power",
-            body={"on": on},
+            body={"enable": on},
             success_message=f"Accessory power mode {state}.",
         )
     )

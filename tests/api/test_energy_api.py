@@ -321,6 +321,31 @@ class TestGridImportExport:
         assert body["customer_preferred_export_rule"] == "pv_only"
 
 
+class TestTelemetryHistory:
+    @pytest.mark.asyncio
+    async def test_returns_calendar_history(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(
+            json={
+                "response": {
+                    "serial_number": "SN123",
+                    "time_series": [],
+                }
+            },
+        )
+        api = EnergyAPI(mock_client)
+        result = await api.telemetry_history(12345)
+
+        assert isinstance(result, CalendarHistory)
+        assert result.serial_number == "SN123"
+        assert result.time_series == []
+
+        request = httpx_mock.get_requests()[0]
+        assert "telemetry_history" in request.url.path
+        assert request.url.params["kind"] == "charge"
+
+
 class TestCalendarHistory:
     @pytest.mark.asyncio
     async def test_returns_calendar_history(

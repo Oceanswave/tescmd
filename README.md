@@ -70,6 +70,18 @@ tescmd cache status
 tescmd cache clear
 ```
 
+## Prerequisites
+
+The following tools should be installed and authenticated before running `tescmd setup`:
+
+| Tool | Required | Purpose | Auth |
+|------|----------|---------|------|
+| **Git** | Yes | Version control, repo management | N/A |
+| **GitHub CLI** (`gh`) | Recommended | Auto-creates `*.github.io` domain for key hosting | `gh auth login` |
+| **Tailscale** | Optional | Secure remote access to vehicles via Fleet Telemetry | `tailscale login` |
+
+Without the GitHub CLI, you'll need to manually host your public key at the Tesla-required `.well-known` path on your own domain. Tailscale is only needed if you plan to use Fleet Telemetry streaming for reduced API costs.
+
 ## Installation
 
 ### From PyPI
@@ -137,11 +149,11 @@ Switch profiles: `tescmd --profile work-car vehicle info`
 |---|---|---|
 | `setup` | *(interactive wizard)* | First-run configuration: client ID, secret, region, domain, key enrollment |
 | `auth` | `login`, `logout`, `status`, `refresh`, `register`, `export`, `import` | OAuth2 authentication lifecycle |
-| `vehicle` | `list`, `info`, `data`, `location`, `wake`, `alerts`, `release-notes`, `service`, `drivers` | Vehicle discovery, state queries, wake, service data |
-| `charge` | `status`, `start`, `stop`, `limit`, `limit-max`, `limit-std`, `amps`, `schedule`, `port-open`, `port-close`, `departure`, `precondition-add`, `precondition-remove` | Charge queries, control, and scheduling |
-| `climate` | `status`, `on`, `off`, `set`, `precondition`, `seat`, `seat-cool`, `wheel-heater`, `overheat`, `keeper`, `cop-temp`, `auto-seat`, `auto-wheel`, `wheel-level` | Climate, seat, and steering wheel control |
-| `security` | `status`, `lock`, `unlock`, `sentry`, `valet`, `valet-reset`, `remote-start`, `flash`, `honk`, `speed-limit`, `pin-reset`, `pin-clear-admin`, `speed-clear`, `speed-clear-admin` | Security, access, and PIN management |
-| `trunk` | `open`, `close`, `frunk`, `window` | Trunk, frunk, and window control |
+| `vehicle` | `list`, `info`, `data`, `location`, `wake`, `alerts`, `release-notes`, `service`, `drivers`, `low-power`, `accessory-power` | Vehicle discovery, state queries, wake, power management |
+| `charge` | `status`, `start`, `stop`, `limit`, `limit-max`, `limit-std`, `amps`, `schedule`, `port-open`, `port-close`, `departure`, `add-schedule`, `remove-schedule`, `managed-amps` | Charge queries, control, scheduling, and fleet management |
+| `climate` | `status`, `on`, `off`, `set`, `precondition`, `seat`, `seat-cool`, `wheel-heater`, `overheat`, `bioweapon`, `defrost`, `keeper`, `cop-temp`, `auto-seat`, `auto-wheel`, `wheel-level` | Climate, seat, and steering wheel control |
+| `security` | `status`, `lock`, `unlock`, `sentry`, `valet`, `valet-reset`, `remote-start`, `flash`, `honk`, `boombox`, `speed-limit`, `pin-to-drive`, `pin-reset`, `pin-clear-admin`, `speed-clear`, `speed-clear-admin`, `guest-mode`, `erase-data` | Security, access, and PIN management |
+| `trunk` | `open`, `close`, `frunk`, `window`, `sunroof`, `tonneau-open`, `tonneau-close`, `tonneau-stop` | Trunk, frunk, sunroof, tonneau, and window control |
 | `media` | `play-pause`, `next-track`, `prev-track`, `next-fav`, `prev-fav`, `volume-up`, `volume-down`, `adjust-volume` | Media playback control |
 | `nav` | `send`, `gps`, `supercharger`, `homelink`, `waypoints` | Navigation and HomeLink |
 | `software` | `status`, `schedule`, `cancel` | Software update management |

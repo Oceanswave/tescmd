@@ -234,7 +234,9 @@ async def _cmd_seat(
             formatter,
             vehicle_api,
             vin,
-            lambda: cmd_api.remote_seat_heater_request(vin, heater=SEAT_MAP[seat], level=level),
+            lambda: cmd_api.remote_seat_heater_request(
+                vin, seat_position=SEAT_MAP[seat], level=level
+            ),
             auto=app_ctx.auto_wake,
         )
     finally:
@@ -420,7 +422,7 @@ def auto_seat_cmd(app_ctx: AppContext, vin_positional: str | None, seat: str, on
             vin_positional,
             "remote_auto_seat_climate_request",
             "climate.auto-seat",
-            body={"auto_seat_position": SEAT_MAP[seat], "on": on},
+            body={"auto_seat_position": SEAT_MAP[seat], "auto_climate_on": on},
             success_message=f"Auto seat climate {state} for {seat}.",
         )
     )

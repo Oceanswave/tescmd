@@ -121,14 +121,18 @@ class CommandAPI:
             {"driver_temp": driver_temp, "passenger_temp": passenger_temp},
         )
 
-    async def set_preconditioning_max(self, vin: str, *, on: bool) -> CommandResponse:
-        return await self._command(vin, "set_preconditioning_max", {"on": on})
-
-    async def remote_seat_heater_request(
-        self, vin: str, *, heater: int, level: int
+    async def set_preconditioning_max(
+        self, vin: str, *, on: bool, manual_override: bool = False
     ) -> CommandResponse:
         return await self._command(
-            vin, "remote_seat_heater_request", {"heater": heater, "level": level}
+            vin, "set_preconditioning_max", {"on": on, "manual_override": manual_override}
+        )
+
+    async def remote_seat_heater_request(
+        self, vin: str, *, seat_position: int, level: int
+    ) -> CommandResponse:
+        return await self._command(
+            vin, "remote_seat_heater_request", {"seat_position": seat_position, "level": level}
         )
 
     async def remote_seat_cooler_request(
@@ -153,12 +157,12 @@ class CommandAPI:
         )
 
     async def set_climate_keeper_mode(
-        self, vin: str, *, climate_keeper_mode: int
+        self, vin: str, *, climate_keeper_mode: int, manual_override: bool = False
     ) -> CommandResponse:
         return await self._command(
             vin,
             "set_climate_keeper_mode",
-            {"climate_keeper_mode": climate_keeper_mode},
+            {"climate_keeper_mode": climate_keeper_mode, "manual_override": manual_override},
         )
 
     async def set_cop_temp(self, vin: str, *, cop_temp: int) -> CommandResponse:
@@ -166,12 +170,12 @@ class CommandAPI:
         return await self._command(vin, "set_cop_temp", {"cop_temp": cop_temp})
 
     async def remote_auto_seat_climate_request(
-        self, vin: str, *, auto_seat_position: int, on: bool
+        self, vin: str, *, auto_seat_position: int, auto_climate_on: bool
     ) -> CommandResponse:
         return await self._command(
             vin,
             "remote_auto_seat_climate_request",
-            {"auto_seat_position": auto_seat_position, "on": on},
+            {"auto_seat_position": auto_seat_position, "auto_climate_on": auto_climate_on},
         )
 
     async def remote_auto_steering_wheel_heat_climate_request(
@@ -267,7 +271,7 @@ class CommandAPI:
     async def media_volume_down(self, vin: str) -> CommandResponse:
         return await self._command(vin, "media_volume_down")
 
-    async def adjust_volume(self, vin: str, *, volume: int) -> CommandResponse:
+    async def adjust_volume(self, vin: str, *, volume: float) -> CommandResponse:
         return await self._command(vin, "adjust_volume", {"volume": volume})
 
     # ------------------------------------------------------------------
@@ -300,6 +304,29 @@ class CommandAPI:
 
     async def trigger_homelink(self, vin: str, *, lat: float, lon: float) -> CommandResponse:
         return await self._command(vin, "trigger_homelink", {"lat": lat, "lon": lon})
+
+    async def navigation_request(
+        self,
+        vin: str,
+        *,
+        type: str = "share_ext_content_raw",
+        locale: str = "en-US",
+        timestamp_ms: str = "",
+        value: dict[str, Any] | None = None,
+    ) -> CommandResponse:
+        """Legacy navigation request (REST-only, deprecated in favour of 'share')."""
+        import time as _time
+
+        body: dict[str, Any] = {
+            "type": type,
+            "locale": locale,
+            "timestamp_ms": timestamp_ms or str(int(_time.time() * 1000)),
+        }
+        if value is not None:
+            body["value"] = value
+        path = f"/api/1/vehicles/{vin}/command/navigation_request"
+        data = await self._client.post(path, json=body)
+        return CommandResponse.model_validate(data)
 
     async def navigation_waypoints_request(self, vin: str, *, waypoints: str) -> CommandResponse:
         return await self._command(vin, "navigation_waypoints_request", {"waypoints": waypoints})
@@ -398,11 +425,11 @@ class CommandAPI:
     # Power management commands
     # ------------------------------------------------------------------
 
-    async def set_low_power_mode(self, vin: str, *, on: bool) -> CommandResponse:
-        return await self._command(vin, "set_low_power_mode", {"on": on})
+    async def set_low_power_mode(self, vin: str, *, enable: bool) -> CommandResponse:
+        return await self._command(vin, "set_low_power_mode", {"enable": enable})
 
-    async def keep_accessory_power_mode(self, vin: str, *, on: bool) -> CommandResponse:
-        return await self._command(vin, "keep_accessory_power_mode", {"on": on})
+    async def keep_accessory_power_mode(self, vin: str, *, enable: bool) -> CommandResponse:
+        return await self._command(vin, "keep_accessory_power_mode", {"enable": enable})
 
     # ------------------------------------------------------------------
     # Managed charging (fleet)
@@ -414,3 +441,11 @@ class CommandAPI:
         return await self._command(
             vin, "set_managed_charge_current_request", {"charging_amps": charging_amps}
         )
+
+    async def set_managed_charger_location(
+        self, vin: str, *, location: dict[str, Any]
+    ) -> CommandResponse:
+        return await self._command(vin, "set_managed_charger_location", location)
+
+    async def set_managed_scheduled_charging_time(self, vin: str, *, time: int) -> CommandResponse:
+        return await self._command(vin, "set_managed_scheduled_charging_time", {"time": time})

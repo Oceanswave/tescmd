@@ -130,10 +130,10 @@ def volume_down_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 
 @media_group.command("adjust-volume")
 @click.argument("vin_positional", required=False, default=None, metavar="VIN")
-@click.argument("volume", type=click.IntRange(0, 11))
+@click.argument("volume", type=click.FloatRange(0.0, 11.0))
 @global_options
-def adjust_volume_cmd(app_ctx: AppContext, vin_positional: str | None, volume: int) -> None:
-    """Set volume to VOLUME (0-11)."""
+def adjust_volume_cmd(app_ctx: AppContext, vin_positional: str | None, volume: float) -> None:
+    """Set volume to VOLUME (0.0-11.0)."""
     run_async(
         execute_command(
             app_ctx,

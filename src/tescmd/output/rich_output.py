@@ -619,7 +619,9 @@ class RichOutput:
 
     def error(self, message: str) -> None:
         """Print a bold red error line."""
-        self._con.print(f"[bold red]Error:[/bold red] {message}")
+        from rich.markup import escape
+
+        self._con.print(f"[bold red]Error:[/bold red] {escape(message)}")
 
     def info(self, message: str) -> None:
         """Print an informational message (plain)."""
