@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.2] - Unreleased
+## [0.1.2] - 2025-01-31
 
 ### Added
 
@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Response cache documentation in CLAUDE.md expanded to cover universal caching, TTL tiers, and generic cache key scheme
 
-## [0.1.1] - Unreleased
+## [0.1.1]
 
 ### Added
 
@@ -48,7 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Friendly command output** — all vehicle commands now display descriptive success messages (e.g. "Climate control turned on.", "Doors locked.") instead of bare "OK"
 - **E2E test script** — `scripts/e2e_test.py` provides interactive end-to-end command testing against a live vehicle with per-command confirmation, category filtering, and destructive-command skipping
 
-## [0.1.0] - Unreleased
+## [0.1.0]
 
 ### Added
 
