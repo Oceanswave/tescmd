@@ -375,6 +375,33 @@ class TestNavigationNewCommands:
         assert "navigation_waypoints_request" in str(httpx_mock.get_requests()[0].url)
 
 
+class TestNavigationScRequest:
+    @pytest.mark.asyncio
+    async def test_navigation_sc_request_with_params(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        await api.navigation_sc_request(VIN, id=42, order=1)
+
+        body = _body(httpx_mock)
+        assert body["id"] == 42
+        assert body["order"] == 1
+        assert "navigation_sc_request" in str(httpx_mock.get_requests()[0].url)
+
+    @pytest.mark.asyncio
+    async def test_navigation_sc_request_defaults(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        await api.navigation_sc_request(VIN)
+
+        body = _body(httpx_mock)
+        assert body["id"] == 0
+        assert body["order"] == 0
+
+
 class TestBoomboxCommand:
     @pytest.mark.asyncio
     async def test_remote_boombox_default_sound(

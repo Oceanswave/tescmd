@@ -299,8 +299,10 @@ class CommandAPI:
             body["order"] = order
         return await self._command(vin, "navigation_gps_request", body)
 
-    async def navigation_sc_request(self, vin: str) -> CommandResponse:
-        return await self._command(vin, "navigation_sc_request")
+    async def navigation_sc_request(
+        self, vin: str, *, id: int = 0, order: int = 0
+    ) -> CommandResponse:
+        return await self._command(vin, "navigation_sc_request", {"id": id, "order": order})
 
     async def trigger_homelink(self, vin: str, *, lat: float, lon: float) -> CommandResponse:
         return await self._command(vin, "trigger_homelink", {"lat": lat, "lon": lon})

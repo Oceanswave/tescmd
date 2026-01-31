@@ -126,8 +126,20 @@ class VehicleAPI:
         return result
 
     async def fleet_telemetry_config(self, vin: str) -> dict[str, Any]:
-        """Fetch fleet telemetry configuration."""
+        """Fetch fleet telemetry configuration for a vehicle."""
         data = await self._client.get(f"/api/1/vehicles/{vin}/fleet_telemetry_config")
+        result: dict[str, Any] = data.get("response", {})
+        return result
+
+    async def fleet_telemetry_config_create(self, *, config: dict[str, Any]) -> dict[str, Any]:
+        """Create or update fleet telemetry server configuration."""
+        data = await self._client.post("/api/1/vehicles/fleet_telemetry_config", json=config)
+        result: dict[str, Any] = data.get("response", {})
+        return result
+
+    async def fleet_telemetry_config_delete(self, vin: str) -> dict[str, Any]:
+        """Remove fleet telemetry configuration from a vehicle."""
+        data = await self._client.delete(f"/api/1/vehicles/{vin}/fleet_telemetry_config")
         result: dict[str, Any] = data.get("response", {})
         return result
 

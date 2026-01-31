@@ -79,6 +79,10 @@ class TeslaFleetClient:
         """Issue a POST request and return the parsed JSON body."""
         return await self._request("POST", path, **kwargs)
 
+    async def delete(self, path: str, **kwargs: Any) -> dict[str, Any]:
+        """Issue a DELETE request and return the parsed JSON body."""
+        return await self._request("DELETE", path, **kwargs)
+
     def update_token(self, access_token: str) -> None:
         """Replace the current access token and update the header."""
         self._access_token = access_token

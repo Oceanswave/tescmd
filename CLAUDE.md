@@ -101,6 +101,12 @@ src/tescmd/
     ├── __init__.py
     ├── vin.py             # Smart VIN resolution
     └── async_utils.py     # asyncio helpers (run_async)
+
+spec/
+└── fleet_api_spec.json        # Canonical Fleet API specification (endpoints, params, types)
+
+scripts/
+└── validate_fleet_api.py      # Spec-driven API coverage validator (AST-based)
 ```
 
 ### Key Models (`models/vehicle.py`)
@@ -217,7 +223,7 @@ The `[R] Retry` option allows users to wake the vehicle for free via the Tesla m
 - Test files mirror source: `tests/cli/test_auth.py`, `tests/api/test_client.py`, etc.
 - Use `pytest-httpx` to mock HTTP responses (no live API calls in tests)
 - Async tests use `@pytest.mark.asyncio`
-- Current count: ~897 tests
+- Current count: ~902 tests
 
 ## Linting & Formatting
 
@@ -278,6 +284,24 @@ All variables can also be set in a `.env` file in the working directory or `$TES
 
 All global flags can be specified at the root level (`tescmd --wake charge status`) or after the subcommand (`tescmd charge status --wake`).
 
+## API Coverage Validation
+
+The project includes a spec-driven validation utility to ensure our implementation stays in sync with the Tesla Fleet API.
+
+- **`spec/fleet_api_spec.json`** — canonical specification covering all Fleet API endpoints, params, and types (sourced from Tesla's docs + Go SDK)
+- **`scripts/validate_fleet_api.py`** — validates the implementation against the spec using AST introspection (no imports needed)
+
+```bash
+# Run the validator
+python scripts/validate_fleet_api.py            # Summary output
+python scripts/validate_fleet_api.py --verbose   # Show all endpoints
+python scripts/validate_fleet_api.py --json      # Machine-readable output
+```
+
+The validator checks: vehicle commands (params + types), vehicle endpoints, energy endpoints, user endpoints, charging endpoints, partner endpoints, and protocol registry entries. Exit code 0 = all pass, 1 = errors found.
+
+**When to run:** After adding or modifying API methods, after Tesla updates their docs, or periodically to catch drift.
+
 ## Common Commands (for reference)
 
 ```bash
@@ -288,6 +312,9 @@ mypy src/
 pytest
 pytest tests/cli/ -k "test_auth"
 pytest tests/cache/              # Cache-specific tests
+
+# API coverage
+python scripts/validate_fleet_api.py
 
 # Build
 python -m build

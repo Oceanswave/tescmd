@@ -347,7 +347,22 @@ pytest
 
 # Run a specific test
 pytest tests/cli/test_auth.py -v
+
+# Validate API coverage against Tesla Fleet API spec
+python scripts/validate_fleet_api.py
 ```
+
+### API Coverage Validation
+
+tescmd ships a spec-driven validation utility that compares our implementation against the Tesla Fleet API. The canonical spec lives at `spec/fleet_api_spec.json` (sourced from Tesla's docs and Go SDK), and `scripts/validate_fleet_api.py` validates all API methods, parameters, and types using AST introspection.
+
+```bash
+python scripts/validate_fleet_api.py            # Summary
+python scripts/validate_fleet_api.py --verbose   # All endpoints
+python scripts/validate_fleet_api.py --json      # Machine-readable
+```
+
+Run this periodically or after modifying API methods to catch drift.
 
 See [docs/development.md](docs/development.md) for detailed contribution guidelines.
 

@@ -521,6 +521,50 @@ class TestFleetTelemetryConfig:
         assert result == {}
 
 
+class TestFleetTelemetryConfigCreate:
+    @pytest.mark.asyncio
+    async def test_fleet_telemetry_config_create(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(
+            url=f"{FLEET_BASE}/api/1/vehicles/fleet_telemetry_config",
+            json={"response": {"updated_vehicles": 1}},
+        )
+        api = VehicleAPI(mock_client)
+        config = {
+            "hostname": "telemetry.example.com",
+            "port": 443,
+            "ca": "-----BEGIN CERTIFICATE-----",
+            "fields": {"BatteryLevel": {"interval_seconds": 60}},
+            "vins": [VIN],
+        }
+        result = await api.fleet_telemetry_config_create(config=config)
+
+        assert result["updated_vehicles"] == 1
+        request = httpx_mock.get_requests()[0]
+        assert request.url.path == "/api/1/vehicles/fleet_telemetry_config"
+        assert request.method == "POST"
+
+
+class TestFleetTelemetryConfigDelete:
+    @pytest.mark.asyncio
+    async def test_fleet_telemetry_config_delete(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(
+            url=f"{FLEET_BASE}/api/1/vehicles/{VIN}/fleet_telemetry_config",
+            json={"response": {"deleted": True}},
+            method="DELETE",
+        )
+        api = VehicleAPI(mock_client)
+        result = await api.fleet_telemetry_config_delete(VIN)
+
+        assert result["deleted"] is True
+        request = httpx_mock.get_requests()[0]
+        assert request.url.path == f"/api/1/vehicles/{VIN}/fleet_telemetry_config"
+        assert request.method == "DELETE"
+
+
 class TestFleetTelemetryErrors:
     @pytest.mark.asyncio
     async def test_fleet_telemetry_errors(

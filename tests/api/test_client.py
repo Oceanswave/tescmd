@@ -50,6 +50,19 @@ class TestPostSuccess:
         assert result["response"]["result"] is True
 
 
+class TestDeleteMethod:
+    @pytest.mark.asyncio
+    async def test_delete_success(self, httpx_mock: HTTPXMock, client: TeslaFleetClient) -> None:
+        payload = {"response": {"deleted": True}}
+        httpx_mock.add_response(
+            url=f"{FLEET_BASE}/api/1/vehicles/123/fleet_telemetry_config",
+            json=payload,
+            method="DELETE",
+        )
+        result = await client.delete("/api/1/vehicles/123/fleet_telemetry_config")
+        assert result["response"]["deleted"] is True
+
+
 class TestAuthHeaderSent:
     @pytest.mark.asyncio
     async def test_auth_header_sent(self, httpx_mock: HTTPXMock, client: TeslaFleetClient) -> None:
