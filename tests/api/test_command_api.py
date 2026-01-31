@@ -373,3 +373,148 @@ class TestNavigationNewCommands:
         body = _body(httpx_mock)
         assert body["waypoints"] == waypoints_str
         assert "navigation_waypoints_request" in str(httpx_mock.get_requests()[0].url)
+
+
+class TestBoomboxCommand:
+    @pytest.mark.asyncio
+    async def test_remote_boombox_default_sound(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        result = await api.remote_boombox(VIN)
+
+        assert result.response.result is True
+        body = _body(httpx_mock)
+        assert body["sound"] == 2000
+
+    @pytest.mark.asyncio
+    async def test_remote_boombox_fart_sound(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        await api.remote_boombox(VIN, sound=0)
+
+        body = _body(httpx_mock)
+        assert body["sound"] == 0
+
+
+class TestSpeedLimitFloat:
+    @pytest.mark.asyncio
+    async def test_speed_limit_set_limit_float(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        await api.speed_limit_set_limit(VIN, limit_mph=65.5)
+
+        body = _body(httpx_mock)
+        assert body["limit_mph"] == 65.5
+
+    @pytest.mark.asyncio
+    async def test_speed_limit_set_limit_int_still_works(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        await api.speed_limit_set_limit(VIN, limit_mph=65)
+
+        body = _body(httpx_mock)
+        assert body["limit_mph"] == 65
+
+
+class TestTonneauCommands:
+    @pytest.mark.asyncio
+    async def test_open_tonneau(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        result = await api.open_tonneau(VIN)
+
+        assert result.response.result is True
+        request = httpx_mock.get_requests()[0]
+        assert "open_tonneau" in str(request.url)
+        assert request.content == b""
+
+    @pytest.mark.asyncio
+    async def test_close_tonneau(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        result = await api.close_tonneau(VIN)
+
+        assert result.response.result is True
+        assert "close_tonneau" in str(httpx_mock.get_requests()[0].url)
+
+    @pytest.mark.asyncio
+    async def test_stop_tonneau(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        result = await api.stop_tonneau(VIN)
+
+        assert result.response.result is True
+        assert "stop_tonneau" in str(httpx_mock.get_requests()[0].url)
+
+
+class TestPowerManagementCommands:
+    @pytest.mark.asyncio
+    async def test_set_low_power_mode_on(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        result = await api.set_low_power_mode(VIN, on=True)
+
+        assert result.response.result is True
+        assert _body(httpx_mock)["on"] is True
+
+    @pytest.mark.asyncio
+    async def test_set_low_power_mode_off(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        await api.set_low_power_mode(VIN, on=False)
+
+        assert _body(httpx_mock)["on"] is False
+
+    @pytest.mark.asyncio
+    async def test_keep_accessory_power_mode_on(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        result = await api.keep_accessory_power_mode(VIN, on=True)
+
+        assert result.response.result is True
+        assert _body(httpx_mock)["on"] is True
+
+    @pytest.mark.asyncio
+    async def test_keep_accessory_power_mode_off(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        await api.keep_accessory_power_mode(VIN, on=False)
+
+        assert _body(httpx_mock)["on"] is False
+
+
+class TestManagedChargingCommand:
+    @pytest.mark.asyncio
+    async def test_set_managed_charge_current_request(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        result = await api.set_managed_charge_current_request(VIN, charging_amps=16)
+
+        assert result.response.result is True
+        body = _body(httpx_mock)
+        assert body["charging_amps"] == 16
+        assert "set_managed_charge_current_request" in str(httpx_mock.get_requests()[0].url)

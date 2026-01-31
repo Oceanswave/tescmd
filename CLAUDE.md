@@ -32,11 +32,11 @@ src/tescmd/
 │   ├── _client.py         # API client builders, auto_wake, cached_vehicle_data
 │   ├── auth.py            # auth login, auth logout, auth status, auth register
 │   ├── cache.py           # cache clear, cache status
-│   ├── charge.py          # charge status, start, stop, limit, amps, schedule, departure, precondition
+│   ├── charge.py          # charge status, start, stop, limit, amps, schedule, departure, precondition, managed-amps
 │   ├── climate.py         # climate status, on, off, set, seat, keeper, cop-temp, auto-seat, auto-wheel, wheel-level
 │   ├── security.py        # security status, lock, unlock, sentry, valet, pin-reset, speed-clear, etc.
-│   ├── trunk.py           # trunk open, close, frunk, window vent/close
-│   ├── vehicle.py         # vehicle list, info, data, location, wake, alerts, release-notes, service, drivers
+│   ├── trunk.py           # trunk open, close, frunk, window vent/close, sunroof vent/close/stop, tonneau open/close/stop
+│   ├── vehicle.py         # vehicle list, info, data, location, wake, alerts, release-notes, service, drivers, low-power, accessory-power
 │   ├── media.py           # media play-pause, next/prev track, next/prev fav, volume
 │   ├── nav.py             # nav send, gps, supercharger, homelink, waypoints
 │   ├── software.py        # software status, schedule, cancel
@@ -50,7 +50,7 @@ src/tescmd/
 │   ├── __init__.py
 │   ├── client.py          # TeslaFleetClient (base HTTP client)
 │   ├── vehicle.py         # VehicleAPI (vehicle data, nearby chargers, alerts, drivers)
-│   ├── command.py         # CommandAPI (~50 vehicle commands, unsigned REST)
+│   ├── command.py         # CommandAPI (~56 vehicle commands, unsigned REST)
 │   ├── signed_command.py  # SignedCommandAPI (Vehicle Command Protocol routing)
 │   ├── energy.py          # EnergyAPI (Powerwall/energy product endpoints)
 │   ├── sharing.py         # SharingAPI (driver and invite management)
@@ -217,7 +217,7 @@ The `[R] Retry` option allows users to wake the vehicle for free via the Tesla m
 - Test files mirror source: `tests/cli/test_auth.py`, `tests/api/test_client.py`, etc.
 - Use `pytest-httpx` to mock HTTP responses (no live API calls in tests)
 - Async tests use `@pytest.mark.asyncio`
-- Current count: ~827 tests
+- Current count: ~874 tests
 
 ## Linting & Formatting
 

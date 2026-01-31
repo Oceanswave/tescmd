@@ -523,6 +523,22 @@ class TestSecuritySpeedLimit:
         body = _cmd_request(httpx_mock, "speed_limit_set_limit")
         assert body["limit_mph"] == 65
 
+    def test_speed_limit_set_float(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
+        """--set accepts float values for precision (e.g. 65.5 MPH)."""
+        httpx_mock.add_response(
+            url=f"{FLEET}/api/1/vehicles/{VIN}/command/speed_limit_set_limit",
+            json=CMD_OK,
+        )
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["--format", "json", "--wake", "security", "speed-limit", "--set", "65.5", VIN],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        body = _cmd_request(httpx_mock, "speed_limit_set_limit")
+        assert body["limit_mph"] == 65.5
+
 
 # ---------------------------------------------------------------------------
 # security pin-to-drive
@@ -610,7 +626,8 @@ class TestSecurityGuestMode:
 
 
 class TestSecurityBoombox:
-    def test_boombox_sends_command(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
+    def test_boombox_default_locate(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
+        """Default --sound is locate (sound=2000)."""
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/remote_boombox",
             json=CMD_OK,
@@ -626,3 +643,37 @@ class TestSecurityBoombox:
         assert parsed["ok"] is True
         assert parsed["command"] == "security.boombox"
         assert parsed["data"]["response"]["result"] is True
+        body = _cmd_request(httpx_mock, "remote_boombox")
+        assert body["sound"] == 2000
+
+    def test_boombox_fart_sound(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
+        """--sound fart sends sound=0."""
+        httpx_mock.add_response(
+            url=f"{FLEET}/api/1/vehicles/{VIN}/command/remote_boombox",
+            json=CMD_OK,
+        )
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["--format", "json", "--wake", "security", "boombox", "--sound", "fart", VIN],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        body = _cmd_request(httpx_mock, "remote_boombox")
+        assert body["sound"] == 0
+
+    def test_boombox_locate_sound(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
+        """--sound locate sends sound=2000."""
+        httpx_mock.add_response(
+            url=f"{FLEET}/api/1/vehicles/{VIN}/command/remote_boombox",
+            json=CMD_OK,
+        )
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["--format", "json", "--wake", "security", "boombox", "--sound", "locate", VIN],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        body = _cmd_request(httpx_mock, "remote_boombox")
+        assert body["sound"] == 2000

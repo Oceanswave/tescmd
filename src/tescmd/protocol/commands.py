@@ -39,6 +39,9 @@ _VCSEC_COMMANDS: dict[str, CommandSpec] = {
     "door_unlock": CommandSpec(Domain.DOMAIN_VEHICLE_SECURITY, action_type="RKE_ACTION_UNLOCK"),
     "actuate_trunk": CommandSpec(Domain.DOMAIN_VEHICLE_SECURITY),
     "window_control": CommandSpec(Domain.DOMAIN_VEHICLE_SECURITY),
+    "open_tonneau": CommandSpec(Domain.DOMAIN_VEHICLE_SECURITY),
+    "close_tonneau": CommandSpec(Domain.DOMAIN_VEHICLE_SECURITY),
+    "stop_tonneau": CommandSpec(Domain.DOMAIN_VEHICLE_SECURITY),
     "remote_start_drive": CommandSpec(Domain.DOMAIN_VEHICLE_SECURITY),
     "flash_lights": CommandSpec(
         Domain.DOMAIN_VEHICLE_SECURITY, action_type="RKE_ACTION_REMOTE_DRIVE"
@@ -110,7 +113,6 @@ _INFOTAINMENT_COMMANDS: dict[str, CommandSpec] = {
     "navigation_gps_request": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "navigation_sc_request": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "trigger_homelink": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
-    "navigation_request": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "navigation_waypoints_request": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     # Software
     "schedule_software_update": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
@@ -120,6 +122,9 @@ _INFOTAINMENT_COMMANDS: dict[str, CommandSpec] = {
     "upcoming_calendar_entries": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     # Sunroof
     "sun_roof_control": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
+    # Power management
+    "set_low_power_mode": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
+    "keep_accessory_power_mode": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
 }
 
 # ---------------------------------------------------------------------------
@@ -128,6 +133,9 @@ _INFOTAINMENT_COMMANDS: dict[str, CommandSpec] = {
 
 _UNSIGNED_COMMANDS: dict[str, CommandSpec] = {
     "wake_up": CommandSpec(Domain.DOMAIN_BROADCAST, requires_signing=False),
+    "set_managed_charge_current_request": CommandSpec(
+        Domain.DOMAIN_BROADCAST, requires_signing=False
+    ),
 }
 
 # ---------------------------------------------------------------------------

@@ -391,3 +391,46 @@ def calendar_cmd(app_ctx: AppContext, vin_positional: str | None, calendar_data:
             body={"calendar_data": calendar_data},
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# Power management commands
+# ---------------------------------------------------------------------------
+
+
+@vehicle_group.command("low-power")
+@click.argument("vin_positional", required=False, default=None, metavar="VIN")
+@click.option("--on/--off", default=True, help="Enable or disable low power mode")
+@global_options
+def low_power_cmd(app_ctx: AppContext, vin_positional: str | None, on: bool) -> None:
+    """Enable or disable low power mode."""
+    state = "enabled" if on else "disabled"
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "set_low_power_mode",
+            "vehicle.low-power",
+            body={"on": on},
+            success_message=f"Low power mode {state}.",
+        )
+    )
+
+
+@vehicle_group.command("accessory-power")
+@click.argument("vin_positional", required=False, default=None, metavar="VIN")
+@click.option("--on/--off", default=True, help="Keep USB/outlets powered after exit")
+@global_options
+def accessory_power_cmd(app_ctx: AppContext, vin_positional: str | None, on: bool) -> None:
+    """Keep accessory power (USB/outlets) active after exiting the vehicle."""
+    state = "enabled" if on else "disabled"
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "keep_accessory_power_mode",
+            "vehicle.accessory-power",
+            body={"on": on},
+            success_message=f"Accessory power mode {state}.",
+        )
+    )

@@ -253,6 +253,24 @@ tescmd vehicle wake --wait          # block until vehicle is online
 tescmd vehicle wake --timeout 30    # wait up to 30 seconds
 ```
 
+### `vehicle low-power [VIN]`
+
+Enable or disable low power mode.
+
+```bash
+tescmd vehicle low-power --on
+tescmd vehicle low-power --off
+```
+
+### `vehicle accessory-power [VIN]`
+
+Keep accessory power (USB/outlets) active after exiting the vehicle.
+
+```bash
+tescmd vehicle accessory-power --on
+tescmd vehicle accessory-power --off
+```
+
 ---
 
 ## `key` — Key Management
@@ -439,6 +457,15 @@ Remove a charge schedule by ID.
 tescmd charge remove-schedule --id 1
 ```
 
+### `charge managed-amps [VIN] AMPS`
+
+Set managed charging current in amps (fleet management). Used by fleet operators to control charging across multiple vehicles.
+
+```bash
+tescmd charge managed-amps 16
+tescmd charge managed-amps 24
+```
+
 ---
 
 ## `climate` — Climate and Comfort
@@ -614,6 +641,7 @@ Manage speed limit mode.
 
 ```bash
 tescmd security speed-limit --set 65       # set to 65 MPH
+tescmd security speed-limit --set 65.5     # fractional MPH accepted
 tescmd security speed-limit --activate 1234  # activate with PIN
 tescmd security speed-limit --deactivate 1234
 ```
@@ -649,8 +677,12 @@ tescmd security erase-data --confirm
 Activate the boombox (external speaker).
 
 ```bash
-tescmd security boombox
+tescmd security boombox                    # default: locate sound (ping)
+tescmd security boombox --sound locate     # locate sound (ping)
+tescmd security boombox --sound fart       # fart sound
 ```
+
+**`--sound`** — Sound to play: `locate` (default, ping/chirp) or `fart`.
 
 ---
 
@@ -684,11 +716,38 @@ tescmd trunk frunk
 
 ### `trunk sunroof [VIN]`
 
-Vent or close the panoramic sunroof.
+Control the panoramic sunroof.
 
 ```bash
-tescmd trunk sunroof --vent
-tescmd trunk sunroof --close
+tescmd trunk sunroof --state vent          # vent the sunroof
+tescmd trunk sunroof --state close         # close the sunroof
+tescmd trunk sunroof --state stop          # stop sunroof movement
+```
+
+**`--state`** (required) — Action: `vent`, `close`, or `stop`.
+
+### `trunk tonneau-open [VIN]`
+
+Open the Cybertruck tonneau cover.
+
+```bash
+tescmd trunk tonneau-open
+```
+
+### `trunk tonneau-close [VIN]`
+
+Close the Cybertruck tonneau cover.
+
+```bash
+tescmd trunk tonneau-close
+```
+
+### `trunk tonneau-stop [VIN]`
+
+Stop the Cybertruck tonneau cover movement.
+
+```bash
+tescmd trunk tonneau-stop
 ```
 
 ### `trunk window [VIN]`

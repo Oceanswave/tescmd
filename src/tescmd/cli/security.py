@@ -316,15 +316,23 @@ def erase_data_cmd(app_ctx: AppContext, vin_positional: str | None, confirm: boo
 
 @security_group.command("boombox")
 @click.argument("vin_positional", required=False, default=None, metavar="VIN")
+@click.option(
+    "--sound",
+    type=click.Choice(["locate", "fart"]),
+    default="locate",
+    help="Sound to play (locate=ping, fart=random fart)",
+)
 @global_options
-def boombox_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
+def boombox_cmd(app_ctx: AppContext, vin_positional: str | None, sound: str) -> None:
     """Activate the boombox (external speaker)."""
+    sound_id = 0 if sound == "fart" else 2000
     run_async(
         execute_command(
             app_ctx,
             vin_positional,
             "remote_boombox",
             "security.boombox",
+            body={"sound": sound_id},
             success_message="Boombox activated.",
         )
     )
@@ -402,14 +410,14 @@ def speed_clear_admin_cmd(app_ctx: AppContext, vin_positional: str | None) -> No
 @click.option(
     "--deactivate", "pin_deactivate", default=None, help="Deactivate speed limit with PIN"
 )
-@click.option("--set", "limit_mph", type=int, default=None, help="Set speed limit in MPH")
+@click.option("--set", "limit_mph", type=float, default=None, help="Set speed limit in MPH")
 @global_options
 def speed_limit_cmd(
     app_ctx: AppContext,
     vin_positional: str | None,
     pin_activate: str | None,
     pin_deactivate: str | None,
-    limit_mph: int | None,
+    limit_mph: float | None,
 ) -> None:
     """Manage speed limit mode (--activate PIN, --deactivate PIN, or --set MPH)."""
     run_async(_cmd_speed_limit(app_ctx, vin_positional, pin_activate, pin_deactivate, limit_mph))
@@ -420,7 +428,7 @@ async def _cmd_speed_limit(
     vin_positional: str | None,
     pin_activate: str | None,
     pin_deactivate: str | None,
-    limit_mph: int | None,
+    limit_mph: float | None,
 ) -> None:
     formatter = app_ctx.formatter
     vin = require_vin(vin_positional, app_ctx.vin)

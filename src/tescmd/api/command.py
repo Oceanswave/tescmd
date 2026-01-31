@@ -218,7 +218,7 @@ class CommandAPI:
     async def speed_limit_deactivate(self, vin: str, *, pin: str) -> CommandResponse:
         return await self._command(vin, "speed_limit_deactivate", {"pin": pin})
 
-    async def speed_limit_set_limit(self, vin: str, *, limit_mph: int) -> CommandResponse:
+    async def speed_limit_set_limit(self, vin: str, *, limit_mph: float) -> CommandResponse:
         return await self._command(vin, "speed_limit_set_limit", {"limit_mph": limit_mph})
 
     async def reset_pin_to_drive_pin(self, vin: str) -> CommandResponse:
@@ -342,8 +342,8 @@ class CommandAPI:
     async def erase_user_data(self, vin: str) -> CommandResponse:
         return await self._command(vin, "erase_user_data")
 
-    async def remote_boombox(self, vin: str) -> CommandResponse:
-        return await self._command(vin, "remote_boombox")
+    async def remote_boombox(self, vin: str, *, sound: int = 2000) -> CommandResponse:
+        return await self._command(vin, "remote_boombox", {"sound": sound})
 
     # ------------------------------------------------------------------
     # Charge schedule commands (firmware 2024.26+)
@@ -379,4 +379,38 @@ class CommandAPI:
     ) -> CommandResponse:
         return await self._command(
             vin, "window_control", {"command": command, "lat": lat, "lon": lon}
+        )
+
+    # ------------------------------------------------------------------
+    # Tonneau cover commands (Cybertruck)
+    # ------------------------------------------------------------------
+
+    async def open_tonneau(self, vin: str) -> CommandResponse:
+        return await self._command(vin, "open_tonneau")
+
+    async def close_tonneau(self, vin: str) -> CommandResponse:
+        return await self._command(vin, "close_tonneau")
+
+    async def stop_tonneau(self, vin: str) -> CommandResponse:
+        return await self._command(vin, "stop_tonneau")
+
+    # ------------------------------------------------------------------
+    # Power management commands
+    # ------------------------------------------------------------------
+
+    async def set_low_power_mode(self, vin: str, *, on: bool) -> CommandResponse:
+        return await self._command(vin, "set_low_power_mode", {"on": on})
+
+    async def keep_accessory_power_mode(self, vin: str, *, on: bool) -> CommandResponse:
+        return await self._command(vin, "keep_accessory_power_mode", {"on": on})
+
+    # ------------------------------------------------------------------
+    # Managed charging (fleet)
+    # ------------------------------------------------------------------
+
+    async def set_managed_charge_current_request(
+        self, vin: str, *, charging_amps: int
+    ) -> CommandResponse:
+        return await self._command(
+            vin, "set_managed_charge_current_request", {"charging_amps": charging_amps}
         )

@@ -352,6 +352,47 @@ class TestPreconditionRemove:
 
 
 # =============================================================================
+# Managed charging
+# =============================================================================
+
+
+class TestManagedAmps:
+    def test_managed_amps(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(
+            url=f"{FLEET}/api/1/vehicles/{VIN}/command/set_managed_charge_current_request",
+            method="POST",
+            json=COMMAND_OK,
+        )
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["--format", "json", "--wake", "charge", "managed-amps", VIN, "16"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        assert parsed["ok"] is True
+        assert parsed["command"] == "charge.managed-amps"
+        assert parsed["data"]["response"]["result"] is True
+
+    def test_managed_amps_sends_body(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(
+            url=f"{FLEET}/api/1/vehicles/{VIN}/command/set_managed_charge_current_request",
+            method="POST",
+            json=COMMAND_OK,
+        )
+        runner = CliRunner()
+        runner.invoke(
+            cli,
+            ["--format", "json", "--wake", "charge", "managed-amps", VIN, "24"],
+            catch_exceptions=False,
+        )
+        request = httpx_mock.get_requests()[0]
+        body = json.loads(request.content)
+        assert body["charging_amps"] == 24
+
+
+# =============================================================================
 # Output envelope structure
 # =============================================================================
 

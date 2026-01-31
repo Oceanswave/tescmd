@@ -142,7 +142,7 @@ class TestTrunkSunroof:
             json=CMD_OK,
         )
         result = CliRunner().invoke(
-            cli, ["--format", "json", "--wake", "trunk", "sunroof", "--vent"]
+            cli, ["--format", "json", "--wake", "trunk", "sunroof", "--state", "vent"]
         )
 
         assert result.exit_code == 0, result.output
@@ -155,21 +155,31 @@ class TestTrunkSunroof:
             json=CMD_OK,
         )
         result = CliRunner().invoke(
-            cli, ["--format", "json", "--wake", "trunk", "sunroof", "--close"]
+            cli, ["--format", "json", "--wake", "trunk", "sunroof", "--state", "close"]
         )
 
         assert result.exit_code == 0, result.output
         body = _request_body(httpx_mock)
         assert body["state"] == "close"
 
-    def test_sunroof_default_is_vent(self, httpx_mock: HTTPXMock, cli_env: dict[str, str]) -> None:
-        """When neither --vent nor --close is given, default is vent."""
-        httpx_mock.add_response(json=CMD_OK)
-        result = CliRunner().invoke(cli, ["--format", "json", "--wake", "trunk", "sunroof"])
+    def test_sunroof_stop(self, httpx_mock: HTTPXMock, cli_env: dict[str, str]) -> None:
+        """--state stop sends state=stop to the API."""
+        httpx_mock.add_response(
+            url=f"{FLEET}/api/1/vehicles/{VIN}/command/sun_roof_control",
+            json=CMD_OK,
+        )
+        result = CliRunner().invoke(
+            cli, ["--format", "json", "--wake", "trunk", "sunroof", "--state", "stop"]
+        )
 
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.output
         body = _request_body(httpx_mock)
-        assert body["state"] == "vent"
+        assert body["state"] == "stop"
+
+    def test_sunroof_requires_state(self, cli_env: dict[str, str]) -> None:
+        """sunroof now requires --state option."""
+        result = CliRunner().invoke(cli, ["--format", "json", "--wake", "trunk", "sunroof"])
+        assert result.exit_code != 0
 
 
 # ---------------------------------------------------------------------------
@@ -331,3 +341,69 @@ class TestTrunkWindowClose:
         assert result.exit_code == 0
         req_url = _request_url(httpx_mock)
         assert f"/api/1/vehicles/{VIN}/command/window_control" in req_url
+
+
+# ---------------------------------------------------------------------------
+# trunk tonneau-open / tonneau-close / tonneau-stop
+# ---------------------------------------------------------------------------
+
+
+class TestTonneauOpen:
+    def test_tonneau_open_sends_command(
+        self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
+    ) -> None:
+        httpx_mock.add_response(
+            url=f"{FLEET}/api/1/vehicles/{VIN}/command/open_tonneau",
+            json=CMD_OK,
+        )
+        result = CliRunner().invoke(cli, ["--format", "json", "--wake", "trunk", "tonneau-open"])
+
+        assert result.exit_code == 0, result.output
+        parsed = json.loads(result.output)
+        assert parsed["ok"] is True
+        assert parsed["command"] == "trunk.tonneau-open"
+        assert parsed["data"]["response"]["result"] is True
+
+    def test_tonneau_open_hits_correct_endpoint(
+        self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
+    ) -> None:
+        httpx_mock.add_response(json=CMD_OK)
+        result = CliRunner().invoke(cli, ["--format", "json", "--wake", "trunk", "tonneau-open"])
+
+        assert result.exit_code == 0
+        req_url = _request_url(httpx_mock)
+        assert f"/api/1/vehicles/{VIN}/command/open_tonneau" in req_url
+
+
+class TestTonneauClose:
+    def test_tonneau_close_sends_command(
+        self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
+    ) -> None:
+        httpx_mock.add_response(
+            url=f"{FLEET}/api/1/vehicles/{VIN}/command/close_tonneau",
+            json=CMD_OK,
+        )
+        result = CliRunner().invoke(cli, ["--format", "json", "--wake", "trunk", "tonneau-close"])
+
+        assert result.exit_code == 0, result.output
+        parsed = json.loads(result.output)
+        assert parsed["ok"] is True
+        assert parsed["command"] == "trunk.tonneau-close"
+        assert parsed["data"]["response"]["result"] is True
+
+
+class TestTonneauStop:
+    def test_tonneau_stop_sends_command(
+        self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
+    ) -> None:
+        httpx_mock.add_response(
+            url=f"{FLEET}/api/1/vehicles/{VIN}/command/stop_tonneau",
+            json=CMD_OK,
+        )
+        result = CliRunner().invoke(cli, ["--format", "json", "--wake", "trunk", "tonneau-stop"])
+
+        assert result.exit_code == 0, result.output
+        parsed = json.loads(result.output)
+        assert parsed["ok"] is True
+        assert parsed["command"] == "trunk.tonneau-stop"
+        assert parsed["data"]["response"]["result"] is True

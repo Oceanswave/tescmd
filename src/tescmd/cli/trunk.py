@@ -89,12 +89,16 @@ def frunk_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 
 @trunk_group.command("sunroof")
 @click.argument("vin_positional", required=False, default=None, metavar="VIN")
-@click.option("--vent/--close", "vent", default=True, help="Vent or close the sunroof")
+@click.option(
+    "--state",
+    type=click.Choice(["vent", "close", "stop"]),
+    required=True,
+    help="Sunroof action: vent, close, or stop",
+)
 @global_options
-def sunroof_cmd(app_ctx: AppContext, vin_positional: str | None, vent: bool) -> None:
-    """Vent or close the panoramic sunroof."""
-    state = "vent" if vent else "close"
-    msg = "Sunroof vented." if vent else "Sunroof closed."
+def sunroof_cmd(app_ctx: AppContext, vin_positional: str | None, state: str) -> None:
+    """Control the panoramic sunroof (vent, close, or stop)."""
+    messages = {"vent": "Sunroof vented.", "close": "Sunroof closed.", "stop": "Sunroof stopped."}
     run_async(
         execute_command(
             app_ctx,
@@ -102,7 +106,60 @@ def sunroof_cmd(app_ctx: AppContext, vin_positional: str | None, vent: bool) -> 
             "sun_roof_control",
             "trunk.sunroof",
             body={"state": state},
-            success_message=msg,
+            success_message=messages[state],
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tonneau cover commands (Cybertruck)
+# ---------------------------------------------------------------------------
+
+
+@trunk_group.command("tonneau-open")
+@click.argument("vin_positional", required=False, default=None, metavar="VIN")
+@global_options
+def tonneau_open_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
+    """Open the Cybertruck tonneau cover."""
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "open_tonneau",
+            "trunk.tonneau-open",
+            success_message="Tonneau cover opening.",
+        )
+    )
+
+
+@trunk_group.command("tonneau-close")
+@click.argument("vin_positional", required=False, default=None, metavar="VIN")
+@global_options
+def tonneau_close_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
+    """Close the Cybertruck tonneau cover."""
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "close_tonneau",
+            "trunk.tonneau-close",
+            success_message="Tonneau cover closing.",
+        )
+    )
+
+
+@trunk_group.command("tonneau-stop")
+@click.argument("vin_positional", required=False, default=None, metavar="VIN")
+@global_options
+def tonneau_stop_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
+    """Stop the Cybertruck tonneau cover movement."""
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "stop_tonneau",
+            "trunk.tonneau-stop",
+            success_message="Tonneau cover stopped.",
         )
     )
 

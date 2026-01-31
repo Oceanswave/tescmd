@@ -484,3 +484,26 @@ def remove_schedule_cmd(app_ctx: AppContext, vin_positional: str | None, schedul
             success_message="Charge schedule removed.",
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# Managed charging (fleet)
+# ---------------------------------------------------------------------------
+
+
+@charge_group.command("managed-amps")
+@click.argument("vin_positional", required=False, default=None, metavar="VIN")
+@click.argument("amps", type=int)
+@global_options
+def managed_amps_cmd(app_ctx: AppContext, vin_positional: str | None, amps: int) -> None:
+    """Set managed charging current in amps (fleet management)."""
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "set_managed_charge_current_request",
+            "charge.managed-amps",
+            body={"charging_amps": amps},
+            success_message=f"Managed charging current set to {amps}A.",
+        )
+    )
