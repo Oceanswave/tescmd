@@ -221,10 +221,10 @@ class TestGetPagesDomain:
         assert gh.get_pages_domain("octocat/my-project") == "octocat.github.io/my-project"
 
     def test_mixed_case_lowercased(self) -> None:
-        assert gh.get_pages_domain("Oceanswave/Oceanswave.github.io") == "oceanswave.github.io"
+        assert gh.get_pages_domain("Testuser/Testuser.github.io") == "testuser.github.io"
 
     def test_mixed_case_project_page(self) -> None:
-        assert gh.get_pages_domain("Oceanswave/My-Project") == "oceanswave.github.io/my-project"
+        assert gh.get_pages_domain("Testuser/My-Project") == "testuser.github.io/my-project"
 
     def test_invalid_repo_name(self) -> None:
         with pytest.raises(ValueError, match="Invalid repo name"):

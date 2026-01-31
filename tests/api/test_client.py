@@ -9,6 +9,8 @@ import pytest
 
 from tescmd.api.client import _RATE_LIMIT_MAX_RETRIES, TeslaFleetClient
 from tescmd.api.errors import (
+    AuthError,
+    MissingScopesError,
     RateLimitError,
     VehicleAsleepError,
 )
@@ -155,3 +157,52 @@ class TestRateLimitCallbackInvoked:
         result = await client.get("/api/1/vehicles")
         assert result == {"response": []}
         callback.assert_awaited_once_with(5, 1, _RATE_LIMIT_MAX_RETRIES)
+
+
+class TestMissingScopesRaises:
+    @pytest.mark.asyncio
+    async def test_missing_scopes_raises(
+        self, httpx_mock: HTTPXMock, client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(
+            url=f"{FLEET_BASE}/api/1/users/me",
+            status_code=403,
+            json={
+                "response": None,
+                "error": "Unauthorized missing scopes",
+                "error_description": "",
+            },
+        )
+        with pytest.raises(MissingScopesError) as exc_info:
+            await client.get("/api/1/users/me")
+        assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_missing_scopes_is_auth_error(
+        self, httpx_mock: HTTPXMock, client: TeslaFleetClient
+    ) -> None:
+        """MissingScopesError should also be catchable as AuthError."""
+        httpx_mock.add_response(
+            url=f"{FLEET_BASE}/api/1/users/me",
+            status_code=403,
+            json={"error": "Unauthorized missing scopes"},
+        )
+        with pytest.raises(AuthError):
+            await client.get("/api/1/users/me")
+
+
+class TestGeneric403RaisesAuthError:
+    @pytest.mark.asyncio
+    async def test_generic_403_raises_auth_error(
+        self, httpx_mock: HTTPXMock, client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(
+            url=f"{FLEET_BASE}/api/1/vehicles/123/command/door_lock",
+            status_code=403,
+            json={"error": "Forbidden"},
+        )
+        with pytest.raises(AuthError) as exc_info:
+            await client.post("/api/1/vehicles/123/command/door_lock")
+        assert exc_info.value.status_code == 403
+        # Generic 403 should NOT be MissingScopesError
+        assert not isinstance(exc_info.value, MissingScopesError)

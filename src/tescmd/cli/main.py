@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import dataclasses
+import logging
 
 import click
 
 from tescmd._internal.async_utils import run_async
-from tescmd.api.errors import AuthError, RegistrationRequiredError, VehicleAsleepError
+from tescmd.api.errors import (
+    AuthError,
+    KeyNotEnrolledError,
+    MissingScopesError,
+    RegistrationRequiredError,
+    SessionError,
+    TierError,
+    VehicleAsleepError,
+)
 from tescmd.output.formatter import OutputFormatter
 
 # ---------------------------------------------------------------------------
@@ -79,6 +88,12 @@ def cli(
     wake: bool,
 ) -> None:
     """Query and control Tesla vehicles via the Fleet API."""
+    if verbose:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(name)s %(levelname)s: %(message)s",
+        )
+
     ctx.ensure_object(dict)
     ctx.obj = AppContext(
         vin=vin,
@@ -112,6 +127,7 @@ def _register_commands() -> None:
     from tescmd.cli.setup import setup_cmd
     from tescmd.cli.sharing import sharing_group
     from tescmd.cli.software import software_group
+    from tescmd.cli.status import status_cmd
     from tescmd.cli.trunk import trunk_group
     from tescmd.cli.user import user_group
     from tescmd.cli.vehicle import vehicle_group
@@ -128,6 +144,7 @@ def _register_commands() -> None:
     cli.add_command(security_group)
     cli.add_command(setup_cmd)
     cli.add_command(sharing_group)
+    cli.add_command(status_cmd)
     cli.add_command(software_group)
     cli.add_command(trunk_group)
     cli.add_command(user_group)
@@ -207,6 +224,9 @@ def _handle_known_error(
 
     Returns ``True`` if the error was handled and the caller should exit.
     """
+    if isinstance(exc, MissingScopesError):
+        _handle_missing_scopes(exc, formatter, cmd_name)
+        return True
     if isinstance(exc, AuthError):
         _handle_auth_error(exc, formatter, cmd_name)
         return True
@@ -216,7 +236,55 @@ def _handle_known_error(
     if isinstance(exc, RegistrationRequiredError):
         _handle_registration_required(exc, app_ctx, formatter, cmd_name)
         return True
+    if isinstance(exc, TierError):
+        _handle_tier_error(exc, formatter, cmd_name)
+        return True
+    if isinstance(exc, KeyNotEnrolledError):
+        _handle_key_not_enrolled(exc, formatter, cmd_name)
+        return True
+    if isinstance(exc, SessionError):
+        _handle_session_error(exc, formatter, cmd_name)
+        return True
     return False
+
+
+def _handle_missing_scopes(
+    exc: MissingScopesError,
+    formatter: OutputFormatter,
+    cmd_name: str,
+) -> None:
+    """Show a friendly error when the token lacks required OAuth scopes."""
+    message = "Your OAuth token is missing required scopes for this command."
+
+    if formatter.format == "json":
+        formatter.output_error(
+            code="missing_scopes",
+            message=(
+                f"{message} Re-login with 'tescmd auth login'. If the error persists, "
+                "check your Tesla Developer Portal app and ensure all required "
+                "scopes are enabled. Note: 'tescmd auth status' shows requested scopes, "
+                "not what Tesla granted — Tesla silently drops scopes your app "
+                "isn't configured for."
+            ),
+            command=cmd_name,
+        )
+        return
+
+    formatter.rich.error(message)
+    formatter.rich.info("")
+    formatter.rich.info("Next steps:")
+    formatter.rich.info("  1. Re-login to refresh your token:")
+    formatter.rich.info("     [cyan]tescmd auth login[/cyan]")
+    formatter.rich.info("")
+    formatter.rich.info("  2. If the error persists, check your Tesla Developer Portal app")
+    formatter.rich.info("     at [cyan]https://developer.tesla.com[/cyan] and ensure all")
+    formatter.rich.info("     required scopes are enabled (user_data, energy_device_data, etc.).")
+    formatter.rich.info("")
+    formatter.rich.info(
+        "[dim]Note: 'tescmd auth status' shows scopes that were requested, not necessarily"
+        " what Tesla granted. Tesla silently drops scopes your Developer Portal app"
+        " isn't configured for.[/dim]"
+    )
 
 
 def _handle_auth_error(
@@ -319,7 +387,7 @@ def _handle_registration_required(
             " Registering now...[/yellow]"
         )
         try:
-            run_async(
+            _result, _scopes = run_async(
                 register_partner_account(
                     client_id=settings.client_id,
                     client_secret=settings.client_secret,
@@ -347,3 +415,102 @@ def _handle_registration_required(
     formatter.rich.info(
         "[dim]This is a one-time step after creating your developer application.[/dim]"
     )
+
+
+def _handle_tier_error(
+    exc: TierError,
+    formatter: OutputFormatter,
+    cmd_name: str,
+) -> None:
+    """Show a friendly tier-mismatch error with upgrade guidance."""
+    message = str(exc) or "This command requires 'full' tier setup."
+
+    if formatter.format == "json":
+        formatter.output_error(
+            code="tier_readonly",
+            message=message,
+            command=cmd_name,
+        )
+        return
+
+    formatter.rich.error(message)
+    formatter.rich.info("")
+    formatter.rich.info("Your setup tier is [yellow]readonly[/yellow].")
+    formatter.rich.info(
+        "Vehicle commands (lock, charge, climate, etc.) require [cyan]full[/cyan] tier."
+    )
+    formatter.rich.info("")
+    formatter.rich.info("To upgrade:")
+    formatter.rich.info("  [cyan]tescmd setup[/cyan]")
+
+
+def _handle_key_not_enrolled(
+    exc: KeyNotEnrolledError,
+    formatter: OutputFormatter,
+    cmd_name: str,
+) -> None:
+    """Show a friendly key-not-enrolled error with enrollment steps."""
+    from tescmd.models.config import AppSettings
+
+    message = str(exc) or "Your key is not enrolled on this vehicle."
+    settings = AppSettings()
+    domain = settings.domain
+
+    if formatter.format == "json":
+        if domain:
+            message += f" Enroll at https://tesla.com/_ak/{domain}"
+        formatter.output_error(
+            code="key_not_enrolled",
+            message=message,
+            command=cmd_name,
+        )
+        return
+
+    formatter.rich.error(message)
+    formatter.rich.info("")
+    if domain:
+        enroll_url = f"https://tesla.com/_ak/{domain}"
+        formatter.rich.info("To enroll your key:")
+        formatter.rich.info(f"  1. Open [link={enroll_url}]{enroll_url}[/link] on your phone")
+        formatter.rich.info("  2. Tap [bold]Finish Setup[/bold] on the web page")
+        formatter.rich.info(
+            "  3. Approve the [bold]Add Virtual Key[/bold] prompt in the Tesla app"
+        )
+        formatter.rich.info("")
+        formatter.rich.info(
+            "Or run [cyan]tescmd key enroll[/cyan] to see the full enrollment guide."
+        )
+    else:
+        formatter.rich.info("To enroll your key:")
+        formatter.rich.info("  [cyan]tescmd key enroll[/cyan]")
+        formatter.rich.info("")
+        formatter.rich.info("[dim]Set TESLA_DOMAIN first if not already configured.[/dim]")
+
+
+def _handle_session_error(
+    exc: SessionError,
+    formatter: OutputFormatter,
+    cmd_name: str,
+) -> None:
+    """Show a friendly session handshake error with recovery steps."""
+    message = str(exc) or "Session handshake with the vehicle failed."
+
+    if formatter.format == "json":
+        formatter.output_error(
+            code="session_error",
+            message=message,
+            command=cmd_name,
+        )
+        return
+
+    formatter.rich.error(message)
+    formatter.rich.info("")
+    formatter.rich.info("Possible causes:")
+    formatter.rich.info("  - Vehicle is temporarily unreachable")
+    formatter.rich.info("  - Local key pair is corrupted")
+    formatter.rich.info("  - Key was re-generated but not re-enrolled")
+    formatter.rich.info("")
+    formatter.rich.info("Try again, or if the problem persists:")
+    formatter.rich.info("  [cyan]tescmd key generate --force[/cyan]  (regenerate key pair)")
+    formatter.rich.info("  [cyan]tescmd key deploy[/cyan]            (re-deploy public key)")
+    formatter.rich.info("  [cyan]tescmd key enroll[/cyan]            (re-enroll on vehicle)")

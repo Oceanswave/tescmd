@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 from tescmd.api.errors import (
     AuthError,
+    MissingScopesError,
     NetworkError,
     RateLimitError,
     RegistrationRequiredError,
@@ -166,6 +167,12 @@ class TeslaFleetClient:
                 "for this region. Run 'tescmd auth register' to fix this.",
                 status_code=412,
             )
+
+        if response.status_code == 403:
+            text = response.text[:200]
+            if "missing scopes" in text.lower():
+                raise MissingScopesError(text, status_code=403)
+            raise AuthError(f"HTTP 403: {text}", status_code=403)
 
         if response.status_code >= 400:
             text = response.text[:200]

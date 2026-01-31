@@ -20,7 +20,7 @@ from tescmd.auth.oauth import (
 )
 from tescmd.auth.token_store import TokenStore
 from tescmd.cli._options import global_options
-from tescmd.models.auth import DEFAULT_SCOPES
+from tescmd.models.auth import DEFAULT_SCOPES, PARTNER_SCOPES, TokenData, decode_jwt_scopes
 from tescmd.models.config import AppSettings
 
 if TYPE_CHECKING:
@@ -44,13 +44,19 @@ auth_group = click.Group("auth", help="Authentication commands")
 
 @auth_group.command("login")
 @click.option("--port", type=int, default=8085, help="Local callback port")
+@click.option(
+    "--reconsent",
+    is_flag=True,
+    default=False,
+    help="Force Tesla to re-display the scope consent screen.",
+)
 @global_options
-def login_cmd(app_ctx: AppContext, port: int) -> None:
+def login_cmd(app_ctx: AppContext, port: int, reconsent: bool) -> None:
     """Log in via OAuth2 PKCE flow."""
-    run_async(_cmd_login(app_ctx, port))
+    run_async(_cmd_login(app_ctx, port, reconsent=reconsent))
 
 
-async def _cmd_login(app_ctx: AppContext, port: int) -> None:
+async def _cmd_login(app_ctx: AppContext, port: int, *, reconsent: bool = False) -> None:
     formatter = app_ctx.formatter
     settings = AppSettings()
 
@@ -89,7 +95,7 @@ async def _cmd_login(app_ctx: AppContext, port: int) -> None:
     )
     formatter.rich.info("[dim]If the browser doesn't open, visit the URL printed below.[/dim]")
 
-    await login_flow(
+    token = await login_flow(
         client_id=client_id,
         client_secret=client_secret,
         redirect_uri=redirect_uri,
@@ -97,10 +103,12 @@ async def _cmd_login(app_ctx: AppContext, port: int) -> None:
         port=port,
         token_store=store,
         region=region,
+        force_consent=reconsent,
     )
 
     formatter.rich.info("")
     formatter.rich.info("[bold green]Login successful![/bold green]")
+    _warn_missing_scopes(formatter, token, requested=DEFAULT_SCOPES)
 
     # Auto-register with the Fleet API (requires client_secret + domain)
     if client_secret and settings.domain:
@@ -160,21 +168,35 @@ async def _cmd_status(app_ctx: AppContext) -> None:
     region: str = meta.get("region", "unknown")
     has_refresh = store.refresh_token is not None
 
+    # Decode the JWT to show the *actual* granted scopes
+    token_scopes: list[str] | None = None
+    access_token = store.access_token
+    if access_token:
+        token_scopes = decode_jwt_scopes(access_token)
+
     if formatter.format == "json":
-        formatter.output(
-            {
-                "authenticated": True,
-                "expires_in": expires_in,
-                "scopes": scopes,
-                "region": region,
-                "has_refresh_token": has_refresh,
-            },
-            command="auth.status",
-        )
+        data: dict[str, object] = {
+            "authenticated": True,
+            "expires_in": expires_in,
+            "scopes": scopes,
+            "region": region,
+            "has_refresh_token": has_refresh,
+        }
+        if token_scopes is not None:
+            data["token_scopes"] = token_scopes
+        formatter.output(data, command="auth.status")
     else:
         formatter.rich.info("Authenticated: yes")
         formatter.rich.info(f"Expires in: {expires_in}s")
-        formatter.rich.info(f"Scopes: {', '.join(scopes)}")
+        formatter.rich.info(f"Scopes (stored): {', '.join(scopes)}")
+        if token_scopes is not None:
+            formatter.rich.info(f"Scopes (token):  {', '.join(token_scopes)}")
+            missing = set(scopes) - set(token_scopes)
+            if missing:
+                not_granted = ", ".join(sorted(missing))
+                formatter.rich.info(
+                    f"  [yellow]Warning: requested but not granted: {not_granted}[/yellow]"
+                )
         formatter.rich.info(f"Region: {region}")
         formatter.rich.info(f"Refresh token: {'yes' if has_refresh else 'no'}")
 
@@ -277,7 +299,7 @@ async def _cmd_register(app_ctx: AppContext) -> None:
     if formatter.format != "json":
         formatter.rich.info(f"Registering application with Fleet API ({region} region)...")
 
-    await register_partner_account(
+    _result, partner_scopes = await register_partner_account(
         client_id=settings.client_id,
         client_secret=settings.client_secret,
         domain=domain,
@@ -285,12 +307,26 @@ async def _cmd_register(app_ctx: AppContext) -> None:
     )
 
     if formatter.format == "json":
-        formatter.output(
-            {"status": "registered", "region": region, "domain": domain},
-            command="auth.register",
-        )
+        data: dict[str, object] = {
+            "status": "registered",
+            "region": region,
+            "domain": domain,
+        }
+        if partner_scopes:
+            data["partner_scopes"] = partner_scopes
+        formatter.output(data, command="auth.register")
     else:
         formatter.rich.info("[green]Registration successful.[/green]")
+        if partner_scopes:
+            formatter.rich.info(f"Partner scopes: {', '.join(partner_scopes)}")
+            missing = sorted(set(PARTNER_SCOPES) - set(partner_scopes))
+            if missing:
+                scope_list = ", ".join(missing)
+                formatter.rich.info(
+                    f"[yellow]Warning: partner token is missing: {scope_list}[/yellow]"
+                )
+                formatter.rich.info("  These scopes won't be available in user tokens.")
+                formatter.rich.info("  Check your Tesla Developer Portal app configuration.")
         formatter.rich.info("")
         formatter.rich.info("Try it out:")
         formatter.rich.info("  [cyan]tescmd vehicle list[/cyan]")
@@ -333,13 +369,20 @@ async def _auto_register(
     formatter.rich.info("")
     formatter.rich.info("Registering with the Fleet API...")
     try:
-        await register_partner_account(
+        _result, partner_scopes = await register_partner_account(
             client_id=client_id,
             client_secret=client_secret,
             domain=domain,
             region=region,
         )
         formatter.rich.info("[green]Registration successful.[/green]")
+        if partner_scopes:
+            missing = sorted(set(PARTNER_SCOPES) - set(partner_scopes))
+            if missing:
+                scope_list = ", ".join(missing)
+                formatter.rich.info(
+                    f"[yellow]Warning: partner token missing scopes: {scope_list}[/yellow]"
+                )
     except Exception:
         formatter.rich.info(
             "[yellow]Registration failed. Run [cyan]tescmd auth register[/cyan] to retry.[/yellow]"
@@ -518,6 +561,45 @@ def _prompt_for_domain(formatter: OutputFormatter) -> str:
     info(f"[green]Domain saved to .env: {domain}[/green]")
 
     return domain
+
+
+def _warn_missing_scopes(
+    formatter: OutputFormatter,
+    token: TokenData,
+    *,
+    requested: list[str],
+) -> None:
+    """Warn the user if the token has fewer scopes than requested."""
+    granted = decode_jwt_scopes(token.access_token)
+    if granted is None:
+        return
+
+    # offline_access is a token-lifetime directive, not present in JWTs
+    requested_set = {s for s in requested if s != "offline_access"}
+    missing = sorted(requested_set - set(granted))
+    if not missing:
+        return
+
+    scope_list = ", ".join(missing)
+    if formatter.format == "json":
+        formatter.output(
+            {
+                "warning": "missing_scopes",
+                "missing": missing,
+                "message": (
+                    f"Token is missing requested scopes: {scope_list}. "
+                    "Run 'tescmd auth login --reconsent' to re-approve scopes."
+                ),
+            },
+            command="auth.login",
+        )
+    else:
+        formatter.rich.info("")
+        formatter.rich.info(f"[yellow]Warning: token is missing scopes: {scope_list}[/yellow]")
+        formatter.rich.info("  Tesla is using a cached consent that predates these scopes.")
+        formatter.rich.info(
+            "  Run [cyan]tescmd auth login --reconsent[/cyan] to re-approve all scopes."
+        )
 
 
 def _write_env_file(

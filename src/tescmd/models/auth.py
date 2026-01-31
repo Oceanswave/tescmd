@@ -1,6 +1,13 @@
 from __future__ import annotations
 
+import base64
+import json
+import logging
+from typing import Any
+
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Scope constants
@@ -19,6 +26,13 @@ ENERGY_SCOPES: list[str] = [
 
 USER_SCOPES: list[str] = [
     "user_data",
+]
+
+PARTNER_SCOPES: list[str] = [
+    "openid",
+    *VEHICLE_SCOPES,
+    *ENERGY_SCOPES,
+    *USER_SCOPES,
 ]
 
 DEFAULT_SCOPES: list[str] = [
@@ -41,7 +55,7 @@ TOKEN_URL: str = f"{AUTH_BASE_URL}/oauth2/v3/token"
 # ---------------------------------------------------------------------------
 
 
-class TokenData(BaseModel):
+class TokenData(BaseModel, extra="allow"):
     """Raw token response from the Tesla OAuth endpoint."""
 
     access_token: str
@@ -49,6 +63,7 @@ class TokenData(BaseModel):
     expires_in: int
     refresh_token: str | None = None
     id_token: str | None = None
+    scope: str | None = None  # space-separated granted scopes (if returned by server)
 
 
 class TokenMeta(BaseModel):
@@ -57,6 +72,31 @@ class TokenMeta(BaseModel):
     expires_at: float
     scopes: list[str]
     region: str
+
+
+def decode_jwt_scopes(token: str) -> list[str] | None:
+    """Extract scopes from a JWT access token without verifying the signature.
+
+    Tesla access tokens are JWTs with an ``scp`` claim containing the
+    granted scopes.  Returns ``None`` if the token isn't a JWT or the
+    ``scp`` claim is absent.
+    """
+    parts = token.split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        # JWT uses base64url encoding; add padding for stdlib decoder
+        payload_b64 = parts[1] + "=" * (-len(parts[1]) % 4)
+        payload_bytes = base64.urlsafe_b64decode(payload_b64)
+        payload: dict[str, Any] = json.loads(payload_bytes)
+    except (ValueError, json.JSONDecodeError):
+        logger.debug("Failed to decode JWT payload")
+        return None
+
+    scp = payload.get("scp")
+    if isinstance(scp, list):
+        return [str(s) for s in scp]
+    return None
 
 
 class AuthConfig(BaseModel):

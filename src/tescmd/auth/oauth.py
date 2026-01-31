@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
 import secrets
 import time
 import webbrowser
@@ -17,12 +18,16 @@ from tescmd.api.errors import AuthError
 from tescmd.auth.server import OAuthCallbackServer
 from tescmd.models.auth import (
     AUTHORIZE_URL,
+    PARTNER_SCOPES,
     TOKEN_URL,
     TokenData,
+    decode_jwt_scopes,
 )
 
 if TYPE_CHECKING:
     from tescmd.auth.token_store import TokenStore
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # PKCE helpers
@@ -46,9 +51,17 @@ def build_auth_url(
     scopes: list[str],
     code_challenge: str,
     state: str,
+    *,
+    force_consent: bool = False,
 ) -> str:
-    """Build the full Tesla authorization URL."""
-    params = {
+    """Build the full Tesla authorization URL.
+
+    When *force_consent* is ``True`` the ``prompt_missing_scopes=true``
+    parameter is added so Tesla prompts the user to approve any scopes
+    that were not granted in a previous consent.  This is Tesla's
+    proprietary parameter (not the standard ``prompt=consent``).
+    """
+    params: dict[str, str] = {
         "response_type": "code",
         "client_id": client_id,
         "redirect_uri": redirect_uri,
@@ -57,6 +70,8 @@ def build_auth_url(
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
     }
+    if force_consent:
+        params["prompt_missing_scopes"] = "true"
     return f"{AUTHORIZE_URL}?{urlencode(params)}"
 
 
@@ -120,11 +135,15 @@ async def get_partner_token(
     client_id: str,
     client_secret: str,
     region: str = "na",
-) -> str:
+) -> tuple[str, list[str]]:
     """Obtain a partner token via *client_credentials* grant.
 
     The ``audience`` parameter tells Tesla which regional endpoint the
     token is for.
+
+    Returns a ``(token, granted_scopes)`` tuple.  *granted_scopes* are
+    decoded from the JWT ``scp`` claim so callers can verify that the
+    partner registration will cover all requested scopes.
     """
     audience = REGION_BASE_URLS.get(region)
     if audience is None:
@@ -135,7 +154,7 @@ async def get_partner_token(
         "grant_type": "client_credentials",
         "client_id": client_id,
         "client_secret": client_secret,
-        "scope": "openid vehicle_device_data vehicle_cmds vehicle_charging_cmds",
+        "scope": " ".join(PARTNER_SCOPES),
         "audience": audience,
     }
 
@@ -148,7 +167,11 @@ async def get_partner_token(
         )
     data: dict[str, Any] = resp.json()
     token: str = data["access_token"]
-    return token
+
+    granted = decode_jwt_scopes(token) or []
+    logger.debug("Partner token scopes: requested=%s, granted=%s", PARTNER_SCOPES, granted)
+
+    return token, granted
 
 
 async def register_partner_account(
@@ -156,18 +179,22 @@ async def register_partner_account(
     client_secret: str,
     domain: str = "localhost",
     region: str = "na",
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], list[str]]:
     """Register the application with the Tesla Fleet API for *region*.
 
     This must be called once per region before the Fleet API will accept
     requests.  It is safe to call more than once (idempotent).
+
+    Returns a ``(response_body, partner_scopes)`` tuple.
+    *partner_scopes* are the scopes actually granted in the partner
+    token, which determines the ceiling for user token scopes.
     """
     base_url = REGION_BASE_URLS.get(region)
     if base_url is None:
         msg = f"Unknown region {region!r}; expected one of {sorted(REGION_BASE_URLS)}"
         raise AuthError(msg)
 
-    partner_token = await get_partner_token(client_id, client_secret, region)
+    partner_token, granted_scopes = await get_partner_token(client_id, client_secret, region)
 
     async with httpx.AsyncClient() as client:
         resp = await client.post(
@@ -182,7 +209,30 @@ async def register_partner_account(
             status_code=resp.status_code,
         )
     result: dict[str, Any] = resp.json()
-    return result
+    return result, granted_scopes
+
+
+# ---------------------------------------------------------------------------
+# Scope extraction
+# ---------------------------------------------------------------------------
+
+
+def _extract_granted_scopes(token: TokenData, *, requested: list[str]) -> list[str]:
+    """Return the scopes actually granted in the token response.
+
+    Checks three sources in priority order:
+    1. ``token.scope`` — the ``scope`` field from the OAuth token response
+    2. JWT ``scp`` claim — decoded from the access token payload
+    3. *requested* — falls back to whatever we asked for
+    """
+    if token.scope:
+        return token.scope.split()
+
+    jwt_scopes = decode_jwt_scopes(token.access_token)
+    if jwt_scopes is not None:
+        return jwt_scopes
+
+    return requested
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +248,8 @@ async def login_flow(
     port: int,
     token_store: TokenStore,
     region: str = "na",
+    *,
+    force_consent: bool = False,
 ) -> TokenData:
     """Run the full OAuth2 PKCE login flow interactively.
 
@@ -207,6 +259,9 @@ async def login_flow(
     4. Wait for redirect with auth code
     5. Exchange code for tokens
     6. Persist to *token_store*
+
+    When *force_consent* is ``True`` the authorization URL includes
+    ``prompt_missing_scopes=true`` so Tesla prompts for any new scopes.
     """
     verifier = _generate_code_verifier()
     challenge = _generate_code_challenge(verifier)
@@ -215,7 +270,14 @@ async def login_flow(
     server = OAuthCallbackServer(port=port)
     server.start()
     try:
-        url = build_auth_url(client_id, redirect_uri, scopes, challenge, state)
+        url = build_auth_url(
+            client_id,
+            redirect_uri,
+            scopes,
+            challenge,
+            state,
+            force_consent=force_consent,
+        )
         webbrowser.open(url)
 
         code, callback_state = server.wait_for_callback(timeout=120)
@@ -236,11 +298,15 @@ async def login_flow(
         redirect_uri=redirect_uri,
     )
 
+    # Determine actually granted scopes — prefer the token response's scope
+    # field, then JWT payload, then fall back to what we requested.
+    granted = _extract_granted_scopes(token, requested=scopes)
+
     token_store.save(
         access_token=token.access_token,
         refresh_token=token.refresh_token or "",
         expires_at=time.time() + token.expires_in,
-        scopes=scopes,
+        scopes=granted,
         region=region,
     )
     return token

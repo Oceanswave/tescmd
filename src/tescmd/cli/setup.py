@@ -73,6 +73,10 @@ async def _cmd_setup(app_ctx: AppContext) -> None:
     if tier == TIER_FULL:
         _key_setup(formatter, settings, domain)
 
+    # Phase 3.5: Key enrollment (full tier only)
+    if tier == TIER_FULL:
+        await _enrollment_step(formatter, app_ctx, settings)
+
     # Phase 4: Fleet API partner registration
     await _registration_step(formatter, app_ctx, settings, client_id, client_secret, domain)
 
@@ -350,6 +354,89 @@ def _key_setup(formatter: OutputFormatter, settings: AppSettings, domain: str) -
 
 
 # ---------------------------------------------------------------------------
+# Phase 3.5: Key enrollment
+# ---------------------------------------------------------------------------
+
+
+async def _enrollment_step(
+    formatter: OutputFormatter,
+    app_ctx: AppContext,
+    settings: AppSettings,
+) -> None:
+    """Guide the user through key enrollment via the Tesla app portal."""
+    import webbrowser
+
+    from tescmd.crypto.keys import get_key_fingerprint, has_key_pair
+    from tescmd.deploy.github_pages import get_key_url, validate_key_url
+
+    info = formatter.rich.info
+    key_dir = Path(settings.config_dir).expanduser() / "keys"
+
+    if not has_key_pair(key_dir):
+        return  # No keys to enroll
+
+    domain = settings.domain
+    if not domain:
+        info("[yellow]No domain configured — skipping enrollment.[/yellow]")
+        info("  Run [cyan]tescmd key enroll[/cyan] after setting TESLA_DOMAIN.")
+        info("")
+        return
+
+    info("[bold]Phase 3.5: Key Enrollment[/bold]")
+    info("")
+    info("  Your key is generated and deployed. To control a vehicle, the key")
+    info("  must also be enrolled via the Tesla app.")
+    info("")
+
+    # Verify the public key is accessible
+    key_url = get_key_url(domain)
+    key_accessible = validate_key_url(domain)
+    if not key_accessible:
+        info(f"  [yellow]Public key not accessible at {key_url}[/yellow]")
+        info("  Enrollment requires the key to be live. Skipping for now.")
+        info("  After deploying, run [cyan]tescmd key enroll[/cyan].")
+        info("")
+        return
+
+    fingerprint = get_key_fingerprint(key_dir)
+    enroll_url = f"https://tesla.com/_ak/{domain}"
+
+    info(f"  Domain:      {domain}")
+    info(f"  Fingerprint: {fingerprint[:8]}…")
+    info(f"  Public key:  [green]accessible[/green] at {key_url}")
+    info("")
+
+    try:
+        answer = input("  Open enrollment URL in your browser? [Y/n] ").strip()
+    except (EOFError, KeyboardInterrupt):
+        info("")
+        return
+
+    if answer.lower() not in ("n", "no"):
+        info("")
+        info(f"  Opening [link={enroll_url}]{enroll_url}[/link]…")
+        webbrowser.open(enroll_url)
+        info("")
+
+    info("  " + "━" * 49)
+    info("    [bold yellow]ACTION REQUIRED: Add virtual key in the Tesla app[/bold yellow]")
+    info("")
+    info(f"    Enrollment URL: {enroll_url}")
+    info("")
+    info("    1. Open the URL above [bold]on your phone[/bold]")
+    info("    2. Tap [bold]Finish Setup[/bold] on the web page")
+    info("    3. The Tesla app shows an [bold]Add Virtual Key[/bold] prompt")
+    info("    4. Approve it")
+    info("")
+    info("    [dim]If the prompt doesn't appear, force-quit the Tesla app,")
+    info("    go back to your browser, and tap Finish Setup again.[/dim]")
+    info("  " + "━" * 49)
+    info("")
+    info("  After approving, try: [cyan]tescmd charge status --wake[/cyan]")
+    info("")
+
+
+# ---------------------------------------------------------------------------
 # Phase 4: Fleet API registration
 # ---------------------------------------------------------------------------
 
@@ -389,7 +476,7 @@ async def _registration_step(
 
     info(f"Registering with Fleet API ({region} region)...")
     try:
-        await register_partner_account(
+        _result, _scopes = await register_partner_account(
             client_id=client_id,
             client_secret=client_secret,
             domain=domain,
@@ -596,15 +683,34 @@ async def _oauth_login_step(
     info = formatter.rich.info
 
     from tescmd.auth.token_store import TokenStore
+    from tescmd.models.auth import DEFAULT_SCOPES
 
     store = TokenStore(profile=app_ctx.profile)
-    if store.has_token:
-        info("Already logged in. Skipping OAuth flow.")
-        info("")
-        return
 
-    info("[bold]Phase 5: OAuth Login[/bold]")
-    info("")
+    if store.has_token:
+        # Check whether the stored scopes cover what we need.
+        # A readonly→full upgrade requires vehicle_cmds + vehicle_charging_cmds
+        # that the original readonly token may not have.
+        stored_scopes = set((store.metadata or {}).get("scopes", []))
+        required_scopes = set(DEFAULT_SCOPES)
+        missing = required_scopes - stored_scopes
+
+        if not missing:
+            info("Already logged in with required scopes. Skipping OAuth flow.")
+            info("")
+            return
+
+        info("[bold]Phase 5: OAuth Login[/bold]")
+        info("")
+        info("[yellow]Your existing token is missing scopes needed for full control:[/yellow]")
+        for scope in sorted(missing):
+            info(f"  - {scope}")
+        info("")
+        info("Re-authenticating to request all required scopes...")
+        info("")
+    else:
+        info("[bold]Phase 5: OAuth Login[/bold]")
+        info("")
 
     port = 8085
     redirect_uri = f"http://localhost:{port}/callback"
@@ -617,7 +723,6 @@ async def _oauth_login_step(
     info("[dim]If the browser doesn't open, visit the URL printed below.[/dim]")
 
     from tescmd.auth.oauth import login_flow
-    from tescmd.models.auth import DEFAULT_SCOPES
 
     region = app_ctx.region or settings.region
 
@@ -654,9 +759,8 @@ def _print_next_steps(formatter: OutputFormatter, tier: str) -> None:
 
     if tier == TIER_FULL:
         info("[bold]For vehicle commands:[/bold]")
-        info("  You also need to enroll your EC key on each vehicle.")
-        info("  Open the Tesla app → Security → Third-Party Access")
-        info("  and approve the key enrollment request.")
+        info("  If you haven't already, enroll your key on each vehicle:")
+        info("  [cyan]tescmd key enroll[/cyan]")
         info("")
         info("  Once enrolled, try:")
         info("  [cyan]tescmd vehicle wake[/cyan]  — wake up your vehicle")

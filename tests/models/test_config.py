@@ -59,9 +59,9 @@ class TestAppSettings:
             if key.startswith("TESLA_"):
                 monkeypatch.delenv(key, raising=False)
 
-        monkeypatch.setenv("TESLA_DOMAIN", "Oceanswave.GitHub.IO")
+        monkeypatch.setenv("TESLA_DOMAIN", "Testuser.GitHub.IO")
         settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
-        assert settings.domain == "oceanswave.github.io"
+        assert settings.domain == "testuser.github.io"
 
     def test_domain_none_stays_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         for key in list(os.environ):

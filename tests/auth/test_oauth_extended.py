@@ -105,12 +105,14 @@ class TestGetPartnerToken:
                 "expires_in": 3600,
             },
         )
-        token = await get_partner_token(
+        token, granted_scopes = await get_partner_token(
             client_id="cid",
             client_secret="csecret",
             region="na",
         )
         assert token == "partner-token-123"
+        # Non-JWT token → no scopes decoded
+        assert granted_scopes == []
 
     @pytest.mark.asyncio
     async def test_partner_token_invalid_region(self) -> None:

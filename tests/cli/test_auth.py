@@ -19,11 +19,11 @@ class TestPromptForDomain:
     def test_lowercases_user_input(self) -> None:
         formatter = _make_formatter()
         with (
-            patch("builtins.input", return_value="Oceanswave.GitHub.IO"),
+            patch("builtins.input", return_value="Testuser.GitHub.IO"),
             patch("tescmd.cli.auth._write_env_value"),
         ):
             domain = _prompt_for_domain(formatter)
-        assert domain == "oceanswave.github.io"
+        assert domain == "testuser.github.io"
 
     def test_strips_https_and_lowercases(self) -> None:
         formatter = _make_formatter()

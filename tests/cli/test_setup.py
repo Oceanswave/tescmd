@@ -189,24 +189,24 @@ class TestAutomatedDomainSetup:
         with (
             patch(
                 "tescmd.deploy.github_pages.get_gh_username",
-                return_value="Oceanswave",
+                return_value="Testuser",
             ),
             patch(
                 "tescmd.deploy.github_pages.create_pages_repo",
-                return_value="Oceanswave/Oceanswave.github.io",
+                return_value="Testuser/Testuser.github.io",
             ),
             patch(
                 "tescmd.deploy.github_pages.get_pages_domain",
-                return_value="oceanswave.github.io",
+                return_value="testuser.github.io",
             ),
             patch("builtins.input", return_value="Y"),
             patch("tescmd.cli.auth._write_env_value") as mock_write,
         ):
             domain = _automated_domain_setup(formatter, settings)
 
-        assert domain == "oceanswave.github.io"
+        assert domain == "testuser.github.io"
         # Verify the lowercased domain was persisted
-        mock_write.assert_any_call("TESLA_DOMAIN", "oceanswave.github.io")
+        mock_write.assert_any_call("TESLA_DOMAIN", "testuser.github.io")
 
 
 # ---------------------------------------------------------------------------
@@ -319,6 +319,10 @@ class TestCmdSetup:
             ),
             patch("tescmd.cli.setup._domain_setup", return_value="user.github.io"),
             patch("tescmd.cli.setup._key_setup") as mock_key,
+            patch(
+                "tescmd.cli.setup._enrollment_step",
+                new_callable=AsyncMock,
+            ),
             patch(
                 "tescmd.cli.setup._registration_step",
                 new_callable=AsyncMock,

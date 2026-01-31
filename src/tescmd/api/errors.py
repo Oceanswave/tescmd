@@ -58,3 +58,19 @@ class NetworkError(TeslaAPIError):
 
 class ConfigError(Exception):
     """Raised for configuration problems (not an API error)."""
+
+
+class TierError(ConfigError):
+    """Command requires full-tier setup but only readonly is configured."""
+
+
+class SessionError(TeslaAPIError):
+    """ECDH session handshake failed."""
+
+
+class MissingScopesError(AuthError):
+    """Raised on HTTP 403 when the token lacks required OAuth scopes."""
+
+
+class KeyNotEnrolledError(TeslaAPIError):
+    """Vehicle rejected the command — key not enrolled."""
