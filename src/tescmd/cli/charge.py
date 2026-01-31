@@ -462,7 +462,7 @@ def add_schedule_cmd(
             vin_positional,
             "add_charge_schedule",
             "charge.add-schedule",
-            body={"schedule": json.dumps(schedule)},
+            body=schedule,
             success_message="Charge schedule updated.",
         )
     )

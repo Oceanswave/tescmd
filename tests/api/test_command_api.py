@@ -126,6 +126,32 @@ class TestClimateCommands:
         assert _body(httpx_mock)["climate_keeper_mode"] == 2
 
 
+class TestCabinOverheatProtection:
+    @pytest.mark.asyncio
+    async def test_fan_only_defaults_false(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        await api.set_cabin_overheat_protection(VIN, on=True)
+
+        body = _body(httpx_mock)
+        assert body["on"] is True
+        assert body["fan_only"] is False
+
+    @pytest.mark.asyncio
+    async def test_fan_only_explicit_true(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        await api.set_cabin_overheat_protection(VIN, on=True, fan_only=True)
+
+        body = _body(httpx_mock)
+        assert body["on"] is True
+        assert body["fan_only"] is True
+
+
 class TestSecurityCommands:
     @pytest.mark.asyncio
     async def test_door_lock_no_body(
@@ -247,19 +273,71 @@ class TestScheduledDeparture:
         assert body["end_off_peak_time"] == 360
 
 
-class TestPreconditionSchedule:
+class TestChargeSchedule:
     @pytest.mark.asyncio
-    async def test_add_precondition_schedule(
+    async def test_add_charge_schedule_with_params(
         self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
     ) -> None:
         httpx_mock.add_response(json=_OK_RESPONSE)
         api = CommandAPI(mock_client)
-        schedule = {"id": 1, "enabled": True, "days_of_week": 127}
-        await api.add_precondition_schedule(VIN, schedule=schedule)
+        await api.add_charge_schedule(
+            VIN, id=1, enabled=True, start_time=360, end_time=480, days_of_week="0111110"
+        )
 
         body = _body(httpx_mock)
         assert body["id"] == 1
         assert body["enabled"] is True
+        assert body["start_time"] == 360
+        assert body["days_of_week"] == "0111110"
+
+    @pytest.mark.asyncio
+    async def test_add_charge_schedule_omits_none_params(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        await api.add_charge_schedule(VIN, id=1, enabled=True)
+
+        body = _body(httpx_mock)
+        assert body == {"id": 1, "enabled": True}
+
+    @pytest.mark.asyncio
+    async def test_remove_charge_schedule(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        await api.remove_charge_schedule(VIN, id=1)
+
+        assert _body(httpx_mock)["id"] == 1
+
+
+class TestPreconditionSchedule:
+    @pytest.mark.asyncio
+    async def test_add_precondition_schedule_with_params(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        await api.add_precondition_schedule(
+            VIN, id=1, enabled=True, days_of_week="1111111"
+        )
+
+        body = _body(httpx_mock)
+        assert body["id"] == 1
+        assert body["enabled"] is True
+        assert body["days_of_week"] == "1111111"
+
+    @pytest.mark.asyncio
+    async def test_add_precondition_schedule_omits_none_params(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(json=_OK_RESPONSE)
+        api = CommandAPI(mock_client)
+        await api.add_precondition_schedule(VIN, id=2, enabled=False)
+
+        body = _body(httpx_mock)
+        assert body == {"id": 2, "enabled": False}
 
     @pytest.mark.asyncio
     async def test_remove_precondition_schedule(

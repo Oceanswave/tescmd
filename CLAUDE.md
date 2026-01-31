@@ -223,7 +223,7 @@ The `[R] Retry` option allows users to wake the vehicle for free via the Tesla m
 - Test files mirror source: `tests/cli/test_auth.py`, `tests/api/test_client.py`, etc.
 - Use `pytest-httpx` to mock HTTP responses (no live API calls in tests)
 - Async tests use `@pytest.mark.asyncio`
-- Current count: ~902 tests
+- Current count: ~910 tests
 
 ## Linting & Formatting
 

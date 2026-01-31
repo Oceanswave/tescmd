@@ -320,7 +320,7 @@ class TestPreconditionAdd:
             json=COMMAND_OK,
         )
         runner = CliRunner()
-        schedule_json = json.dumps({"schedule": {"days_of_week": 127, "enabled": True}})
+        schedule_json = json.dumps({"days_of_week": "127", "enabled": True, "id": 1})
         result = runner.invoke(
             cli,
             ["--format", "json", "--wake", "charge", "precondition-add", VIN, schedule_json],

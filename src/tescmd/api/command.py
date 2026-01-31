@@ -95,9 +95,33 @@ class CommandAPI:
         )
 
     async def add_precondition_schedule(
-        self, vin: str, *, schedule: dict[str, Any]
+        self,
+        vin: str,
+        *,
+        lat: float | None = None,
+        lon: float | None = None,
+        precondition_time: int | None = None,
+        one_time: bool | None = None,
+        days_of_week: str | None = None,
+        id: int | None = None,
+        enabled: bool | None = None,
     ) -> CommandResponse:
-        return await self._command(vin, "add_precondition_schedule", schedule)
+        body: dict[str, Any] = {}
+        if lat is not None:
+            body["lat"] = lat
+        if lon is not None:
+            body["lon"] = lon
+        if precondition_time is not None:
+            body["precondition_time"] = precondition_time
+        if one_time is not None:
+            body["one_time"] = one_time
+        if days_of_week is not None:
+            body["days_of_week"] = days_of_week
+        if id is not None:
+            body["id"] = id
+        if enabled is not None:
+            body["enabled"] = enabled
+        return await self._command(vin, "add_precondition_schedule", body)
 
     async def remove_precondition_schedule(self, vin: str, *, id: int) -> CommandResponse:
         return await self._command(vin, "remove_precondition_schedule", {"id": id})
@@ -148,7 +172,7 @@ class CommandAPI:
         return await self._command(vin, "remote_steering_wheel_heater_request", {"on": on})
 
     async def set_cabin_overheat_protection(
-        self, vin: str, *, on: bool, fan_only: bool
+        self, vin: str, *, on: bool, fan_only: bool = False
     ) -> CommandResponse:
         return await self._command(
             vin,
@@ -378,8 +402,43 @@ class CommandAPI:
     # Charge schedule commands (firmware 2024.26+)
     # ------------------------------------------------------------------
 
-    async def add_charge_schedule(self, vin: str, *, schedule: dict[str, Any]) -> CommandResponse:
-        return await self._command(vin, "add_charge_schedule", schedule)
+    async def add_charge_schedule(
+        self,
+        vin: str,
+        *,
+        lat: float | None = None,
+        lon: float | None = None,
+        start_time: int | None = None,
+        start_enabled: bool | None = None,
+        end_time: int | None = None,
+        end_enabled: bool | None = None,
+        days_of_week: str | None = None,
+        id: int | None = None,
+        enabled: bool | None = None,
+        one_time: bool | None = None,
+    ) -> CommandResponse:
+        body: dict[str, Any] = {}
+        if lat is not None:
+            body["lat"] = lat
+        if lon is not None:
+            body["lon"] = lon
+        if start_time is not None:
+            body["start_time"] = start_time
+        if start_enabled is not None:
+            body["start_enabled"] = start_enabled
+        if end_time is not None:
+            body["end_time"] = end_time
+        if end_enabled is not None:
+            body["end_enabled"] = end_enabled
+        if days_of_week is not None:
+            body["days_of_week"] = days_of_week
+        if id is not None:
+            body["id"] = id
+        if enabled is not None:
+            body["enabled"] = enabled
+        if one_time is not None:
+            body["one_time"] = one_time
+        return await self._command(vin, "add_charge_schedule", body)
 
     async def remove_charge_schedule(self, vin: str, *, id: int) -> CommandResponse:
         return await self._command(vin, "remove_charge_schedule", {"id": id})

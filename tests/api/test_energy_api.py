@@ -278,8 +278,8 @@ class TestChargingHistory:
         assert len(result.time_series) == 2
 
         request = httpx_mock.get_requests()[0]
-        assert request.url.path == f"/api/1/energy_sites/{SITE_ID}/history"
-        assert request.url.params["kind"] == "charging"
+        assert request.url.path == f"/api/1/energy_sites/{SITE_ID}/telemetry_history"
+        assert request.url.params["kind"] == "charge"
 
 
 class TestOffGridVehicleChargingReserve:
@@ -413,3 +413,29 @@ class TestCalendarHistory:
         request = httpx_mock.get_requests()[0]
         assert "start_date" not in request.url.params
         assert "end_date" not in request.url.params
+
+    @pytest.mark.asyncio
+    async def test_passes_time_zone(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(
+            json={"response": {"serial_number": "PW-001", "time_series": []}},
+        )
+        api = EnergyAPI(mock_client)
+        await api.calendar_history(SITE_ID, kind="energy", time_zone="America/Los_Angeles")
+
+        request = httpx_mock.get_requests()[0]
+        assert request.url.params["time_zone"] == "America/Los_Angeles"
+
+    @pytest.mark.asyncio
+    async def test_omits_time_zone_when_none(
+        self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
+    ) -> None:
+        httpx_mock.add_response(
+            json={"response": {"serial_number": "PW-001", "time_series": []}},
+        )
+        api = EnergyAPI(mock_client)
+        await api.calendar_history(SITE_ID, kind="energy")
+
+        request = httpx_mock.get_requests()[0]
+        assert "time_zone" not in request.url.params

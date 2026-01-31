@@ -71,10 +71,10 @@ class EnergyAPI:
         return result
 
     async def charging_history(self, site_id: int) -> CalendarHistory:
-        """Fetch charging history for a site."""
+        """Fetch charging history for a site (wall connector telemetry)."""
         data = await self._client.get(
-            f"/api/1/energy_sites/{site_id}/history",
-            params={"kind": "charging"},
+            f"/api/1/energy_sites/{site_id}/telemetry_history",
+            params={"kind": "charge"},
         )
         return CalendarHistory.model_validate(data.get("response", {}))
 
@@ -129,6 +129,7 @@ class EnergyAPI:
         period: str = "day",
         start_date: str | None = None,
         end_date: str | None = None,
+        time_zone: str | None = None,
     ) -> CalendarHistory:
         """Fetch calendar-based history for a site."""
         params: dict[str, str] = {"kind": kind, "period": period}
@@ -136,6 +137,8 @@ class EnergyAPI:
             params["start_date"] = start_date
         if end_date:
             params["end_date"] = end_date
+        if time_zone:
+            params["time_zone"] = time_zone
         data = await self._client.get(
             f"/api/1/energy_sites/{site_id}/calendar_history",
             params=params,

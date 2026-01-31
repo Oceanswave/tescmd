@@ -507,11 +507,11 @@ class TestEnergyTou:
 
 
 class TestEnergyHistory:
-    """Tests for ``tescmd energy history SITE_ID`` (GET history?kind=charging)."""
+    """Tests for ``tescmd energy history SITE_ID`` (GET telemetry_history?kind=charge)."""
 
     def test_history_returns_data(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(
-            url=f"{FLEET}/api/1/energy_sites/{SITE_ID}/history?kind=charging",
+            url=f"{FLEET}/api/1/energy_sites/{SITE_ID}/telemetry_history?kind=charge",
             json=CHARGING_HISTORY_RESPONSE,
         )
         runner = CliRunner()
@@ -531,7 +531,7 @@ class TestEnergyHistory:
         self, cli_env: dict[str, str], httpx_mock: HTTPXMock
     ) -> None:
         httpx_mock.add_response(
-            url=f"{FLEET}/api/1/energy_sites/{SITE_ID}/history?kind=charging",
+            url=f"{FLEET}/api/1/energy_sites/{SITE_ID}/telemetry_history?kind=charge",
             json={"response": {"serial_number": "ch-789", "time_series": []}},
         )
         runner = CliRunner()
