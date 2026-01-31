@@ -288,11 +288,12 @@ class CommandAPI:
         return CommandResponse.model_validate(data)
 
     async def navigation_gps_request(
-        self, vin: str, *, lat: float, lon: float, order: int = 0
+        self, vin: str, *, lat: float, lon: float, order: int | None = None
     ) -> CommandResponse:
-        return await self._command(
-            vin, "navigation_gps_request", {"lat": lat, "lon": lon, "order": order}
-        )
+        body: dict[str, Any] = {"lat": lat, "lon": lon}
+        if order is not None:
+            body["order"] = order
+        return await self._command(vin, "navigation_gps_request", body)
 
     async def navigation_sc_request(self, vin: str) -> CommandResponse:
         return await self._command(vin, "navigation_sc_request")
@@ -300,12 +301,8 @@ class CommandAPI:
     async def trigger_homelink(self, vin: str, *, lat: float, lon: float) -> CommandResponse:
         return await self._command(vin, "trigger_homelink", {"lat": lat, "lon": lon})
 
-    async def navigation_waypoints_request(
-        self, vin: str, *, waypoints: list[dict[str, Any]]
-    ) -> CommandResponse:
-        return await self._command(
-            vin, "navigation_request", {"type": "share_ext_content_raw", "waypoints": waypoints}
-        )
+    async def navigation_waypoints_request(self, vin: str, *, waypoints: str) -> CommandResponse:
+        return await self._command(vin, "navigation_waypoints_request", {"waypoints": waypoints})
 
     # ------------------------------------------------------------------
     # Software commands

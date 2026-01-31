@@ -37,7 +37,6 @@ class TestTokenData:
         assert token.refresh_token is None
         assert token.id_token is None
 
-
     def test_scope_field_parsed(self) -> None:
         payload = {
             "access_token": "abc",

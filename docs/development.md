@@ -37,8 +37,11 @@ tescmd/
 │   ├── api/             # API client layer (HTTP, domain methods)
 │   ├── models/          # Pydantic v2 models
 │   ├── auth/            # OAuth2, token storage
-│   ├── crypto/          # EC keys
+│   ├── crypto/          # EC keys, ECDH key exchange
+│   ├── protocol/        # Vehicle Command Protocol (ECDH, signing, protobuf)
 │   ├── output/          # Rich + JSON formatters, display units
+│   ├── cache/           # Response caching (file-based JSON with TTL)
+│   ├── deploy/          # Key deployment (GitHub Pages)
 │   ├── config/          # Configuration (stub)
 │   ├── ble/             # BLE key enrollment (stub)
 │   └── _internal/       # Shared utilities
@@ -49,6 +52,8 @@ tescmd/
 │   ├── auth/
 │   ├── crypto/
 │   ├── output/
+│   ├── cache/
+│   ├── deploy/
 │   ├── protocol/        # Vehicle Command Protocol tests
 │   └── conftest.py      # Shared fixtures
 ├── scripts/             # Developer scripts

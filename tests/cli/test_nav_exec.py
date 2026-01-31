@@ -140,7 +140,7 @@ class TestNavGps:
     def test_nav_gps_sends_correct_body(
         self, cli_env: dict[str, str], httpx_mock: HTTPXMock
     ) -> None:
-        """nav gps sends lat, lon, and order in the request body."""
+        """nav gps sends lat and lon in the request body."""
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/navigation_gps_request",
             method="POST",
@@ -155,6 +155,108 @@ class TestNavGps:
         body = _request_body(httpx_mock)
         assert body["lat"] == 40.7128
         assert body["lon"] == 74.006
+
+    def test_nav_gps_with_order(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
+        """nav gps --order sends order field in the request body."""
+        httpx_mock.add_response(
+            url=f"{FLEET}/api/1/vehicles/{VIN}/command/navigation_gps_request",
+            method="POST",
+            json=COMMAND_OK,
+        )
+        runner = CliRunner()
+        runner.invoke(
+            cli,
+            [
+                "--format",
+                "json",
+                "--wake",
+                "nav",
+                "gps",
+                VIN,
+                "30.222",
+                "97.618",
+                "--order",
+                "1",
+            ],
+            catch_exceptions=False,
+        )
+        body = _request_body(httpx_mock)
+        assert body["lat"] == 30.222
+        assert body["lon"] == 97.618
+        assert body["order"] == 1
+
+    def test_nav_gps_without_order_omits_field(
+        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
+    ) -> None:
+        """nav gps without --order does not send order in the body."""
+        httpx_mock.add_response(
+            url=f"{FLEET}/api/1/vehicles/{VIN}/command/navigation_gps_request",
+            method="POST",
+            json=COMMAND_OK,
+        )
+        runner = CliRunner()
+        runner.invoke(
+            cli,
+            ["--format", "json", "--wake", "nav", "gps", VIN, "37.77", "122.42"],
+            catch_exceptions=False,
+        )
+        body = _request_body(httpx_mock)
+        assert "order" not in body
+
+    def test_nav_gps_comma_separated(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
+        """nav gps accepts comma-separated LAT,LON format."""
+        httpx_mock.add_response(
+            url=f"{FLEET}/api/1/vehicles/{VIN}/command/navigation_gps_request",
+            method="POST",
+            json=COMMAND_OK,
+        )
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["--format", "json", "--wake", "nav", "gps", VIN, "37.7749,122.4194"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        body = _request_body(httpx_mock)
+        assert body["lat"] == 37.7749
+        assert body["lon"] == 122.4194
+
+    def test_nav_gps_multi_point(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
+        """nav gps with multiple coordinate pairs sends multiple API requests."""
+        httpx_mock.add_response(
+            url=f"{FLEET}/api/1/vehicles/{VIN}/command/navigation_gps_request",
+            method="POST",
+            json=COMMAND_OK,
+        )
+        httpx_mock.add_response(
+            url=f"{FLEET}/api/1/vehicles/{VIN}/command/navigation_gps_request",
+            method="POST",
+            json=COMMAND_OK,
+        )
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "--format",
+                "json",
+                "--wake",
+                "nav",
+                "gps",
+                VIN,
+                "37.77,122.42",
+                "37.33,121.89",
+            ],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        requests = httpx_mock.get_requests()
+        assert len(requests) == 2
+        body1 = json.loads(requests[0].content)
+        body2 = json.loads(requests[1].content)
+        assert body1["lat"] == 37.77
+        assert body1["order"] == 1
+        assert body2["lat"] == 37.33
+        assert body2["order"] == 2
 
 
 # =============================================================================
@@ -323,26 +425,28 @@ class TestNavHomelink:
 
 
 class TestNavWaypoints:
-    """Tests for ``tescmd nav waypoints VIN WAYPOINTS_JSON``."""
+    """Tests for ``tescmd nav waypoints VIN PLACE_ID...``."""
 
     def test_nav_waypoints(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
-        """nav waypoints posts to /command/navigation_request and returns success."""
-        # navigation_waypoints_request maps to /command/navigation_request
+        """nav waypoints posts to /command/navigation_waypoints_request."""
         httpx_mock.add_response(
-            url=f"{FLEET}/api/1/vehicles/{VIN}/command/navigation_request",
+            url=f"{FLEET}/api/1/vehicles/{VIN}/command/navigation_waypoints_request",
             method="POST",
             json=COMMAND_OK,
         )
         runner = CliRunner()
-        waypoints_json = json.dumps(
-            [
-                {"lat": 37.77, "lon": -122.42},
-                {"lat": 37.33, "lon": -121.89},
-            ]
-        )
         result = runner.invoke(
             cli,
-            ["--format", "json", "--wake", "nav", "waypoints", VIN, waypoints_json],
+            [
+                "--format",
+                "json",
+                "--wake",
+                "nav",
+                "waypoints",
+                VIN,
+                "ChIJIQBpAG2ahYAR_6128GcTUEo",
+                "ChIJw____96GhYARCVVwg5cT7c0",
+            ],
             catch_exceptions=False,
         )
         assert result.exit_code == 0
@@ -351,23 +455,49 @@ class TestNavWaypoints:
         assert parsed["command"] == "nav.waypoints"
         assert parsed["data"]["response"]["result"] is True
 
-    def test_nav_waypoints_sends_correct_body(
+    def test_nav_waypoints_sends_refid_string(
         self, cli_env: dict[str, str], httpx_mock: HTTPXMock
     ) -> None:
-        """nav waypoints sends waypoints list in the request body."""
+        """nav waypoints formats Place IDs as comma-separated refId: string."""
         httpx_mock.add_response(
-            url=f"{FLEET}/api/1/vehicles/{VIN}/command/navigation_request",
+            url=f"{FLEET}/api/1/vehicles/{VIN}/command/navigation_waypoints_request",
             method="POST",
             json=COMMAND_OK,
         )
         runner = CliRunner()
-        waypoints_data = [{"lat": 40.71, "lon": -74.01}]
-        waypoints_json = json.dumps(waypoints_data)
         runner.invoke(
             cli,
-            ["--format", "json", "--wake", "nav", "waypoints", VIN, waypoints_json],
+            [
+                "--format",
+                "json",
+                "--wake",
+                "nav",
+                "waypoints",
+                VIN,
+                "ChIJIQBpAG2ahYAR_6128GcTUEo",
+                "ChIJw____96GhYARCVVwg5cT7c0",
+            ],
             catch_exceptions=False,
         )
         body = _request_body(httpx_mock)
-        assert "waypoints" in body
-        assert body["waypoints"] == waypoints_data
+        assert body["waypoints"] == (
+            "refId:ChIJIQBpAG2ahYAR_6128GcTUEo,refId:ChIJw____96GhYARCVVwg5cT7c0"
+        )
+
+    def test_nav_waypoints_single_place_id(
+        self, cli_env: dict[str, str], httpx_mock: HTTPXMock
+    ) -> None:
+        """nav waypoints works with a single Place ID."""
+        httpx_mock.add_response(
+            url=f"{FLEET}/api/1/vehicles/{VIN}/command/navigation_waypoints_request",
+            method="POST",
+            json=COMMAND_OK,
+        )
+        runner = CliRunner()
+        runner.invoke(
+            cli,
+            ["--format", "json", "--wake", "nav", "waypoints", VIN, "ChIJIQBpAG2ahYAR_6128GcTUEo"],
+            catch_exceptions=False,
+        )
+        body = _request_body(httpx_mock)
+        assert body["waypoints"] == "refId:ChIJIQBpAG2ahYAR_6128GcTUEo"

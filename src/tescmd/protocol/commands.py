@@ -111,6 +111,7 @@ _INFOTAINMENT_COMMANDS: dict[str, CommandSpec] = {
     "navigation_sc_request": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "trigger_homelink": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "navigation_request": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
+    "navigation_waypoints_request": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     # Software
     "schedule_software_update": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "cancel_software_update": CommandSpec(Domain.DOMAIN_INFOTAINMENT),

@@ -88,10 +88,10 @@ class TestNavWaypoints:
     def test_waypoints_help(self) -> None:
         result = CliRunner().invoke(cli, ["nav", "waypoints", "--help"])
         assert result.exit_code == 0
-        assert "WAYPOINTS_JSON" in result.output
+        assert "PLACE_IDS" in result.output
 
-    def test_waypoints_requires_json_arg(self) -> None:
-        """waypoints should fail when no JSON argument is provided."""
+    def test_waypoints_requires_place_id_arg(self) -> None:
+        """waypoints should fail when no Place ID argument is provided."""
         result = CliRunner().invoke(cli, ["nav", "waypoints"])
         assert result.exit_code != 0
 

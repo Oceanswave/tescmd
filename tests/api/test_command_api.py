@@ -367,9 +367,9 @@ class TestNavigationNewCommands:
     ) -> None:
         httpx_mock.add_response(json=_OK_RESPONSE)
         api = CommandAPI(mock_client)
-        waypoints = [{"lat": 37.77, "lon": -122.42, "name": "Home"}]
-        await api.navigation_waypoints_request(VIN, waypoints=waypoints)
+        waypoints_str = "refId:ChIJIQBpAG2ahYAR_6128GcTUEo,refId:ChIJw____96GhYARCVVwg5cT7c0"
+        await api.navigation_waypoints_request(VIN, waypoints=waypoints_str)
 
         body = _body(httpx_mock)
-        assert body["waypoints"] == waypoints
-        assert body["type"] == "share_ext_content_raw"
+        assert body["waypoints"] == waypoints_str
+        assert "navigation_waypoints_request" in str(httpx_mock.get_requests()[0].url)

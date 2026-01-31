@@ -114,7 +114,7 @@ Each file corresponds to a command group (`auth`, `vehicle`, `key`, `setup`). Bu
 CLI modules do **not** construct HTTP requests or handle auth tokens directly.
 
 **Currently implemented command groups:**
-- `auth` — login, logout, status, refresh, register
+- `auth` — login (`--reconsent`), logout, status, refresh, register, export, import
 - `vehicle` — list, info, data, location, wake, alerts, release-notes, service, drivers
 - `charge` — status, start, stop, limit, amps, schedule, departure, precondition
 - `climate` — status, on, off, set, seat, keeper, cop-temp, auto-seat, auto-wheel, wheel-level
@@ -126,7 +126,7 @@ CLI modules do **not** construct HTTP requests or handle auth tokens directly.
 - `energy` — list, status, live, backup, mode, storm, tou, history, off-grid, grid-config, calendar
 - `user` — me, region, orders, features
 - `sharing` — add/remove driver, create/redeem/revoke/list invites
-- `key` — generate, deploy, validate, show, enroll
+- `key` — generate, deploy, validate, show, enroll, unenroll
 - `cache` — status, clear
 - `raw` — get, post
 - `setup` — interactive first-run configuration wizard with key enrollment
@@ -140,7 +140,7 @@ CLI modules do **not** construct HTTP requests or handle auth tokens directly.
 - **`energy.py`** (`EnergyAPI`) — Energy product endpoints (Powerwall, solar).
 - **`sharing.py`** (`SharingAPI`) — Driver and invite management.
 - **`user.py`** (`UserAPI`) — Account info, region, orders, features.
-- **`errors.py`** — Typed exceptions: `AuthError`, `VehicleAsleepError`, `SessionError`, `KeyNotEnrolledError`, `TierError`, `RateLimitError`, etc.
+- **`errors.py`** — Typed exceptions: `AuthError`, `MissingScopesError`, `VehicleAsleepError`, `SessionError`, `KeyNotEnrolledError`, `TierError`, `RateLimitError`, etc.
 
 API classes use **composition**: they receive a `TeslaFleetClient` instance, not extend it.
 
@@ -159,7 +159,7 @@ class VehicleAPI:
 Pydantic v2 models for all structured data:
 
 - **`vehicle.py`** — `Vehicle`, `VehicleData`, `DriveState`, `ChargeState`, `ClimateState`, `VehicleState`, `VehicleConfig`, `GuiSettings`
-- **`auth.py`** — `TokenResponse`, `AuthConfig`
+- **`auth.py`** — `TokenData`, `TokenMeta`, `AuthConfig`, `PARTNER_SCOPES`, `decode_jwt_scopes`
 - **`command.py`** — `CommandResponse`, `CommandResult`
 - **`config.py`** — `AppSettings` (pydantic-settings for env/file loading)
 
@@ -167,7 +167,7 @@ Models serve as the **contract** between layers. API methods return models; CLI 
 
 ### `auth/` — Authentication
 
-- **`oauth.py`** — OAuth2 PKCE flow implementation. Generates verifier/challenge, builds auth URL, handles code exchange. Also handles partner account registration.
+- **`oauth.py`** — OAuth2 PKCE flow implementation. Generates verifier/challenge, builds auth URL, handles code exchange. Also handles partner account registration with scope verification. Supports `--reconsent` via `prompt_missing_scopes=true` for re-granting expanded scopes.
 - **`token_store.py`** — Wraps `keyring` for OS-native credential storage. Stores access token, refresh token, expiry, and metadata.
 - **`server.py`** — Ephemeral local HTTP server that receives the OAuth redirect callback.
 

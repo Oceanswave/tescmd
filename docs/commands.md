@@ -133,7 +133,10 @@ Start the OAuth2 PKCE flow. Opens a browser for Tesla login.
 ```bash
 tescmd auth login
 tescmd auth login --port 9090       # custom callback port
+tescmd auth login --reconsent       # force re-consent for expanded scopes
 ```
+
+The `--reconsent` flag is needed when your application adds new OAuth scopes after initial login. Tesla caches the original consent, so without this flag, new scopes won't be granted.
 
 ### `auth logout`
 
@@ -168,6 +171,22 @@ Register your application with the Tesla Fleet API for a given region. This is a
 
 ```bash
 tescmd auth register
+```
+
+### `auth export`
+
+Export current tokens as JSON for transfer to another machine.
+
+```bash
+tescmd auth export > tokens.json
+```
+
+### `auth import`
+
+Import tokens from a previously exported JSON file.
+
+```bash
+tescmd auth import < tokens.json
 ```
 
 ---
@@ -296,6 +315,15 @@ Display key path, fingerprint, and expected URL.
 
 ```bash
 tescmd key show
+```
+
+### `key unenroll [VIN]`
+
+Remove your enrolled key from a vehicle.
+
+```bash
+tescmd key unenroll
+tescmd key unenroll 5YJ3E1EA1NF000000
 ```
 
 ---
@@ -757,12 +785,22 @@ Send an address to the vehicle navigation.
 tescmd nav send "1 Infinite Loop, Cupertino, CA"
 ```
 
-### `nav gps [VIN] LAT LON`
+### `nav gps [VIN] COORDS...`
 
-Navigate to GPS coordinates.
+Navigate to GPS coordinates. Accepts `LAT LON` pairs or comma-separated `LAT,LON` strings.
 
 ```bash
+# Single destination
 tescmd nav gps 37.3861 -122.0839
+
+# Comma-separated format
+tescmd nav gps 37.3861,-122.0839
+
+# With explicit waypoint order
+tescmd nav gps 37.3861 -122.0839 --order 1
+
+# Multi-stop route (auto-ordered)
+tescmd nav gps 37.3861,-122.0839 37.3382,-121.8863
 ```
 
 ### `nav supercharger [VIN]`
@@ -782,12 +820,12 @@ tescmd nav homelink
 tescmd nav homelink --lat 37.38 --lon -122.08
 ```
 
-### `nav waypoints [VIN] WAYPOINTS_JSON`
+### `nav waypoints [VIN] PLACE_IDS...`
 
-Send multi-stop waypoints as a JSON array.
+Send multi-stop waypoints using Google Maps Place IDs. Each ID is automatically prefixed with `refId:` and joined into a comma-separated string.
 
 ```bash
-tescmd nav waypoints '[{"lat": 37.38, "lon": -122.08}, {"lat": 37.40, "lon": -122.10}]'
+tescmd nav waypoints ChIJIQBpAG2ahYAR_6128GcTUEo ChIJw____96GhYARCVVwg5cT7c0
 ```
 
 ---

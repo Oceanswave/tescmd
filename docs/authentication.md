@@ -41,7 +41,7 @@ Step 3: tescmd opens the system browser to Tesla's authorization endpoint:
         ?client_id=<CLIENT_ID>
         &redirect_uri=http://localhost:8085/callback
         &response_type=code
-        &scope=openid vehicle_device_data vehicle_cmds vehicle_charging_cmds
+        &scope=openid vehicle_device_data vehicle_cmds vehicle_charging_cmds energy_device_data energy_cmds user_data offline_access
         &code_challenge=<CHALLENGE>
         &code_challenge_method=S256
         &state=<RANDOM>
@@ -79,6 +79,8 @@ tescmd requests these OAuth2 scopes:
 | `vehicle_cmds` | Send commands (lock, unlock, climate, etc.) |
 | `vehicle_charging_cmds` | Charging commands (start, stop, schedule) |
 | `energy_device_data` | Energy product data (Powerwall, Solar) |
+| `energy_cmds` | Energy product commands (backup reserve, operation mode) |
+| `user_data` | User account info (profile, orders, features) |
 | `offline_access` | Refresh token for long-lived sessions |
 
 ### Token Management
@@ -101,6 +103,20 @@ tescmd auth status
 ```
 
 Displays: token expiry time, scopes, associated region, and whether refresh token is available.
+
+**Re-consent for new scopes:**
+```bash
+tescmd auth login --reconsent
+```
+
+If your application adds new scopes after initial login, Tesla caches the original consent and won't prompt for the new ones. The `--reconsent` flag sends `prompt_missing_scopes=true` to Tesla's authorize endpoint, which forces the consent screen to show any scopes not yet granted.
+
+After login, tescmd decodes the JWT access token and warns if any requested scopes are missing from the granted set:
+
+```
+Warning: token is missing scopes: energy_cmds, user_data
+  Run: tescmd auth login --reconsent
+```
 
 **Logout:**
 ```bash
