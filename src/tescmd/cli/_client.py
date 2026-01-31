@@ -11,15 +11,18 @@ from typing import TYPE_CHECKING, Any, TypeVar
 import click
 
 from tescmd._internal.vin import resolve_vin
+from tescmd.api.charging import ChargingAPI
 from tescmd.api.client import TeslaFleetClient
 from tescmd.api.command import CommandAPI
 from tescmd.api.energy import EnergyAPI
 from tescmd.api.errors import ConfigError, KeyNotEnrolledError, TierError, VehicleAsleepError
+from tescmd.api.partner import PartnerAPI
 from tescmd.api.sharing import SharingAPI
 from tescmd.api.user import UserAPI
 from tescmd.api.vehicle import VehicleAPI
 from tescmd.auth.token_store import TokenStore
 from tescmd.cache import ResponseCache
+from tescmd.cache.keys import generic_cache_key
 from tescmd.crypto.keys import has_key_pair, load_private_key
 from tescmd.models.config import AppSettings
 from tescmd.models.vehicle import VehicleData
@@ -99,7 +102,11 @@ def _make_rate_limit_handler(
 def get_client(app_ctx: AppContext) -> TeslaFleetClient:
     """Build an authenticated :class:`TeslaFleetClient` from settings / token store."""
     settings = AppSettings()
-    store = TokenStore(profile=app_ctx.profile)
+    store = TokenStore(
+        profile=app_ctx.profile,
+        token_file=settings.token_file,
+        config_dir=settings.config_dir,
+    )
 
     access_token = settings.access_token
     if not access_token:
@@ -127,6 +134,14 @@ def get_energy_api(
     return client, EnergyAPI(client)
 
 
+def get_billing_api(
+    app_ctx: AppContext,
+) -> tuple[TeslaFleetClient, ChargingAPI]:
+    """Build a :class:`TeslaFleetClient` + :class:`ChargingAPI` for billing commands."""
+    client = get_client(app_ctx)
+    return client, ChargingAPI(client)
+
+
 def get_user_api(
     app_ctx: AppContext,
 ) -> tuple[TeslaFleetClient, UserAPI]:
@@ -141,6 +156,38 @@ def get_sharing_api(
     """Build a :class:`TeslaFleetClient` + :class:`SharingAPI`."""
     client = get_client(app_ctx)
     return client, SharingAPI(client)
+
+
+async def get_partner_api(
+    app_ctx: AppContext,
+) -> tuple[TeslaFleetClient, PartnerAPI]:
+    """Build a :class:`TeslaFleetClient` + :class:`PartnerAPI` using a partner token.
+
+    Partner endpoints require a ``client_credentials`` token rather than a
+    user access token.  This helper obtains one via :func:`get_partner_token`.
+    """
+    from tescmd.auth.oauth import get_partner_token
+
+    settings = AppSettings()
+    if not settings.client_id or not settings.client_secret:
+        raise ConfigError(
+            "Partner endpoints require TESLA_CLIENT_ID and TESLA_CLIENT_SECRET. "
+            "Run 'tescmd setup' or set them in your environment."
+        )
+
+    region = app_ctx.region or settings.region
+    token, _scopes = await get_partner_token(
+        client_id=settings.client_id,
+        client_secret=settings.client_secret,
+        region=region,
+    )
+
+    client = TeslaFleetClient(
+        access_token=token,
+        region=region,
+        on_rate_limit_wait=_make_rate_limit_handler(app_ctx.formatter),
+    )
+    return client, PartnerAPI(client)
 
 
 def get_vehicle_api(app_ctx: AppContext) -> tuple[TeslaFleetClient, VehicleAPI]:
@@ -197,6 +244,15 @@ def require_vin(vin_positional: str | None, vin_flag: str | None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# TTL tiers — calibrated to how frequently each data type changes.
+# ---------------------------------------------------------------------------
+
+TTL_STATIC = 3600  # 1h  — specs, warranty, account info
+TTL_SLOW = 300  # 5m  — fleet lists, site config, drivers
+TTL_DEFAULT = 60  # 1m  — standard (matches TESLA_CACHE_TTL default)
+TTL_FAST = 30  # 30s — nearby chargers, location-dependent
+
+# ---------------------------------------------------------------------------
 # Cache helpers
 # ---------------------------------------------------------------------------
 
@@ -211,6 +267,62 @@ def get_cache(app_ctx: AppContext) -> ResponseCache:
         default_ttl=settings.cache_ttl,
         enabled=enabled,
     )
+
+
+async def cached_api_call(
+    app_ctx: AppContext,
+    *,
+    scope: str,
+    identifier: str,
+    endpoint: str,
+    fetch: Callable[[], Awaitable[Any]],
+    ttl: int | None = None,
+    params: dict[str, str] | None = None,
+) -> Any:
+    """Fetch API data with transparent caching.
+
+    1. Compute cache key via :func:`generic_cache_key`.
+    2. On hit → emit cache metadata, return cached dict.
+    3. On miss → call *fetch()*, serialise, store, return result.
+
+    The caller's ``formatter.output()`` handles both Pydantic models (miss)
+    and plain dicts (hit).
+    """
+    formatter = app_ctx.formatter
+    cache = get_cache(app_ctx)
+    key = generic_cache_key(scope, identifier, endpoint, params)
+
+    cached = cache.get_generic(key)
+    if cached is not None:
+        if formatter.format == "json":
+            formatter.set_cache_meta(
+                hit=True,
+                age_seconds=cached.age_seconds,
+                ttl_seconds=cached.ttl_seconds,
+            )
+        else:
+            formatter.rich.info(
+                f"[dim]Data cached {cached.age_seconds}s ago"
+                f" (TTL {cached.ttl_seconds}s)."
+                f" Use --fresh for live data.[/dim]"
+            )
+        return cached.data
+
+    result = await fetch()
+
+    # Serialise: Pydantic model → dict, list of models → list of dicts
+    if hasattr(result, "model_dump"):
+        data = result.model_dump()
+    elif isinstance(result, list):
+        data = [item.model_dump() if hasattr(item, "model_dump") else item for item in result]
+    elif isinstance(result, dict):
+        data = result
+    else:
+        # Scalar or unknown — wrap so JSON round-trips cleanly
+        data = {"_value": result}
+
+    cache.put_generic(key, data, ttl)
+    return result
 
 
 async def cached_vehicle_data(
@@ -362,7 +474,14 @@ async def execute_command(
 def invalidate_cache_for_vin(app_ctx: AppContext, vin: str) -> None:
     """Clear cached data for *vin* (called after state-changing commands)."""
     cache = get_cache(app_ctx)
-    cache.clear(vin)
+    cache.clear(vin)  # legacy {vin}_*.json keys
+    cache.clear_by_prefix(f"vin_{vin}_")  # generic keys
+
+
+def invalidate_cache_for_site(app_ctx: AppContext, site_id: int | str) -> None:
+    """Clear cached data for an energy *site_id* (called after site-changing commands)."""
+    cache = get_cache(app_ctx)
+    cache.clear_by_prefix(f"site_{site_id}_")
 
 
 # ---------------------------------------------------------------------------

@@ -117,7 +117,7 @@ class TestSharingRemoveDriver:
         self, cli_env: dict[str, str], httpx_mock: HTTPXMock
     ) -> None:
         httpx_mock.add_response(
-            url=f"{FLEET}/api/1/vehicles/{VIN}/drivers/remove",
+            url=f"{FLEET}/api/1/vehicles/{VIN}/drivers",
             json={"response": {"result": True}},
         )
         runner = CliRunner()
@@ -137,7 +137,7 @@ class TestSharingRemoveDriver:
         self, cli_env: dict[str, str], httpx_mock: HTTPXMock
     ) -> None:
         httpx_mock.add_response(
-            url=f"{FLEET}/api/1/vehicles/{VIN}/drivers/remove",
+            url=f"{FLEET}/api/1/vehicles/{VIN}/drivers",
             json={"response": {"result": True}},
         )
         runner = CliRunner()
@@ -164,8 +164,8 @@ class TestSharingRemoveDriver:
         )
 
         req = httpx_mock.get_requests()[0]
-        assert req.method == "POST"
-        assert f"/api/1/vehicles/{VIN}/drivers/remove" in _request_url(httpx_mock)
+        assert req.method == "DELETE"
+        assert f"/api/1/vehicles/{VIN}/drivers" in _request_url(httpx_mock)
 
 
 # ---------------------------------------------------------------------------
@@ -264,7 +264,7 @@ class TestSharingRedeemInvite:
         self, cli_env: dict[str, str], httpx_mock: HTTPXMock
     ) -> None:
         httpx_mock.add_response(
-            url=f"{FLEET}/api/1/vehicles/{VIN}/invitations/redeem",
+            url=f"{FLEET}/api/1/invitations/redeem",
             json={
                 "response": {
                     "id": "inv-123",
@@ -278,7 +278,7 @@ class TestSharingRedeemInvite:
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            ["--format", "json", "sharing", "redeem-invite", VIN, "ABC123"],
+            ["--format", "json", "sharing", "redeem-invite", "ABC123"],
             catch_exceptions=False,
         )
 
@@ -294,7 +294,7 @@ class TestSharingRedeemInvite:
         self, cli_env: dict[str, str], httpx_mock: HTTPXMock
     ) -> None:
         httpx_mock.add_response(
-            url=f"{FLEET}/api/1/vehicles/{VIN}/invitations/redeem",
+            url=f"{FLEET}/api/1/invitations/redeem",
             json={
                 "response": {
                     "id": "inv-123",
@@ -306,7 +306,7 @@ class TestSharingRedeemInvite:
         runner = CliRunner()
         runner.invoke(
             cli,
-            ["--format", "json", "sharing", "redeem-invite", VIN, "MYCODE"],
+            ["--format", "json", "sharing", "redeem-invite", "MYCODE"],
             catch_exceptions=False,
         )
 
@@ -328,13 +328,13 @@ class TestSharingRedeemInvite:
         runner = CliRunner()
         runner.invoke(
             cli,
-            ["--format", "json", "sharing", "redeem-invite", VIN, "ZZZ"],
+            ["--format", "json", "sharing", "redeem-invite", "ZZZ"],
             catch_exceptions=False,
         )
 
         req = httpx_mock.get_requests()[0]
         assert req.method == "POST"
-        assert f"/api/1/vehicles/{VIN}/invitations/redeem" in _request_url(httpx_mock)
+        assert "/api/1/invitations/redeem" in _request_url(httpx_mock)
 
 
 # ---------------------------------------------------------------------------

@@ -16,28 +16,51 @@ cache_group = click.Group("cache", help="Response cache management")
 
 
 @cache_group.command("clear")
+@click.option("--site", "site_id", default=None, help="Clear cache for an energy site ID")
+@click.option(
+    "--scope",
+    "scope",
+    type=click.Choice(["account", "partner"]),
+    default=None,
+    help="Clear cache entries for a scope (account or partner)",
+)
 @global_options
-def clear_cmd(app_ctx: AppContext) -> None:
+def clear_cmd(app_ctx: AppContext, site_id: str | None, scope: str | None) -> None:
     """Clear cached API responses.
 
-    If --vin is provided (global option), clears only that vehicle's cache.
-    Otherwise clears all cached entries.
+    \b
+    Filters (first matching rule wins):
+      --vin VIN              Vehicle-specific entries (legacy + generic)
+      --site SITE_ID         Energy site entries
+      --scope account|partner  Scope-level entries
+      (none)                 Clear everything
     """
     formatter = app_ctx.formatter
     cache = get_cache(app_ctx)
     target_vin = app_ctx.vin
-    removed = cache.clear(target_vin)
+    removed = 0
+    label = ""
+
+    if target_vin:
+        removed += cache.clear(target_vin)
+        removed += cache.clear_by_prefix(f"vin_{target_vin}_")
+        label = f" for VIN {target_vin}"
+    elif site_id:
+        removed = cache.clear_by_prefix(f"site_{site_id}_")
+        label = f" for site {site_id}"
+    elif scope:
+        removed = cache.clear_by_prefix(f"{scope}_")
+        label = f" for scope '{scope}'"
+    else:
+        removed = cache.clear()
 
     if formatter.format == "json":
         formatter.output(
-            {"cleared": removed, "vin": target_vin},
+            {"cleared": removed, "vin": target_vin, "site": site_id, "scope": scope},
             command="cache.clear",
         )
     else:
-        if target_vin:
-            formatter.rich.info(f"Cleared {removed} cache entries for VIN {target_vin}.")
-        else:
-            formatter.rich.info(f"Cleared {removed} cache entries.")
+        formatter.rich.info(f"Cleared {removed} cache entries{label}.")
 
 
 @cache_group.command("status")

@@ -36,13 +36,28 @@ class AppContext:
     verbose: bool
     no_cache: bool = False
     auto_wake: bool = False
+    temp_unit: str = "F"
+    distance_unit: str = "mi"
+    pressure_unit: str = "psi"
     _formatter: OutputFormatter | None = dataclasses.field(default=None, repr=False)
 
     @property
     def formatter(self) -> OutputFormatter:
         if self._formatter is None:
+            from tescmd.output.rich_output import (
+                DisplayUnits,
+                DistanceUnit,
+                PressureUnit,
+                TempUnit,
+            )
+
             force = "quiet" if self.quiet else self.output_format
-            self._formatter = OutputFormatter(force_format=force)
+            units = DisplayUnits(
+                temp=TempUnit(self.temp_unit),
+                distance=DistanceUnit(self.distance_unit),
+                pressure=PressureUnit(self.pressure_unit),
+            )
+            self._formatter = OutputFormatter(force_format=force, units=units)
         return self._formatter
 
 
@@ -75,6 +90,12 @@ class AppContext:
 @click.option(
     "--wake", is_flag=True, default=False, help="Auto-wake vehicle without confirmation (billable)"
 )
+@click.option(
+    "--units",
+    type=click.Choice(["us", "metric"]),
+    default=None,
+    help="Display units preset (us: °F/mi/psi, metric: °C/km/bar)",
+)
 @click.pass_context
 def cli(
     ctx: click.Context,
@@ -86,6 +107,7 @@ def cli(
     verbose: bool,
     no_cache: bool,
     wake: bool,
+    units: str | None,
 ) -> None:
     """Query and control Tesla vehicles via the Fleet API."""
     if verbose:
@@ -93,6 +115,19 @@ def cli(
             level=logging.DEBUG,
             format="%(name)s %(levelname)s: %(message)s",
         )
+
+    # Resolve display units: --units flag > env vars > defaults
+    from tescmd.models.config import AppSettings
+
+    settings = AppSettings()
+    if units == "metric":
+        temp_unit, distance_unit, pressure_unit = "C", "km", "bar"
+    elif units == "us":
+        temp_unit, distance_unit, pressure_unit = "F", "mi", "psi"
+    else:
+        temp_unit = settings.temp_unit
+        distance_unit = settings.distance_unit
+        pressure_unit = settings.pressure_unit
 
     ctx.ensure_object(dict)
     ctx.obj = AppContext(
@@ -104,6 +139,9 @@ def cli(
         verbose=verbose,
         no_cache=no_cache,
         auto_wake=wake,
+        temp_unit=temp_unit,
+        distance_unit=distance_unit,
+        pressure_unit=pressure_unit,
     )
 
 
@@ -115,6 +153,7 @@ def cli(
 def _register_commands() -> None:
     """Import and attach all subcommand groups to the root CLI."""
     from tescmd.cli.auth import auth_group
+    from tescmd.cli.billing import billing_group
     from tescmd.cli.cache import cache_group
     from tescmd.cli.charge import charge_group
     from tescmd.cli.climate import climate_group
@@ -122,6 +161,7 @@ def _register_commands() -> None:
     from tescmd.cli.key import key_group
     from tescmd.cli.media import media_group
     from tescmd.cli.nav import nav_group
+    from tescmd.cli.partner import partner_group
     from tescmd.cli.raw import raw_group
     from tescmd.cli.security import security_group
     from tescmd.cli.setup import setup_cmd
@@ -135,11 +175,13 @@ def _register_commands() -> None:
     cli.add_command(auth_group)
     cli.add_command(cache_group)
     cli.add_command(charge_group)
+    cli.add_command(billing_group)
     cli.add_command(climate_group)
     cli.add_command(energy_group)
     cli.add_command(key_group)
     cli.add_command(media_group)
     cli.add_command(nav_group)
+    cli.add_command(partner_group)
     cli.add_command(raw_group)
     cli.add_command(security_group)
     cli.add_command(setup_cmd)
@@ -245,6 +287,17 @@ def _handle_known_error(
     if isinstance(exc, SessionError):
         _handle_session_error(exc, formatter, cmd_name)
         return True
+
+    # Keyring failures (e.g. headless Linux with no keyring daemon)
+    try:
+        from keyring.errors import KeyringError
+
+        if isinstance(exc, KeyringError):
+            _handle_keyring_error(exc, formatter, cmd_name)
+            return True
+    except ImportError:
+        pass
+
     return False
 
 
@@ -514,3 +567,35 @@ def _handle_session_error(
     formatter.rich.info("  [cyan]tescmd key generate --force[/cyan]  (regenerate key pair)")
     formatter.rich.info("  [cyan]tescmd key deploy[/cyan]            (re-deploy public key)")
     formatter.rich.info("  [cyan]tescmd key enroll[/cyan]            (re-enroll on vehicle)")
+
+
+def _handle_keyring_error(
+    exc: Exception,
+    formatter: OutputFormatter,
+    cmd_name: str,
+) -> None:
+    """Show a friendly error when the OS keyring is unavailable."""
+    message = f"OS keyring error: {exc}"
+
+    if formatter.format == "json":
+        formatter.output_error(
+            code="keyring_error",
+            message=(
+                f"{message} Set TESLA_TOKEN_FILE to store tokens in a file "
+                "instead of the OS keyring."
+            ),
+            command=cmd_name,
+        )
+        return
+
+    formatter.rich.error(message)
+    formatter.rich.info("")
+    formatter.rich.info("The OS keyring (macOS Keychain, GNOME Keyring, etc.) is unavailable.")
+    formatter.rich.info("This is common in Docker, headless Linux, and CI environments.")
+    formatter.rich.info("")
+    formatter.rich.info("To fix this, set a file-based token path:")
+    formatter.rich.info("  [cyan]export TESLA_TOKEN_FILE=~/.config/tescmd/tokens.json[/cyan]")
+    formatter.rich.info("")
+    formatter.rich.info(
+        "[dim]Tokens will be stored in plaintext with restricted file permissions.[/dim]"
+    )

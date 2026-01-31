@@ -26,8 +26,8 @@ class SharingAPI:
 
     async def remove_driver(self, vin: str, *, share_user_id: int) -> dict[str, Any]:
         """Remove a driver by their share user ID."""
-        data = await self._client.post(
-            f"/api/1/vehicles/{vin}/drivers/remove",
+        data = await self._client.delete(
+            f"/api/1/vehicles/{vin}/drivers",
             json={"share_user_id": share_user_id},
         )
         result: dict[str, Any] = data.get("response", {})
@@ -38,10 +38,14 @@ class SharingAPI:
         data = await self._client.post(f"/api/1/vehicles/{vin}/invitations")
         return ShareInvite.model_validate(data.get("response", {}))
 
-    async def redeem_invite(self, vin: str, *, code: str) -> ShareInvite:
-        """Redeem a vehicle share invite code."""
+    async def redeem_invite(self, *, code: str) -> ShareInvite:
+        """Redeem a vehicle share invite code.
+
+        This is an account-level endpoint (no VIN required) — the invite
+        code itself encodes the vehicle association.
+        """
         data = await self._client.post(
-            f"/api/1/vehicles/{vin}/invitations/redeem",
+            "/api/1/invitations/redeem",
             json={"code": code},
         )
         return ShareInvite.model_validate(data.get("response", {}))

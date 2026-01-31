@@ -66,7 +66,6 @@ class TestSharingRedeemInvite:
         result = CliRunner().invoke(cli, ["sharing", "redeem-invite", "--help"])
         assert result.exit_code == 0
         assert "CODE" in result.output
-        assert "VIN" in result.output
 
     def test_redeem_invite_requires_code(self) -> None:
         """redeem-invite should fail when no code is provided."""

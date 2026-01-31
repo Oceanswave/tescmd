@@ -7,7 +7,13 @@ from typing import TYPE_CHECKING
 import click
 
 from tescmd._internal.async_utils import run_async
-from tescmd.cli._client import get_sharing_api, require_vin
+from tescmd.cli._client import (
+    TTL_SLOW,
+    cached_api_call,
+    get_sharing_api,
+    invalidate_cache_for_vin,
+    require_vin,
+)
 from tescmd.cli._options import global_options
 
 if TYPE_CHECKING:
@@ -33,6 +39,8 @@ async def _cmd_add_driver(app_ctx: AppContext, vin_positional: str | None, email
         result = await api.add_driver(vin, email=email)
     finally:
         await client.close()
+
+    invalidate_cache_for_vin(app_ctx, vin)
 
     if formatter.format == "json":
         formatter.output(result, command="sharing.add-driver")
@@ -60,6 +68,8 @@ async def _cmd_remove_driver(
     finally:
         await client.close()
 
+    invalidate_cache_for_vin(app_ctx, vin)
+
     if formatter.format == "json":
         formatter.output(result, command="sharing.remove-driver")
     else:
@@ -83,6 +93,8 @@ async def _cmd_create_invite(app_ctx: AppContext, vin_positional: str | None) ->
     finally:
         await client.close()
 
+    invalidate_cache_for_vin(app_ctx, vin)
+
     if formatter.format == "json":
         formatter.output(result, command="sharing.create-invite")
     else:
@@ -91,20 +103,18 @@ async def _cmd_create_invite(app_ctx: AppContext, vin_positional: str | None) ->
 
 
 @sharing_group.command("redeem-invite")
-@click.argument("vin_positional", required=False, default=None, metavar="VIN")
 @click.argument("code")
 @global_options
-def redeem_invite_cmd(app_ctx: AppContext, vin_positional: str | None, code: str) -> None:
-    """Redeem a vehicle share invite CODE."""
-    run_async(_cmd_redeem_invite(app_ctx, vin_positional, code))
+def redeem_invite_cmd(app_ctx: AppContext, code: str) -> None:
+    """Redeem a vehicle share invite CODE (no VIN required)."""
+    run_async(_cmd_redeem_invite(app_ctx, code))
 
 
-async def _cmd_redeem_invite(app_ctx: AppContext, vin_positional: str | None, code: str) -> None:
+async def _cmd_redeem_invite(app_ctx: AppContext, code: str) -> None:
     formatter = app_ctx.formatter
-    vin = require_vin(vin_positional, app_ctx.vin)
     client, api = get_sharing_api(app_ctx)
     try:
-        result = await api.redeem_invite(vin, code=code)
+        result = await api.redeem_invite(code=code)
     finally:
         await client.close()
 
@@ -134,6 +144,8 @@ async def _cmd_revoke_invite(
     finally:
         await client.close()
 
+    invalidate_cache_for_vin(app_ctx, vin)
+
     if formatter.format == "json":
         formatter.output(result, command="sharing.revoke-invite")
     else:
@@ -153,7 +165,14 @@ async def _cmd_list_invites(app_ctx: AppContext, vin_positional: str | None) -> 
     vin = require_vin(vin_positional, app_ctx.vin)
     client, api = get_sharing_api(app_ctx)
     try:
-        invites = await api.list_invites(vin)
+        invites = await cached_api_call(
+            app_ctx,
+            scope="vin",
+            identifier=vin,
+            endpoint="sharing.list-invites",
+            fetch=lambda: api.list_invites(vin),
+            ttl=TTL_SLOW,
+        )
     finally:
         await client.close()
 
@@ -162,6 +181,8 @@ async def _cmd_list_invites(app_ctx: AppContext, vin_positional: str | None) -> 
     else:
         if invites:
             for inv in invites:
-                formatter.rich.info(f"  ID: {inv.id or ''}  Code: {inv.code or ''}")
+                inv_id = (inv.get("id") if isinstance(inv, dict) else inv.id) or ""
+                inv_code = (inv.get("code") if isinstance(inv, dict) else inv.code) or ""
+                formatter.rich.info(f"  ID: {inv_id}  Code: {inv_code}")
         else:
             formatter.rich.info("[dim]No active invites.[/dim]")

@@ -4,7 +4,7 @@
 
 **tescmd** is a Python CLI application that queries data from and sends commands to Tesla vehicles via the [Tesla Fleet API](https://developer.tesla.com/docs/fleet-api). The current implementation covers OAuth2 authentication, key management, vehicle state queries (battery, location, climate, drive state, tire pressure, trunks, and more), and both human-friendly (Rich TUI) and machine-friendly (JSON) output with configurable display units.
 
-**Current scope:** auth, vehicle queries, vehicle commands (charge, climate, security, trunk, media, nav, software), energy product management, user account info, vehicle sharing, key management with enrollment, Vehicle Command Protocol (ECDH sessions + HMAC-signed commands), tier enforcement, initial setup, response caching with cost-aware wake confirmation, and Fleet Telemetry awareness.
+**Current scope:** auth, vehicle queries, vehicle commands (charge, climate, security, trunk, media, nav, software), energy product management (including telemetry), Supercharger charging history and invoices, user account info, vehicle sharing, partner account endpoints (public key, fleet telemetry errors), key management with enrollment and unenrollment, Vehicle Command Protocol (ECDH sessions + HMAC-signed protobuf commands), tier enforcement, initial setup, response caching with cost-aware wake confirmation, Fleet Telemetry configuration management (create/delete/errors), configuration status dashboard, and GitHub Pages key deployment.
 
 ## Tech Stack
 
@@ -29,50 +29,55 @@ src/tescmd/
 │   ├── __init__.py
 │   ├── main.py            # Root Click group, dispatch, AppContext
 │   ├── _options.py        # Shared Click options/decorators
-│   ├── _client.py         # API client builders, auto_wake, cached_vehicle_data
-│   ├── auth.py            # auth login, auth logout, auth status, auth register
+│   ├── _client.py         # API client builders, auto_wake, cached_vehicle_data, cached_api_call, TTL tiers
+│   ├── auth.py            # auth login, logout, status, refresh, export, register, import
 │   ├── cache.py           # cache clear, cache status
-│   ├── charge.py          # charge status, start, stop, limit, amps, schedule, departure, precondition, managed-amps, add-schedule, remove-schedule
-│   ├── climate.py         # climate status, on, off, set, seat, keeper, cop-temp, auto-seat, auto-wheel, wheel-level
-│   ├── security.py        # security status, lock, unlock, sentry, valet, pin-reset, speed-clear, etc.
-│   ├── trunk.py           # trunk open, close, frunk, window vent/close, sunroof vent/close/stop, tonneau open/close/stop
-│   ├── vehicle.py         # vehicle list, info, data, location, wake, alerts, release-notes, service, drivers, low-power, accessory-power
+│   ├── charge.py          # charge status, start, stop, limit, limit-max, limit-std, amps, port-open, port-close, schedule, departure, precondition-add/remove, add/remove-schedule, clear-schedules, clear-preconditions, managed-amps/location/schedule
+│   ├── billing.py         # billing history, sessions, invoice (Supercharger billing data)
+│   ├── climate.py         # climate status, on, off, set, precondition, seat, seat-cool, wheel-heater, overheat, bioweapon, keeper, cop-temp, auto-seat, auto-wheel, wheel-level
+│   ├── security.py        # security status, lock, auto-secure, unlock, sentry, valet, valet-reset, remote-start, flash, honk, boombox, pin-to-drive, pin-reset, pin-clear-admin, speed-limit, speed-clear, speed-clear-admin, guest-mode, erase-data
+│   ├── status.py          # status (show config, auth, and cache status)
+│   ├── trunk.py           # trunk open, close, frunk, window, sunroof, tonneau-open/close/stop
+│   ├── vehicle.py         # vehicle list, get, info, data, location, wake, rename, mobile-access, nearby-chargers, alerts, release-notes, service, drivers, calendar, subscriptions, upgrades, options, specs, warranty, fleet-status, low-power, accessory-power; telemetry subgroup: config, create, delete, errors
 │   ├── media.py           # media play-pause, next/prev track, next/prev fav, volume
 │   ├── nav.py             # nav send, gps, supercharger, homelink, waypoints
+│   ├── partner.py         # partner public-key, telemetry-error-vins, telemetry-errors
 │   ├── software.py        # software status, schedule, cancel
-│   ├── energy.py          # energy list, status, live, backup, mode, storm, tou, history, off-grid, grid-config, calendar
+│   ├── energy.py          # energy list, status, live, backup, mode, storm, tou, history, off-grid, grid-config, telemetry, calendar
 │   ├── user.py            # user me, region, orders, features
 │   ├── sharing.py         # sharing add/remove driver, create/redeem/revoke/list invites
 │   ├── raw.py             # raw get, raw post (arbitrary Fleet API access)
-│   ├── key.py             # key generate, deploy, validate, show, enroll
+│   ├── key.py             # key generate, deploy, validate, show, enroll, unenroll
 │   └── setup.py           # setup (interactive first-run wizard, key enrollment, Fleet Telemetry awareness)
 ├── api/                   # API client layer
 │   ├── __init__.py
 │   ├── client.py          # TeslaFleetClient (base HTTP client)
-│   ├── vehicle.py         # VehicleAPI (vehicle data, nearby chargers, alerts, drivers)
-│   ├── command.py         # CommandAPI (~76 vehicle commands, unsigned REST)
+│   ├── vehicle.py         # VehicleAPI (vehicle data, nearby chargers, alerts, drivers, fleet telemetry, subscriptions, specs)
+│   ├── command.py         # CommandAPI (~78 vehicle commands, unsigned REST)
 │   ├── signed_command.py  # SignedCommandAPI (Vehicle Command Protocol routing)
-│   ├── energy.py          # EnergyAPI (Powerwall/energy product endpoints)
+│   ├── energy.py          # EnergyAPI (Powerwall/energy product endpoints, telemetry)
+│   ├── charging.py        # ChargingAPI (Supercharger charging history, sessions, invoices)
+│   ├── partner.py         # PartnerAPI (public key, fleet telemetry errors — requires partner token)
 │   ├── sharing.py         # SharingAPI (driver and invite management)
 │   ├── user.py            # UserAPI (account info, region, orders, features)
 │   └── errors.py          # API error types (incl. TierError, SessionError, KeyNotEnrolledError)
 ├── cache/                 # Response caching
-│   ├── __init__.py        # Re-exports ResponseCache
-│   ├── response_cache.py  # ResponseCache (file-based JSON with TTL)
-│   └── keys.py            # Cache key generation (VIN + endpoint hash)
+│   ├── __init__.py        # Re-exports ResponseCache, generic_cache_key
+│   ├── response_cache.py  # ResponseCache (file-based JSON with TTL, generic cache)
+│   └── keys.py            # Cache key generation (VIN + endpoint hash, generic_cache_key)
 ├── models/                # Pydantic models
-│   ├── __init__.py        # Re-exports all models (~42 symbols)
+│   ├── __init__.py        # Re-exports all models (40 symbols)
 │   ├── vehicle.py         # Vehicle, VehicleData, DriveState, ChargeState, ClimateState, VehicleState, VehicleConfig, GuiSettings, SoftwareUpdateInfo, SuperchargerInfo, DestChargerInfo, NearbyChargingSites
 │   ├── energy.py          # LiveStatus, SiteInfo, CalendarHistory, GridImportExportConfig
 │   ├── user.py            # UserInfo, UserRegion, VehicleOrder, FeatureConfig
 │   ├── sharing.py         # ShareDriverInfo, ShareInvite
-│   ├── auth.py            # TokenResponse, AuthConfig
+│   ├── auth.py            # TokenData, TokenMeta, AuthConfig
 │   ├── command.py         # CommandResponse, CommandResult
 │   └── config.py          # AppSettings (pydantic-settings, incl. cache settings)
 ├── auth/                  # Authentication
 │   ├── __init__.py
 │   ├── oauth.py           # OAuth2 PKCE flow, token refresh, partner registration
-│   ├── token_store.py     # Keyring-backed token persistence
+│   ├── token_store.py     # Token persistence (keyring backend + file-based fallback)
 │   └── server.py          # Local callback server for OAuth redirect
 ├── protocol/              # Vehicle Command Protocol
 │   ├── __init__.py        # Re-exports: Session, SessionManager, CommandSpec, etc.
@@ -83,6 +88,7 @@ src/tescmd/
 │   ├── signer.py          # HMAC-SHA256 command signing
 │   ├── metadata.py        # TLV serialization for command metadata
 │   ├── commands.py        # Command registry (name → domain + signing requirement)
+│   ├── payloads.py        # Protobuf payload builders for Vehicle Command Protocol
 │   └── encoder.py         # RoutableMessage assembly + base64 encoding
 ├── crypto/                # Key management and ECDH
 │   ├── __init__.py
@@ -95,12 +101,16 @@ src/tescmd/
 │   └── json_output.py     # Structured JSON output
 ├── ble/                   # BLE communication (stub — enrollment not yet wired)
 │   └── __init__.py
+├── deploy/                # Key deployment helpers
+│   ├── __init__.py
+│   └── github_pages.py    # GitHub Pages deployment for public key hosting
 ├── config/                # Configuration (stub — settings in models/config.py)
 │   └── __init__.py
 └── _internal/             # Shared utilities
     ├── __init__.py
     ├── vin.py             # Smart VIN resolution
-    └── async_utils.py     # asyncio helpers (run_async)
+    ├── async_utils.py     # asyncio helpers (run_async)
+    └── permissions.py     # Cross-platform file permissions (chmod 0600 / icacls)
 
 spec/
 └── fleet_api_spec.json        # Canonical Fleet API specification (endpoints, params, types)
@@ -159,15 +169,33 @@ ro = RichOutput(console, units=DisplayUnits(
 
 ### Response Cache (`cache/response_cache.py`)
 
-The Tesla Fleet API is pay-per-use — every call with status < 500 is billable, wake requests are the most expensive category (3/min limit), and their docs explicitly say `vehicle_data` should never be polled regularly. The response cache reduces API costs through three mechanisms:
+The Tesla Fleet API is pay-per-use — every call with status < 500 is billable, wake requests are the most expensive category (3/min limit), and their docs explicitly say `vehicle_data` should never be polled regularly. **All read commands** are transparently cached — bots can call tescmd as often as needed; within the TTL window, responses are instant and free.
 
-1. **Disk cache** — `ResponseCache` stores API responses as JSON files under `~/.cache/tescmd/`. Each entry has a TTL (default 60s). Expired entries are cleaned up lazily on read.
-2. **Wake state cache** — Tracks whether the vehicle was recently confirmed online (default 30s TTL). Skips redundant wake attempts when the vehicle is known to be awake.
-3. **Wake confirmation prompt** — Before sending a billable wake API call, users are prompted interactively (TTY) or receive a structured error (JSON/piped) with guidance to wake via the Tesla app for free.
+The cache reduces API costs through four mechanisms:
 
-Cache files are named `{vin}_{endpoint_hash}.json` (data) or `{vin}_wake.json` (wake state). The VIN prefix enables per-vehicle clearing via glob.
+1. **Universal read-command cache** — Every read command goes through `cached_api_call()` with a scope-aware TTL. Vehicle state queries additionally use `cached_vehicle_data()` with smart wake logic.
+2. **Disk cache** — `ResponseCache` stores API responses as JSON files under `~/.cache/tescmd/`. Each entry has a TTL. Expired entries are cleaned up lazily on read.
+3. **Wake state cache** — Tracks whether the vehicle was recently confirmed online (default 30s TTL). Skips redundant wake attempts when the vehicle is known to be awake.
+4. **Wake confirmation prompt** — Before sending a billable wake API call, users are prompted interactively (TTY) or receive a structured error (JSON/piped) with guidance to wake via the Tesla app for free.
 
-**Data flow for read-commands** (`cached_vehicle_data()` in `_client.py`):
+**TTL tiers** (defined in `cli/_client.py`):
+
+| Tier | TTL | Use case | Example endpoints |
+|------|-----|----------|-------------------|
+| `TTL_STATIC` | 3600s (1h) | Rarely changes | specs, warranty, options, user.me, user.region, user.features, partner.public-key |
+| `TTL_SLOW` | 300s (5m) | Changes infrequently | vehicle.list, fleet-status, drivers, subscriptions, energy.list, energy.status, sharing.list-invites |
+| `TTL_DEFAULT` | 60s (1m) | Standard | vehicle.get, mobile-access, alerts, billing.history, user.orders |
+| `TTL_FAST` | 30s | Location-dependent | nearby-chargers |
+
+**Generic cache key scheme** (`cache/keys.py`):
+
+`generic_cache_key(scope, identifier, endpoint, params)` generates keys in the format `{scope}_{identifier}_{sha256(endpoint+params)[:12]}`. Scopes: `vin`, `site`, `account`, `partner`. Params are sorted and hashed so different query parameters produce different cache entries.
+
+**Cache file naming**:
+- Legacy: `{vin}_{endpoint_hash}.json` (vehicle state data), `{vin}_wake.json`
+- Generic: `{scope}_{identifier}_{hash}.json` (all other cached commands)
+
+**Data flow for vehicle-state commands** (`cached_vehicle_data()` in `_client.py`):
 
 1. Check disk cache → on hit, return `VehicleData.model_validate(cached)`
 2. Check wake state cache → if recently online, try direct API fetch (skip wake)
@@ -175,17 +203,46 @@ Cache files are named `{vin}_{endpoint_hash}.json` (data) or `{vin}_wake.json` (
 4. If no cached wake state, use `auto_wake()` directly
 5. On success, cache the response and update wake state
 
-**Write-commands** (POST operations) do not cache responses but call `invalidate_cache_for_vin()` after success to prevent stale reads.
+**Data flow for all other read commands** (`cached_api_call()` in `_client.py`):
+
+1. Compute `generic_cache_key(scope, identifier, endpoint, params)`
+2. Check `cache.get_generic(key)` → on hit, emit cache metadata, return cached dict
+3. On miss → call `fetch()`, serialise (Pydantic → dict), `cache.put_generic(key, data, ttl)`, return result
+
+**Write-commands** (POST operations) do not cache responses but call `invalidate_cache_for_vin()` or `invalidate_cache_for_site()` after success to prevent stale reads.
+
+**Intentionally NOT cached:**
+- `energy live` — real-time power flow, stale in seconds
+- `energy history/calendar/telemetry` — time-range parameterized, complex key management
+- `billing invoice` — one-off document retrieval
+- `raw get` / `raw post` — escape hatch, user controls caching
+- `vehicle wake` — write operation
+- Auth/key/setup commands — infrastructure, not data reads
 
 ```python
-from tescmd.cache import ResponseCache
+from tescmd.cache import ResponseCache, generic_cache_key
 
 cache = ResponseCache(cache_dir=Path("~/.cache/tescmd"), default_ttl=60, enabled=True)
+
+# Legacy VIN-scoped cache (vehicle state data)
 cache.put("VIN123", {"charge_state": {"battery_level": 72}}, endpoints=["charge_state"])
-data = cache.get("VIN123", endpoints=["charge_state"])  # dict or None
+data = cache.get("VIN123", endpoints=["charge_state"])  # CacheResult or None
+
+# Generic cache (any scope)
+key = generic_cache_key("account", "global", "vehicle.list")
+cache.put_generic(key, [{"vin": "VIN123"}], ttl=300)
+result = cache.get_generic(key)  # CacheResult or None
+
+# Wake state
 cache.put_wake_state("VIN123", "online", ttl=30)
 is_online = cache.get_wake_state("VIN123")  # True/False
-cache.clear("VIN123")  # per-VIN, or cache.clear() for all
+
+# Clearing
+cache.clear("VIN123")                     # per-VIN (legacy keys)
+cache.clear_by_prefix("vin_VIN123_")      # per-VIN (generic keys)
+cache.clear_by_prefix("site_12345_")      # per energy site
+cache.clear_by_prefix("account_")         # all account-level entries
+cache.clear()                             # everything
 ```
 
 ### Wake Confirmation (`cli/_client.py`)
@@ -243,12 +300,14 @@ The `[R] Retry` option allows users to wake the vehicle for free via the Tesla m
 8. **httpx async** — clean async API, good type stubs, easily testable with pytest-httpx
 9. **Browser-based auth** — `tescmd auth login` opens system browser for OAuth2 PKCE flow with local callback server
 10. **Display-layer unit conversion** — models retain raw API values (Celsius, miles, bar); conversion to user-preferred units happens in `RichOutput` via `DisplayUnits`
-11. **Response caching** — file-based JSON cache under `~/.cache/tescmd/` with per-entry TTL. Read-commands check cache first; write-commands invalidate after success. No new dependencies (stdlib `json`, `hashlib`, `time`, `pathlib`).
+11. **Universal response caching** — file-based JSON cache under `~/.cache/tescmd/` with tiered TTLs (STATIC 1h / SLOW 5m / DEFAULT 1m / FAST 30s). **All** read commands are cached via `cached_api_call()` with scope-aware keys (`vin`, `site`, `account`, `partner`). Vehicle state queries use the dedicated `cached_vehicle_data()` with smart wake logic. Write-commands invalidate via `invalidate_cache_for_vin()` / `invalidate_cache_for_site()`. No new dependencies (stdlib `json`, `hashlib`, `time`, `pathlib`).
 12. **Cost-aware wake** — `auto_wake()` prompts before sending billable wake API calls. TTY users get an interactive choice; JSON/piped consumers get structured errors. The `--wake` flag opts in to auto-wake for scripts that accept the cost.
 13. **Smart wake state** — wake state is cached separately (30s TTL). If the vehicle was recently confirmed online, both the prompt and the wake API call are skipped entirely.
 14. **Vehicle Command Protocol** — `SignedCommandAPI` wraps `CommandAPI` via composition. When keys are enrolled and tier is `full`, `get_command_api()` returns `SignedCommandAPI` which transparently routes signed commands through ECDH session + HMAC path. Unsigned commands (`wake_up`) pass through to legacy REST. The `command_protocol` setting (`auto`/`signed`/`unsigned`) controls routing.
 15. **Tier enforcement** — `execute_command()` checks `setup_tier` before running write commands. Readonly tier raises `TierError` with guidance to upgrade via `tescmd setup`.
 16. **Key enrollment** — `tescmd key enroll <VIN>` sends the public key to the vehicle via the unsigned `add_key_request` endpoint, then guides the user through Tesla app approval with an interactive prompt or `--wait` auto-polling.
+17. **Cross-platform token storage** — `TokenStore` uses a `_TokenBackend` protocol with two implementations: `_KeyringBackend` (OS keyring) and `_FileBackend` (JSON file with atomic writes and restricted permissions). Backend selection: explicit `TESLA_TOKEN_FILE` → file; keyring probe success → keyring; probe failure → file fallback at `{config_dir}/tokens.json` with one-time warning.
+18. **Cross-platform file permissions** — `_internal/permissions.py` provides `secure_file()` which uses `chmod 0600` on Unix and `icacls` on Windows. Used by both token storage and key generation. Failures are silently ignored (Docker volumes, network mounts, etc.).
 
 ## Environment Variables
 
@@ -258,7 +317,7 @@ The `[R] Retry` option allows users to wake the vehicle for free via the Tesla m
 | `TESLA_CLIENT_SECRET` | OAuth2 application client secret | — |
 | `TESLA_VIN` | Default vehicle VIN | — |
 | `TESLA_REGION` | API region (`na`, `eu`, `cn`) | `na` |
-| `TESLA_TOKEN_FILE` | Override token storage path | (keyring) |
+| `TESLA_TOKEN_FILE` | File path for token storage (skips keyring; auto-set on headless fallback) | (keyring or `{config_dir}/tokens.json`) |
 | `TESLA_CONFIG_DIR` | Override config directory | `~/.config/tescmd` |
 | `TESLA_OUTPUT_FORMAT` | Force output format (`rich`, `json`, `quiet`) | (auto) |
 | `TESLA_PROFILE` | Active config profile name | `default` |
@@ -266,6 +325,14 @@ The `[R] Retry` option allows users to wake the vehicle for free via the Tesla m
 | `TESLA_CACHE_TTL` | Cache entry time-to-live (seconds) | `60` |
 | `TESLA_CACHE_DIR` | Cache directory path | `~/.cache/tescmd` |
 | `TESLA_COMMAND_PROTOCOL` | Command signing: `auto`, `signed`, `unsigned` | `auto` |
+| `TESLA_TEMP_UNIT` | Temperature display unit: `F` or `C` | `F` |
+| `TESLA_DISTANCE_UNIT` | Distance display unit: `mi` or `km` | `mi` |
+| `TESLA_PRESSURE_UNIT` | Pressure display unit: `psi` or `bar` | `psi` |
+| `TESLA_ACCESS_TOKEN` | Override access token (bypass keyring) | — |
+| `TESLA_REFRESH_TOKEN` | Override refresh token (bypass keyring) | — |
+| `TESLA_DOMAIN` | Domain for Fleet API key hosting | — |
+| `TESLA_SETUP_TIER` | Setup tier (`readonly` or `full`) | — |
+| `TESLA_GITHUB_REPO` | GitHub repo for key deployment (e.g., `user/user.github.io`) | — |
 
 All variables can also be set in a `.env` file in the working directory or `$TESLA_CONFIG_DIR/.env`.
 
@@ -281,6 +348,7 @@ All variables can also be set in a `.env` file in the working directory or `$TES
 | `--verbose` | Global | Enable verbose logging |
 | `--no-cache` / `--fresh` | Global | Bypass response cache for this invocation |
 | `--wake` | Global | Auto-wake vehicle without confirmation (billable) |
+| `--units {us,metric}` | Global | Display units preset (us: °F/mi/psi, metric: °C/km/bar) |
 
 All global flags can be specified at the root level (`tescmd --wake charge status`) or after the subcommand (`tescmd charge status --wake`).
 
@@ -323,6 +391,8 @@ python -m build
 tescmd cache status              # Show cache stats
 tescmd cache clear               # Clear all cached entries
 tescmd cache clear --vin VIN     # Clear cache for a specific vehicle
+tescmd cache clear --site 12345  # Clear cache for an energy site
+tescmd cache clear --scope account  # Clear account-level entries
 
 # Cost-optimized usage
 tescmd charge status             # Uses cache, prompts before wake

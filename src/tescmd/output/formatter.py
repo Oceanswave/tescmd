@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 from rich.console import Console
 
 from tescmd.output.json_output import format_json_error, format_json_response
-from tescmd.output.rich_output import RichOutput
+from tescmd.output.rich_output import DisplayUnits, RichOutput
 
 if TYPE_CHECKING:
     from io import TextIOBase
@@ -39,6 +39,7 @@ class OutputFormatter:
         *,
         stream: TextIOBase | Any | None = None,
         force_format: str | None = None,
+        units: DisplayUnits | None = None,
     ) -> None:
         self._stream = stream or sys.stdout
         if force_format is not None:
@@ -58,7 +59,7 @@ class OutputFormatter:
         # for machine-parseable data (JSON, piped workflows).
         self._error_console = Console(stderr=True)
 
-        self._rich = RichOutput(self._console)
+        self._rich = RichOutput(self._console, units=units)
         self._cache_meta: dict[str, Any] | None = None
 
     # ------------------------------------------------------------------

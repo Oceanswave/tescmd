@@ -381,7 +381,12 @@ def precondition_add_cmd(
     app_ctx: AppContext, vin_positional: str | None, schedule_json: str
 ) -> None:
     """Add a precondition schedule (SCHEDULE_JSON is a JSON string)."""
-    schedule = json.loads(schedule_json)
+    from tescmd.api.errors import ConfigError
+
+    try:
+        schedule = json.loads(schedule_json)
+    except json.JSONDecodeError as e:
+        raise ConfigError(f"Invalid JSON in SCHEDULE_JSON: {e}") from e
     run_async(
         execute_command(
             app_ctx,
@@ -486,6 +491,58 @@ def remove_schedule_cmd(app_ctx: AppContext, vin_positional: str | None, schedul
     )
 
 
+@charge_group.command("clear-schedules")
+@click.argument("vin_positional", required=False, default=None, metavar="VIN")
+@click.option("--home/--no-home", default=True, help="Remove home location schedules")
+@click.option("--work/--no-work", default=True, help="Remove work location schedules")
+@click.option("--other/--no-other", default=True, help="Remove other location schedules")
+@global_options
+def clear_schedules_cmd(
+    app_ctx: AppContext,
+    vin_positional: str | None,
+    home: bool,
+    work: bool,
+    other: bool,
+) -> None:
+    """Batch remove charge schedules by location type."""
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "batch_remove_charge_schedules",
+            "charge.clear-schedules",
+            body={"home": home, "work": work, "other": other},
+            success_message="Charge schedules removed.",
+        )
+    )
+
+
+@charge_group.command("clear-preconditions")
+@click.argument("vin_positional", required=False, default=None, metavar="VIN")
+@click.option("--home/--no-home", default=True, help="Remove home location schedules")
+@click.option("--work/--no-work", default=True, help="Remove work location schedules")
+@click.option("--other/--no-other", default=True, help="Remove other location schedules")
+@global_options
+def clear_preconditions_cmd(
+    app_ctx: AppContext,
+    vin_positional: str | None,
+    home: bool,
+    work: bool,
+    other: bool,
+) -> None:
+    """Batch remove precondition schedules by location type."""
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "batch_remove_precondition_schedules",
+            "charge.clear-preconditions",
+            body={"home": home, "work": work, "other": other},
+            success_message="Precondition schedules removed.",
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # Managed charging (fleet)
 # ---------------------------------------------------------------------------
@@ -505,5 +562,49 @@ def managed_amps_cmd(app_ctx: AppContext, vin_positional: str | None, amps: int)
             "charge.managed-amps",
             body={"charging_amps": amps},
             success_message=f"Managed charging current set to {amps}A.",
+        )
+    )
+
+
+@charge_group.command("managed-location")
+@click.argument("vin_positional", required=False, default=None, metavar="VIN")
+@click.option("--lat", type=float, required=True, help="Latitude")
+@click.option("--lon", type=float, required=True, help="Longitude")
+@global_options
+def managed_location_cmd(
+    app_ctx: AppContext, vin_positional: str | None, lat: float, lon: float
+) -> None:
+    """Set managed charger location (fleet management)."""
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "set_managed_charger_location",
+            "charge.managed-location",
+            body={"location": {"lat": lat, "lon": lon}},
+            success_message="Managed charger location set.",
+        )
+    )
+
+
+@charge_group.command("managed-schedule")
+@click.argument("vin_positional", required=False, default=None, metavar="VIN")
+@click.argument("time_minutes", type=click.IntRange(0, 1440))
+@global_options
+def managed_schedule_cmd(
+    app_ctx: AppContext, vin_positional: str | None, time_minutes: int
+) -> None:
+    """Set managed scheduled charging time (fleet management).
+
+    TIME_MINUTES is minutes past midnight (0-1440).
+    """
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "set_managed_scheduled_charging_time",
+            "charge.managed-schedule",
+            body={"time": time_minutes},
+            success_message=f"Managed scheduled charging time set to {time_minutes} min.",
         )
     )

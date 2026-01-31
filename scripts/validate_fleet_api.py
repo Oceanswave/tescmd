@@ -35,6 +35,7 @@ VEHICLE_API = ROOT / "src" / "tescmd" / "api" / "vehicle.py"
 ENERGY_API = ROOT / "src" / "tescmd" / "api" / "energy.py"
 USER_API = ROOT / "src" / "tescmd" / "api" / "user.py"
 SHARING_API = ROOT / "src" / "tescmd" / "api" / "sharing.py"
+CHARGING_API = ROOT / "src" / "tescmd" / "api" / "charging.py"
 PROTOCOL_COMMANDS = ROOT / "src" / "tescmd" / "protocol" / "commands.py"
 
 # ---------------------------------------------------------------------------
@@ -481,19 +482,20 @@ def validate(*, verbose: bool = False) -> ValidationResult:
         "User",
     )
 
-    # 5. Charging endpoints — not yet implemented as a separate API
-    charging_endpoints = spec.get("charging_endpoints", [])
-    result.charging_endpoint_total = len(charging_endpoints)
-    for ep in charging_endpoints:
-        result.issues.append(
-            Issue(
-                INFO,
-                "NOT_IMPLEMENTED",
-                ep["name"],
-                f"Charging endpoint '{ep['name']}' not yet implemented "
-                f"(accessible via tescmd raw get)",
-            )
-        )
+    # 5. Charging endpoints (ChargingAPI)
+    charging_name_map = {
+        "charging_sessions": "charging_sessions",
+    }
+    validate_endpoints(
+        "charging_endpoints",
+        CHARGING_API,
+        spec,
+        result,
+        "charging_endpoint_total",
+        "charging_endpoint_found",
+        "Charging",
+        name_map=charging_name_map,
+    )
 
     # 6. Partner endpoints — split across auth/oauth.py and vehicle API
     partner_endpoints = spec.get("partner_endpoints", [])

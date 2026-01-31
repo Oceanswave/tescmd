@@ -11,6 +11,11 @@ import click
 from tescmd._internal.async_utils import run_async
 from tescmd.api.errors import VehicleAsleepError
 from tescmd.cli._client import (
+    TTL_DEFAULT,
+    TTL_FAST,
+    TTL_SLOW,
+    TTL_STATIC,
+    cached_api_call,
     cached_vehicle_data,
     execute_command,
     get_vehicle_api,
@@ -27,6 +32,9 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 vehicle_group = click.Group("vehicle", help="Vehicle commands")
+
+telemetry_group = click.Group("telemetry", help="Fleet telemetry configuration and errors")
+vehicle_group.add_command(telemetry_group)
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +53,14 @@ async def _cmd_list(app_ctx: AppContext) -> None:
     formatter = app_ctx.formatter
     client, api = get_vehicle_api(app_ctx)
     try:
-        vehicles = await api.list_vehicles()
+        vehicles = await cached_api_call(
+            app_ctx,
+            scope="account",
+            identifier="global",
+            endpoint="vehicle.list",
+            fetch=lambda: api.list_vehicles(),
+            ttl=TTL_SLOW,
+        )
     finally:
         await client.close()
 
@@ -53,6 +68,44 @@ async def _cmd_list(app_ctx: AppContext) -> None:
         formatter.output(vehicles, command="vehicle.list")
     else:
         formatter.rich.vehicle_list(vehicles)
+
+
+@vehicle_group.command("get")
+@click.argument("vin_positional", required=False, default=None, metavar="VIN")
+@global_options
+def get_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
+    """Fetch basic vehicle info (lightweight, no wake required)."""
+    run_async(_cmd_get(app_ctx, vin_positional))
+
+
+async def _cmd_get(app_ctx: AppContext, vin_positional: str | None) -> None:
+    formatter = app_ctx.formatter
+    vin = require_vin(vin_positional, app_ctx.vin)
+    client, api = get_vehicle_api(app_ctx)
+    try:
+        vehicle = await cached_api_call(
+            app_ctx,
+            scope="vin",
+            identifier=vin,
+            endpoint="vehicle.get",
+            fetch=lambda: api.get_vehicle(vin),
+            ttl=TTL_DEFAULT,
+        )
+    finally:
+        await client.close()
+
+    if formatter.format == "json":
+        formatter.output(vehicle, command="vehicle.get")
+    else:
+        state = vehicle.get("state") if isinstance(vehicle, dict) else vehicle.state
+        style = "green" if state == "online" else "yellow"
+        if isinstance(vehicle, dict):
+            name = vehicle.get("display_name") or vehicle.get("vin") or "Unknown"
+            v_vin = vehicle.get("vin", "")
+        else:
+            name = vehicle.display_name or vehicle.vin or "Unknown"
+            v_vin = vehicle.vin
+        formatter.rich.info(f"{name}  [{style}]{state}[/{style}]  VIN: {v_vin}")
 
 
 @vehicle_group.command("info")
@@ -229,10 +282,19 @@ async def _cmd_mobile_access(app_ctx: AppContext, vin_positional: str | None) ->
     vin = require_vin(vin_positional, app_ctx.vin)
     client, api = get_vehicle_api(app_ctx)
     try:
-        enabled = await api.mobile_enabled(vin)
+        result = await cached_api_call(
+            app_ctx,
+            scope="vin",
+            identifier=vin,
+            endpoint="vehicle.mobile-access",
+            fetch=lambda: api.mobile_enabled(vin),
+            ttl=TTL_DEFAULT,
+        )
     finally:
         await client.close()
 
+    # Result is bool on miss, {"_value": bool} on hit
+    enabled = result.get("_value") if isinstance(result, dict) else result
     if formatter.format == "json":
         formatter.output({"mobile_enabled": enabled}, command="vehicle.mobile-access")
     else:
@@ -253,7 +315,14 @@ async def _cmd_nearby_chargers(app_ctx: AppContext, vin_positional: str | None) 
     vin = require_vin(vin_positional, app_ctx.vin)
     client, api = get_vehicle_api(app_ctx)
     try:
-        data = await api.nearby_charging_sites(vin)
+        data = await cached_api_call(
+            app_ctx,
+            scope="vin",
+            identifier=vin,
+            endpoint="vehicle.nearby-chargers",
+            fetch=lambda: api.nearby_charging_sites(vin),
+            ttl=TTL_FAST,
+        )
     finally:
         await client.close()
 
@@ -276,7 +345,14 @@ async def _cmd_alerts(app_ctx: AppContext, vin_positional: str | None) -> None:
     vin = require_vin(vin_positional, app_ctx.vin)
     client, api = get_vehicle_api(app_ctx)
     try:
-        alerts = await api.recent_alerts(vin)
+        alerts = await cached_api_call(
+            app_ctx,
+            scope="vin",
+            identifier=vin,
+            endpoint="vehicle.alerts",
+            fetch=lambda: api.recent_alerts(vin),
+            ttl=TTL_DEFAULT,
+        )
     finally:
         await client.close()
 
@@ -305,17 +381,21 @@ async def _cmd_release_notes(app_ctx: AppContext, vin_positional: str | None) ->
     vin = require_vin(vin_positional, app_ctx.vin)
     client, api = get_vehicle_api(app_ctx)
     try:
-        data = await api.release_notes(vin)
+        data = await cached_api_call(
+            app_ctx,
+            scope="vin",
+            identifier=vin,
+            endpoint="vehicle.release-notes",
+            fetch=lambda: api.release_notes(vin),
+            ttl=TTL_SLOW,
+        )
     finally:
         await client.close()
 
     if formatter.format == "json":
         formatter.output(data, command="vehicle.release-notes")
     else:
-        if data:
-            formatter.rich.info(str(data))
-        else:
-            formatter.rich.info("[dim]No release notes available.[/dim]")
+        formatter.rich.vehicle_release_notes(data)
 
 
 @vehicle_group.command("service")
@@ -331,17 +411,21 @@ async def _cmd_service(app_ctx: AppContext, vin_positional: str | None) -> None:
     vin = require_vin(vin_positional, app_ctx.vin)
     client, api = get_vehicle_api(app_ctx)
     try:
-        data = await api.service_data(vin)
+        data = await cached_api_call(
+            app_ctx,
+            scope="vin",
+            identifier=vin,
+            endpoint="vehicle.service",
+            fetch=lambda: api.service_data(vin),
+            ttl=TTL_SLOW,
+        )
     finally:
         await client.close()
 
     if formatter.format == "json":
         formatter.output(data, command="vehicle.service")
     else:
-        if data:
-            formatter.rich.info(str(data))
-        else:
-            formatter.rich.info("[dim]No service data available.[/dim]")
+        formatter.rich.vehicle_service(data)
 
 
 @vehicle_group.command("drivers")
@@ -357,7 +441,14 @@ async def _cmd_drivers(app_ctx: AppContext, vin_positional: str | None) -> None:
     vin = require_vin(vin_positional, app_ctx.vin)
     client, api = get_vehicle_api(app_ctx)
     try:
-        drivers = await api.list_drivers(vin)
+        drivers = await cached_api_call(
+            app_ctx,
+            scope="vin",
+            identifier=vin,
+            endpoint="vehicle.drivers",
+            fetch=lambda: api.list_drivers(vin),
+            ttl=TTL_SLOW,
+        )
     finally:
         await client.close()
 
@@ -366,8 +457,8 @@ async def _cmd_drivers(app_ctx: AppContext, vin_positional: str | None) -> None:
     else:
         if drivers:
             for d in drivers:
-                email = d.email or "unknown"
-                status = d.status or ""
+                email = (d.get("email") if isinstance(d, dict) else d.email) or "unknown"
+                status = (d.get("status") if isinstance(d, dict) else d.status) or ""
                 formatter.rich.info(f"  {email}  [dim]{status}[/dim]")
         else:
             formatter.rich.info("[dim]No drivers found.[/dim]")
@@ -391,6 +482,316 @@ def calendar_cmd(app_ctx: AppContext, vin_positional: str | None, calendar_data:
             body={"calendar_data": calendar_data},
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# Power management commands
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Extended vehicle data endpoints
+# ---------------------------------------------------------------------------
+
+
+@vehicle_group.command("subscriptions")
+@click.argument("vin_positional", required=False, default=None, metavar="VIN")
+@global_options
+def subscriptions_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
+    """Check subscription eligibility for the vehicle."""
+    run_async(_cmd_subscriptions(app_ctx, vin_positional))
+
+
+async def _cmd_subscriptions(app_ctx: AppContext, vin_positional: str | None) -> None:
+    formatter = app_ctx.formatter
+    vin = require_vin(vin_positional, app_ctx.vin)
+    client, api = get_vehicle_api(app_ctx)
+    try:
+        data = await cached_api_call(
+            app_ctx,
+            scope="vin",
+            identifier=vin,
+            endpoint="vehicle.subscriptions",
+            fetch=lambda: api.eligible_subscriptions(vin),
+            ttl=TTL_SLOW,
+        )
+    finally:
+        await client.close()
+
+    if formatter.format == "json":
+        formatter.output(data, command="vehicle.subscriptions")
+    else:
+        formatter.rich.vehicle_subscriptions(data)
+
+
+@vehicle_group.command("upgrades")
+@click.argument("vin_positional", required=False, default=None, metavar="VIN")
+@global_options
+def upgrades_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
+    """Check upgrade eligibility for the vehicle."""
+    run_async(_cmd_upgrades(app_ctx, vin_positional))
+
+
+async def _cmd_upgrades(app_ctx: AppContext, vin_positional: str | None) -> None:
+    formatter = app_ctx.formatter
+    vin = require_vin(vin_positional, app_ctx.vin)
+    client, api = get_vehicle_api(app_ctx)
+    try:
+        data = await cached_api_call(
+            app_ctx,
+            scope="vin",
+            identifier=vin,
+            endpoint="vehicle.upgrades",
+            fetch=lambda: api.eligible_upgrades(vin),
+            ttl=TTL_SLOW,
+        )
+    finally:
+        await client.close()
+
+    if formatter.format == "json":
+        formatter.output(data, command="vehicle.upgrades")
+    else:
+        formatter.rich.vehicle_upgrades(data)
+
+
+@vehicle_group.command("options")
+@click.argument("vin_positional", required=False, default=None, metavar="VIN")
+@global_options
+def options_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
+    """Fetch vehicle option codes."""
+    run_async(_cmd_options(app_ctx, vin_positional))
+
+
+async def _cmd_options(app_ctx: AppContext, vin_positional: str | None) -> None:
+    formatter = app_ctx.formatter
+    vin = require_vin(vin_positional, app_ctx.vin)
+    client, api = get_vehicle_api(app_ctx)
+    try:
+        data = await cached_api_call(
+            app_ctx,
+            scope="vin",
+            identifier=vin,
+            endpoint="vehicle.options",
+            fetch=lambda: api.options(vin),
+            ttl=TTL_STATIC,
+        )
+    finally:
+        await client.close()
+
+    if formatter.format == "json":
+        formatter.output(data, command="vehicle.options")
+    else:
+        formatter.rich.vehicle_options(data)
+
+
+@vehicle_group.command("specs")
+@click.argument("vin_positional", required=False, default=None, metavar="VIN")
+@global_options
+def specs_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
+    """Fetch vehicle specifications (partner tokens, $0.10/call)."""
+    run_async(_cmd_specs(app_ctx, vin_positional))
+
+
+async def _cmd_specs(app_ctx: AppContext, vin_positional: str | None) -> None:
+    formatter = app_ctx.formatter
+    vin = require_vin(vin_positional, app_ctx.vin)
+    client, api = get_vehicle_api(app_ctx)
+    try:
+        data = await cached_api_call(
+            app_ctx,
+            scope="vin",
+            identifier=vin,
+            endpoint="vehicle.specs",
+            fetch=lambda: api.specs(vin),
+            ttl=TTL_STATIC,
+        )
+    finally:
+        await client.close()
+
+    if formatter.format == "json":
+        formatter.output(data, command="vehicle.specs")
+    else:
+        formatter.rich.vehicle_specs(data)
+
+
+@vehicle_group.command("warranty")
+@global_options
+def warranty_cmd(app_ctx: AppContext) -> None:
+    """Fetch warranty details for the account."""
+    run_async(_cmd_warranty(app_ctx))
+
+
+async def _cmd_warranty(app_ctx: AppContext) -> None:
+    formatter = app_ctx.formatter
+    client, api = get_vehicle_api(app_ctx)
+    try:
+        data = await cached_api_call(
+            app_ctx,
+            scope="account",
+            identifier="global",
+            endpoint="vehicle.warranty",
+            fetch=lambda: api.warranty_details(),
+            ttl=TTL_STATIC,
+        )
+    finally:
+        await client.close()
+
+    if formatter.format == "json":
+        formatter.output(data, command="vehicle.warranty")
+    else:
+        formatter.rich.vehicle_warranty(data)
+
+
+@vehicle_group.command("fleet-status")
+@global_options
+def fleet_status_cmd(app_ctx: AppContext) -> None:
+    """Fetch fleet status for all vehicles."""
+    run_async(_cmd_fleet_status(app_ctx))
+
+
+async def _cmd_fleet_status(app_ctx: AppContext) -> None:
+    formatter = app_ctx.formatter
+    client, api = get_vehicle_api(app_ctx)
+    try:
+        data = await cached_api_call(
+            app_ctx,
+            scope="account",
+            identifier="global",
+            endpoint="vehicle.fleet-status",
+            fetch=lambda: api.fleet_status(),
+            ttl=TTL_SLOW,
+        )
+    finally:
+        await client.close()
+
+    if formatter.format == "json":
+        formatter.output(data, command="vehicle.fleet-status")
+    else:
+        formatter.rich.fleet_status(data)
+
+
+@telemetry_group.command("config")
+@click.argument("vin_positional", required=False, default=None, metavar="VIN")
+@global_options
+def telemetry_config_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
+    """Fetch fleet telemetry configuration for a vehicle."""
+    run_async(_cmd_telemetry_config(app_ctx, vin_positional))
+
+
+async def _cmd_telemetry_config(app_ctx: AppContext, vin_positional: str | None) -> None:
+    formatter = app_ctx.formatter
+    vin = require_vin(vin_positional, app_ctx.vin)
+    client, api = get_vehicle_api(app_ctx)
+    try:
+        data = await cached_api_call(
+            app_ctx,
+            scope="vin",
+            identifier=vin,
+            endpoint="vehicle.telemetry.config",
+            fetch=lambda: api.fleet_telemetry_config(vin),
+            ttl=TTL_SLOW,
+        )
+    finally:
+        await client.close()
+
+    if formatter.format == "json":
+        formatter.output(data, command="vehicle.telemetry.config")
+    else:
+        formatter.rich.telemetry_config(data)
+
+
+@telemetry_group.command("create")
+@click.argument("config_json")
+@global_options
+def telemetry_config_create_cmd(app_ctx: AppContext, config_json: str) -> None:
+    """Create or update fleet telemetry server configuration (CONFIG_JSON is a JSON string)."""
+    import json
+
+    from tescmd.api.errors import ConfigError
+
+    try:
+        config = json.loads(config_json)
+    except json.JSONDecodeError as e:
+        raise ConfigError(f"Invalid JSON in CONFIG_JSON: {e}") from e
+    run_async(_cmd_telemetry_config_create(app_ctx, config))
+
+
+async def _cmd_telemetry_config_create(app_ctx: AppContext, config: dict[str, object]) -> None:
+    formatter = app_ctx.formatter
+    client, api = get_vehicle_api(app_ctx)
+    try:
+        data = await api.fleet_telemetry_config_create(config=config)
+    finally:
+        await client.close()
+
+    if formatter.format == "json":
+        formatter.output(data, command="vehicle.telemetry.create")
+    else:
+        formatter.rich.info("Fleet telemetry config created/updated.")
+
+
+@telemetry_group.command("delete")
+@click.argument("vin_positional", required=False, default=None, metavar="VIN")
+@click.option(
+    "--confirm",
+    is_flag=True,
+    required=True,
+    help="Required flag to confirm config deletion",
+)
+@global_options
+def telemetry_config_delete_cmd(
+    app_ctx: AppContext, vin_positional: str | None, confirm: bool
+) -> None:
+    """Remove fleet telemetry configuration from a vehicle (DESTRUCTIVE).
+
+    Requires --confirm flag.
+    """
+    run_async(_cmd_telemetry_config_delete(app_ctx, vin_positional))
+
+
+async def _cmd_telemetry_config_delete(app_ctx: AppContext, vin_positional: str | None) -> None:
+    formatter = app_ctx.formatter
+    vin = require_vin(vin_positional, app_ctx.vin)
+    client, api = get_vehicle_api(app_ctx)
+    try:
+        data = await api.fleet_telemetry_config_delete(vin)
+    finally:
+        await client.close()
+
+    if formatter.format == "json":
+        formatter.output(data, command="vehicle.telemetry.delete")
+    else:
+        formatter.rich.info("Fleet telemetry config deleted.")
+
+
+@telemetry_group.command("errors")
+@click.argument("vin_positional", required=False, default=None, metavar="VIN")
+@global_options
+def telemetry_errors_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
+    """Fetch fleet telemetry errors for a vehicle."""
+    run_async(_cmd_telemetry_errors(app_ctx, vin_positional))
+
+
+async def _cmd_telemetry_errors(app_ctx: AppContext, vin_positional: str | None) -> None:
+    formatter = app_ctx.formatter
+    vin = require_vin(vin_positional, app_ctx.vin)
+    client, api = get_vehicle_api(app_ctx)
+    try:
+        data = await cached_api_call(
+            app_ctx,
+            scope="vin",
+            identifier=vin,
+            endpoint="vehicle.telemetry.errors",
+            fetch=lambda: api.fleet_telemetry_errors(vin),
+            ttl=TTL_SLOW,
+        )
+    finally:
+        await client.close()
+
+    if formatter.format == "json":
+        formatter.output(data, command="vehicle.telemetry.errors")
+    else:
+        formatter.rich.telemetry_errors(data)
 
 
 # ---------------------------------------------------------------------------

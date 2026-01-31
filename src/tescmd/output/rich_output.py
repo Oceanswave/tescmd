@@ -101,6 +101,126 @@ class RichOutput:
         return f"{bar:.2f}"
 
     # ------------------------------------------------------------------
+    # Generic dict → table helper
+    # ------------------------------------------------------------------
+
+    def _dict_table(self, title: str, data: dict[str, Any], *, empty_msg: str = "") -> None:
+        """Render an arbitrary dict as a 2-column Field / Value table.
+
+        * Nested dicts are flattened one level deep with dot notation.
+        * Lists of scalars are comma-joined; lists of dicts show ``[N items]``.
+        * ``None`` values are skipped.
+        """
+        if not data:
+            self._con.print(empty_msg or "[dim]No data.[/dim]")
+            return
+
+        table = Table(title=title)
+        table.add_column("Field", style="bold")
+        table.add_column("Value")
+
+        for key, val in data.items():
+            if val is None:
+                continue
+            if isinstance(val, dict):
+                for sub_key, sub_val in val.items():
+                    if sub_val is not None:
+                        table.add_row(f"{key}.{sub_key}", str(sub_val))
+            elif isinstance(val, list):
+                if not val:
+                    table.add_row(key, "[]")
+                elif isinstance(val[0], dict):
+                    table.add_row(key, f"[{len(val)} items]")
+                else:
+                    table.add_row(key, ", ".join(str(v) for v in val))
+            else:
+                table.add_row(key, str(val))
+
+        self._con.print(table)
+
+    # -- Thin wrappers for specific dict-based endpoints ----------------
+
+    def vehicle_subscriptions(self, data: dict[str, Any]) -> None:
+        """Display subscription eligibility data."""
+        self._dict_table(
+            "Subscription Eligibility",
+            data,
+            empty_msg="[dim]No subscription eligibility data.[/dim]",
+        )
+
+    def vehicle_upgrades(self, data: dict[str, Any]) -> None:
+        """Display upgrade eligibility data."""
+        self._dict_table(
+            "Upgrade Eligibility",
+            data,
+            empty_msg="[dim]No upgrade eligibility data.[/dim]",
+        )
+
+    def vehicle_options(self, data: dict[str, Any]) -> None:
+        """Display vehicle option codes."""
+        self._dict_table(
+            "Vehicle Options",
+            data,
+            empty_msg="[dim]No option data available.[/dim]",
+        )
+
+    def vehicle_specs(self, data: dict[str, Any]) -> None:
+        """Display vehicle specifications."""
+        self._dict_table(
+            "Vehicle Specifications",
+            data,
+            empty_msg="[dim]No spec data available.[/dim]",
+        )
+
+    def vehicle_warranty(self, data: dict[str, Any]) -> None:
+        """Display warranty details."""
+        self._dict_table(
+            "Warranty Details",
+            data,
+            empty_msg="[dim]No warranty data available.[/dim]",
+        )
+
+    def fleet_status(self, data: dict[str, Any]) -> None:
+        """Display fleet status."""
+        self._dict_table(
+            "Fleet Status",
+            data,
+            empty_msg="[dim]No fleet status data.[/dim]",
+        )
+
+    def telemetry_config(self, data: dict[str, Any]) -> None:
+        """Display fleet telemetry configuration."""
+        self._dict_table(
+            "Fleet Telemetry Config",
+            data,
+            empty_msg="[dim]No telemetry config found.[/dim]",
+        )
+
+    def telemetry_errors(self, data: dict[str, Any]) -> None:
+        """Display fleet telemetry errors."""
+        self._dict_table(
+            "Fleet Telemetry Errors",
+            data,
+            empty_msg="[dim]No telemetry errors found.[/dim]",
+        )
+
+    def vehicle_service(self, data: dict[str, Any]) -> None:
+        """Display vehicle service data."""
+        self._dict_table(
+            "Service Data",
+            data,
+            empty_msg="[dim]No service data available.[/dim]",
+        )
+
+    def vehicle_release_notes(self, data: dict[str, Any]) -> None:
+        """Display firmware release notes."""
+        self._dict_table(
+            "Release Notes",
+            data,
+            empty_msg="[dim]No release notes available.[/dim]",
+        )
+
+    # ------------------------------------------------------------------
     # Vehicle list
     # ------------------------------------------------------------------
 

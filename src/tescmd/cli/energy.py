@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import click
 
 from tescmd._internal.async_utils import run_async
-from tescmd.cli._client import get_energy_api
+from tescmd.cli._client import TTL_SLOW, cached_api_call, get_energy_api, invalidate_cache_for_site
 from tescmd.cli._options import global_options
 
 if TYPE_CHECKING:
@@ -27,7 +27,14 @@ async def _cmd_list(app_ctx: AppContext) -> None:
     formatter = app_ctx.formatter
     client, api = get_energy_api(app_ctx)
     try:
-        products = await api.list_products()
+        products = await cached_api_call(
+            app_ctx,
+            scope="account",
+            identifier="global",
+            endpoint="energy.list",
+            fetch=lambda: api.list_products(),
+            ttl=TTL_SLOW,
+        )
     finally:
         await client.close()
 
@@ -52,7 +59,14 @@ async def _cmd_status(app_ctx: AppContext, site_id: int) -> None:
     formatter = app_ctx.formatter
     client, api = get_energy_api(app_ctx)
     try:
-        data = await api.site_info(site_id)
+        data = await cached_api_call(
+            app_ctx,
+            scope="site",
+            identifier=str(site_id),
+            endpoint="energy.status",
+            fetch=lambda: api.site_info(site_id),
+            ttl=TTL_SLOW,
+        )
     finally:
         await client.close()
 
@@ -101,6 +115,8 @@ async def _cmd_backup(app_ctx: AppContext, site_id: int, percent: int) -> None:
     finally:
         await client.close()
 
+    invalidate_cache_for_site(app_ctx, site_id)
+
     if formatter.format == "json":
         formatter.output(result, command="energy.backup")
     else:
@@ -127,6 +143,8 @@ async def _cmd_mode(app_ctx: AppContext, site_id: int, mode: str) -> None:
     finally:
         await client.close()
 
+    invalidate_cache_for_site(app_ctx, site_id)
+
     if formatter.format == "json":
         formatter.output(result, command="energy.mode")
     else:
@@ -149,6 +167,8 @@ async def _cmd_storm(app_ctx: AppContext, site_id: int, on: bool) -> None:
         result = await api.set_storm_mode(site_id, enabled=on)
     finally:
         await client.close()
+
+    invalidate_cache_for_site(app_ctx, site_id)
 
     if formatter.format == "json":
         formatter.output(result, command="energy.storm")
@@ -176,6 +196,8 @@ async def _cmd_tou(app_ctx: AppContext, site_id: int, settings: dict[str, object
         result = await api.time_of_use_settings(site_id, settings=settings)
     finally:
         await client.close()
+
+    invalidate_cache_for_site(app_ctx, site_id)
 
     if formatter.format == "json":
         formatter.output(result, command="energy.tou")
@@ -225,6 +247,8 @@ async def _cmd_off_grid(app_ctx: AppContext, site_id: int, reserve: int) -> None
     finally:
         await client.close()
 
+    invalidate_cache_for_site(app_ctx, site_id)
+
     if formatter.format == "json":
         formatter.output(result, command="energy.off-grid")
     else:
@@ -251,10 +275,63 @@ async def _cmd_grid_config(app_ctx: AppContext, site_id: int, config: dict[str, 
     finally:
         await client.close()
 
+    invalidate_cache_for_site(app_ctx, site_id)
+
     if formatter.format == "json":
         formatter.output(result, command="energy.grid-config")
     else:
         formatter.rich.info("Grid import/export config updated")
+
+
+@energy_group.command("telemetry")
+@click.argument("site_id", type=int)
+@click.option(
+    "--kind", type=click.Choice(["charge", "power"]), default="charge", help="Telemetry data type"
+)
+@click.option("--start-date", default=None, help="Start date (YYYY-MM-DD)")
+@click.option("--end-date", default=None, help="End date (YYYY-MM-DD)")
+@click.option("--time-zone", default=None, help="Time zone (e.g. America/Los_Angeles)")
+@global_options
+def telemetry_cmd(
+    app_ctx: AppContext,
+    site_id: int,
+    kind: str,
+    start_date: str | None,
+    end_date: str | None,
+    time_zone: str | None,
+) -> None:
+    """Show telemetry history for an energy site (wall connector)."""
+    run_async(_cmd_telemetry(app_ctx, site_id, kind, start_date, end_date, time_zone))
+
+
+async def _cmd_telemetry(
+    app_ctx: AppContext,
+    site_id: int,
+    kind: str,
+    start_date: str | None,
+    end_date: str | None,
+    time_zone: str | None,
+) -> None:
+    formatter = app_ctx.formatter
+    client, api = get_energy_api(app_ctx)
+    try:
+        data = await api.telemetry_history(
+            site_id,
+            kind=kind,
+            start_date=start_date,
+            end_date=end_date,
+            time_zone=time_zone,
+        )
+    finally:
+        await client.close()
+
+    if formatter.format == "json":
+        formatter.output(data, command="energy.telemetry")
+    else:
+        if data.time_series:
+            formatter.rich.info(f"Telemetry history: {len(data.time_series)} entries")
+        else:
+            formatter.rich.info("No telemetry history available.")
 
 
 @energy_group.command("calendar")

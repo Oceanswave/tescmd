@@ -96,6 +96,24 @@ class ResponseCache:
         self._write_entry(path, {"state": state}, ttl)
 
     # ------------------------------------------------------------------
+    # Generic cache (any scope / endpoint)
+    # ------------------------------------------------------------------
+
+    def get_generic(self, key: str) -> CacheResult | None:
+        """Return cached data for a pre-computed *key*, or ``None`` on miss/expiry."""
+        if not self._enabled:
+            return None
+        path = self._cache_dir / f"{key}.json"
+        return self._read_entry(path)
+
+    def put_generic(self, key: str, data: dict[str, Any], ttl: int | None = None) -> None:
+        """Store *data* under a pre-computed *key* with the given *ttl*."""
+        if not self._enabled:
+            return
+        path = self._cache_dir / f"{key}.json"
+        self._write_entry(path, data, ttl or self._default_ttl)
+
+    # ------------------------------------------------------------------
     # Cache management
     # ------------------------------------------------------------------
 
@@ -109,6 +127,20 @@ class ResponseCache:
         pattern = f"{vin}_*.json" if vin else "*.json"
         removed = 0
         for path in self._cache_dir.glob(pattern):
+            path.unlink(missing_ok=True)
+            removed += 1
+        return removed
+
+    def clear_by_prefix(self, prefix: str) -> int:
+        """Delete cache entries whose filename starts with *prefix*.
+
+        Returns the number of files removed.  Used for scope-based
+        invalidation (e.g. ``clear_by_prefix("site_12345_")``).
+        """
+        if not self._cache_dir.is_dir():
+            return 0
+        removed = 0
+        for path in self._cache_dir.glob(f"{prefix}*.json"):
             path.unlink(missing_ok=True)
             removed += 1
         return removed

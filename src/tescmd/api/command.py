@@ -36,6 +36,14 @@ class CommandAPI:
     # See cli/key.py for the enrollment flow implementation.
 
     # ------------------------------------------------------------------
+    # Security / convenience commands
+    # ------------------------------------------------------------------
+
+    async def auto_secure_vehicle(self, vin: str) -> CommandResponse:
+        """Close falcon-wing doors and lock (Model X only)."""
+        return await self._command(vin, "auto_secure_vehicle")
+
+    # ------------------------------------------------------------------
     # Charging commands
     # ------------------------------------------------------------------
 
@@ -125,6 +133,16 @@ class CommandAPI:
 
     async def remove_precondition_schedule(self, vin: str, *, id: int) -> CommandResponse:
         return await self._command(vin, "remove_precondition_schedule", {"id": id})
+
+    async def batch_remove_precondition_schedules(
+        self, vin: str, *, home: bool, work: bool, other: bool
+    ) -> CommandResponse:
+        """Remove precondition schedules by location type (home/work/other)."""
+        return await self._command(
+            vin,
+            "batch_remove_precondition_schedules",
+            {"home": home, "work": work, "other": other},
+        )
 
     # ------------------------------------------------------------------
     # Climate commands
@@ -442,6 +460,16 @@ class CommandAPI:
 
     async def remove_charge_schedule(self, vin: str, *, id: int) -> CommandResponse:
         return await self._command(vin, "remove_charge_schedule", {"id": id})
+
+    async def batch_remove_charge_schedules(
+        self, vin: str, *, home: bool, work: bool, other: bool
+    ) -> CommandResponse:
+        """Remove charge schedules by location type (home/work/other)."""
+        return await self._command(
+            vin,
+            "batch_remove_charge_schedules",
+            {"home": home, "work": work, "other": other},
+        )
 
     # ------------------------------------------------------------------
     # Vehicle name / calendar

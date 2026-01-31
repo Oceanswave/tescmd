@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - Unreleased
+
+### Added
+
+- **Universal read-command caching** — every read command is now transparently cached with tiered TTLs (STATIC 1h, SLOW 5m, DEFAULT 1m, FAST 30s); bots can call tescmd as often as needed — within the TTL window, responses are instant and free
+- **Generic cache key scheme** — `generic_cache_key(scope, identifier, endpoint, params)` generates scope-aware keys (`vin`, `site`, `account`, `partner`) for any API endpoint
+- **`cached_api_call()` helper** — unified async helper that handles cache lookup, fetch, serialisation (Pydantic/dict/list/scalar), and storage for all non-vehicle-state read commands
+- **Site-scoped cache invalidation** — `invalidate_cache_for_site()` clears energy site entries after write commands; `invalidate_cache_for_vin()` now also clears generic vin-scoped keys
+- **`cache clear` options** — `--site SITE_ID` and `--scope {account,partner}` flags for targeted cache clearing alongside existing `--vin`
+- **Partner endpoints** — `partner public-key`, `partner telemetry-error-vins`, `partner telemetry-errors` for partner account data (require client credentials)
+- **Billing endpoints** — `billing history`, `billing sessions`, `billing invoice` for Supercharger charging data
+- **Cross-platform file permissions** — `_internal/permissions.py` provides `secure_file()` using `chmod 0600` on Unix and `icacls` on Windows
+- **Token store file backend** — `_FileBackend` with atomic writes and restricted permissions as fallback when keyring is unavailable
+- **Spec-driven Fleet API validation** — `scripts/validate_fleet_api.py` validates implementation against `spec/fleet_api_spec.json` using AST introspection
+- **6 missing Fleet API commands** — added `managed_charging_set_amps`, `managed_charging_set_location`, `managed_charging_set_schedule`, `add_charge_schedule`, `remove_charge_schedule`, `clear_charge_schedules`
+- **Configurable display units** — `--units metric` flag switches all display values to °C/km/bar; individual env vars (`TESLA_TEMP_UNIT`, `TESLA_DISTANCE_UNIT`, `TESLA_PRESSURE_UNIT`) for granular control
+
+### Fixed
+
+- Aligned schedule/departure command parameters with Tesla Go SDK (correct param names and types)
+- Fixed energy endpoint paths to match Fleet API spec
+- Fixed Rich markup escaping bug in command output
+- Aligned command parameters (3 param gaps) with Go SDK specs
+
+### Changed
+
+- Response cache documentation in CLAUDE.md expanded to cover universal caching, TTL tiers, and generic cache key scheme
+
 ## [0.1.1] - Unreleased
 
 ### Added

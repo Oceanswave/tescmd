@@ -84,7 +84,11 @@ async def _cmd_login(app_ctx: AppContext, port: int, *, reconsent: bool = False)
         await _cmd_setup(app_ctx)
         return
 
-    store = TokenStore(profile=app_ctx.profile)
+    store = TokenStore(
+        profile=app_ctx.profile,
+        token_file=settings.token_file,
+        config_dir=settings.config_dir,
+    )
     region = app_ctx.region or settings.region
 
     formatter.rich.info("")
@@ -133,7 +137,12 @@ def logout_cmd(app_ctx: AppContext) -> None:
 
 async def _cmd_logout(app_ctx: AppContext) -> None:
     formatter = app_ctx.formatter
-    store = TokenStore(profile=app_ctx.profile)
+    settings = AppSettings()
+    store = TokenStore(
+        profile=app_ctx.profile,
+        token_file=settings.token_file,
+        config_dir=settings.config_dir,
+    )
     store.clear()
 
     if formatter.format == "json":
@@ -151,7 +160,12 @@ def status_cmd(app_ctx: AppContext) -> None:
 
 async def _cmd_status(app_ctx: AppContext) -> None:
     formatter = app_ctx.formatter
-    store = TokenStore(profile=app_ctx.profile)
+    settings = AppSettings()
+    store = TokenStore(
+        profile=app_ctx.profile,
+        token_file=settings.token_file,
+        config_dir=settings.config_dir,
+    )
 
     if not store.has_token:
         if formatter.format == "json":
@@ -211,7 +225,11 @@ def refresh_cmd(app_ctx: AppContext) -> None:
 async def _cmd_refresh(app_ctx: AppContext) -> None:
     formatter = app_ctx.formatter
     settings = AppSettings()
-    store = TokenStore(profile=app_ctx.profile)
+    store = TokenStore(
+        profile=app_ctx.profile,
+        token_file=settings.token_file,
+        config_dir=settings.config_dir,
+    )
 
     rt = store.refresh_token
     if not rt:
@@ -255,7 +273,12 @@ def export_cmd(app_ctx: AppContext) -> None:
 
 
 async def _cmd_export(app_ctx: AppContext) -> None:
-    store = TokenStore(profile=app_ctx.profile)
+    settings = AppSettings()
+    store = TokenStore(
+        profile=app_ctx.profile,
+        token_file=settings.token_file,
+        config_dir=settings.config_dir,
+    )
     data = store.export_dict()
     print(json.dumps(data, indent=2))
 
@@ -342,9 +365,14 @@ def import_cmd(app_ctx: AppContext) -> None:
 
 async def _cmd_import(app_ctx: AppContext) -> None:
     formatter = app_ctx.formatter
+    settings = AppSettings()
     raw = sys.stdin.read()
     data = json.loads(raw)
-    store = TokenStore(profile=app_ctx.profile)
+    store = TokenStore(
+        profile=app_ctx.profile,
+        token_file=settings.token_file,
+        config_dir=settings.config_dir,
+    )
     store.import_dict(data)
 
     if formatter.format == "json":

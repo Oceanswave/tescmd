@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tescmd.auth.token_store import TokenStore
+from tescmd.auth.token_store import TokenStore, _KeyringBackend
 
 # ---------------------------------------------------------------------------
 # Dict-backed mock keyring
@@ -40,10 +40,15 @@ def mock_kr() -> _MockKeyring:
 
 @pytest.fixture
 def store(mock_kr: _MockKeyring) -> TokenStore:
+    """Build a TokenStore that uses the keyring backend with mocked keyring."""
     with (
-        patch("tescmd.auth.token_store.keyring.get_password", mock_kr.get_password),
-        patch("tescmd.auth.token_store.keyring.set_password", mock_kr.set_password),
-        patch("tescmd.auth.token_store.keyring.delete_password", mock_kr.delete_password),
+        patch("keyring.get_password", mock_kr.get_password),
+        patch("keyring.set_password", mock_kr.set_password),
+        patch("keyring.delete_password", mock_kr.delete_password),
+        patch(
+            "tescmd.auth.token_store._resolve_backend",
+            return_value=_KeyringBackend(),
+        ),
     ):
         yield TokenStore(profile="test")  # type: ignore[misc]
 
@@ -51,12 +56,9 @@ def store(mock_kr: _MockKeyring) -> TokenStore:
 class TestSaveAndLoadTokens:
     def test_save_and_load_tokens(self, mock_kr: _MockKeyring, store: TokenStore) -> None:
         with (
-            patch("tescmd.auth.token_store.keyring.get_password", mock_kr.get_password),
-            patch("tescmd.auth.token_store.keyring.set_password", mock_kr.set_password),
-            patch(
-                "tescmd.auth.token_store.keyring.delete_password",
-                mock_kr.delete_password,
-            ),
+            patch("keyring.get_password", mock_kr.get_password),
+            patch("keyring.set_password", mock_kr.set_password),
+            patch("keyring.delete_password", mock_kr.delete_password),
         ):
             store.save(
                 access_token="at",
@@ -74,19 +76,16 @@ class TestSaveAndLoadTokens:
 
 class TestLoadMissingToken:
     def test_load_missing_token(self, mock_kr: _MockKeyring, store: TokenStore) -> None:
-        with patch("tescmd.auth.token_store.keyring.get_password", mock_kr.get_password):
+        with patch("keyring.get_password", mock_kr.get_password):
             assert store.access_token is None
 
 
 class TestClearTokens:
     def test_clear_tokens(self, mock_kr: _MockKeyring, store: TokenStore) -> None:
         with (
-            patch("tescmd.auth.token_store.keyring.get_password", mock_kr.get_password),
-            patch("tescmd.auth.token_store.keyring.set_password", mock_kr.set_password),
-            patch(
-                "tescmd.auth.token_store.keyring.delete_password",
-                mock_kr.delete_password,
-            ),
+            patch("keyring.get_password", mock_kr.get_password),
+            patch("keyring.set_password", mock_kr.set_password),
+            patch("keyring.delete_password", mock_kr.delete_password),
         ):
             store.save(
                 access_token="at",
@@ -102,8 +101,8 @@ class TestClearTokens:
 class TestHasToken:
     def test_has_token(self, mock_kr: _MockKeyring, store: TokenStore) -> None:
         with (
-            patch("tescmd.auth.token_store.keyring.get_password", mock_kr.get_password),
-            patch("tescmd.auth.token_store.keyring.set_password", mock_kr.set_password),
+            patch("keyring.get_password", mock_kr.get_password),
+            patch("keyring.set_password", mock_kr.set_password),
         ):
             assert store.has_token is False
             store.save(

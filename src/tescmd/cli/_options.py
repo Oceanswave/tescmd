@@ -22,6 +22,13 @@ def global_options(f: Any) -> Any:
     """
 
     @click.option(
+        "--units",
+        "local_units",
+        type=click.Choice(["us", "metric"]),
+        default=None,
+        help="Display units preset (us: °F/mi/psi, metric: °C/km/bar)",
+    )
+    @click.option(
         "--wake",
         "local_wake",
         is_flag=True,
@@ -77,6 +84,7 @@ def global_options(f: Any) -> Any:
         local_verbose: bool = kwargs.pop("local_verbose", False)
         local_no_cache: bool = kwargs.pop("local_no_cache", False)
         local_wake: bool = kwargs.pop("local_wake", False)
+        local_units: str | None = kwargs.pop("local_units", None)
 
         # Merge overrides into AppContext (command-level wins)
         if local_vin is not None:
@@ -101,6 +109,16 @@ def global_options(f: Any) -> Any:
             app_ctx.no_cache = True
         if local_wake:
             app_ctx.auto_wake = True
+        if local_units is not None:
+            if local_units == "metric":
+                app_ctx.temp_unit = "C"
+                app_ctx.distance_unit = "km"
+                app_ctx.pressure_unit = "bar"
+            else:
+                app_ctx.temp_unit = "F"
+                app_ctx.distance_unit = "mi"
+                app_ctx.pressure_unit = "psi"
+            app_ctx._formatter = None  # reset cached formatter
 
         return f(app_ctx, **kwargs)
 

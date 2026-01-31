@@ -319,9 +319,7 @@ class TestPreconditionSchedule:
     ) -> None:
         httpx_mock.add_response(json=_OK_RESPONSE)
         api = CommandAPI(mock_client)
-        await api.add_precondition_schedule(
-            VIN, id=1, enabled=True, days_of_week="1111111"
-        )
+        await api.add_precondition_schedule(VIN, id=1, enabled=True, days_of_week="1111111")
 
         body = _body(httpx_mock)
         assert body["id"] == 1

@@ -56,3 +56,8 @@ class AppSettings(BaseSettings):
     # signed = require signed (error if no keys)
     # unsigned = force legacy REST path
     command_protocol: str = "auto"
+
+    # Display units (TESLA_TEMP_UNIT, TESLA_DISTANCE_UNIT, TESLA_PRESSURE_UNIT)
+    temp_unit: str = "F"
+    distance_unit: str = "mi"
+    pressure_unit: str = "psi"

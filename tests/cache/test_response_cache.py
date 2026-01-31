@@ -186,6 +186,23 @@ class TestStatus:
         assert info["total"] == 0
 
 
+class TestClearByPrefix:
+    def test_clears_matching(self, cache: ResponseCache) -> None:
+        cache.put_generic("vin_VIN1_aaa", SAMPLE_DATA)
+        cache.put_generic("vin_VIN1_bbb", SAMPLE_DATA)
+        cache.put_generic("vin_VIN2_ccc", SAMPLE_DATA)
+        removed = cache.clear_by_prefix("vin_VIN1_")
+        assert removed == 2
+        assert cache.get_generic("vin_VIN2_ccc") is not None
+
+    def test_no_match(self, cache: ResponseCache) -> None:
+        cache.put_generic("account_global_xyz", SAMPLE_DATA)
+        assert cache.clear_by_prefix("partner_") == 0
+
+    def test_empty_dir(self, cache: ResponseCache) -> None:
+        assert cache.clear_by_prefix("x_") == 0
+
+
 class TestCorruptFiles:
     def test_corrupt_json_returns_none(self, cache: ResponseCache, cache_dir: Path) -> None:
         cache_dir.mkdir(parents=True, exist_ok=True)

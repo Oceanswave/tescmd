@@ -38,13 +38,12 @@ _VCSEC_COMMANDS: dict[str, CommandSpec] = {
     "door_lock": CommandSpec(Domain.DOMAIN_VEHICLE_SECURITY, action_type="RKE_ACTION_LOCK"),
     "door_unlock": CommandSpec(Domain.DOMAIN_VEHICLE_SECURITY, action_type="RKE_ACTION_UNLOCK"),
     "actuate_trunk": CommandSpec(Domain.DOMAIN_VEHICLE_SECURITY),
-    "window_control": CommandSpec(Domain.DOMAIN_VEHICLE_SECURITY),
     "open_tonneau": CommandSpec(Domain.DOMAIN_VEHICLE_SECURITY),
     "close_tonneau": CommandSpec(Domain.DOMAIN_VEHICLE_SECURITY),
     "stop_tonneau": CommandSpec(Domain.DOMAIN_VEHICLE_SECURITY),
     "remote_start_drive": CommandSpec(Domain.DOMAIN_VEHICLE_SECURITY),
-    "flash_lights": CommandSpec(
-        Domain.DOMAIN_VEHICLE_SECURITY, action_type="RKE_ACTION_REMOTE_DRIVE"
+    "auto_secure_vehicle": CommandSpec(
+        Domain.DOMAIN_VEHICLE_SECURITY, action_type="RKE_ACTION_AUTO_SECURE_VEHICLE"
     ),
 }
 
@@ -66,8 +65,10 @@ _INFOTAINMENT_COMMANDS: dict[str, CommandSpec] = {
     "set_scheduled_departure": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "add_precondition_schedule": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "remove_precondition_schedule": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
+    "batch_remove_precondition_schedules": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "add_charge_schedule": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "remove_charge_schedule": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
+    "batch_remove_charge_schedules": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     # Climate
     "auto_conditioning_start": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "auto_conditioning_stop": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
@@ -94,6 +95,7 @@ _INFOTAINMENT_COMMANDS: dict[str, CommandSpec] = {
     "reset_pin_to_drive_pin": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "clear_pin_to_drive_admin": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "speed_limit_clear_pin_admin": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
+    "flash_lights": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "honk_horn": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "set_pin_to_drive": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "guest_mode": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
@@ -120,7 +122,8 @@ _INFOTAINMENT_COMMANDS: dict[str, CommandSpec] = {
     # Vehicle name / calendar
     "set_vehicle_name": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "upcoming_calendar_entries": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
-    # Sunroof
+    # Windows / sunroof
+    "window_control": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "sun_roof_control": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     # Power management
     "set_low_power_mode": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
@@ -134,6 +137,10 @@ _INFOTAINMENT_COMMANDS: dict[str, CommandSpec] = {
 _UNSIGNED_COMMANDS: dict[str, CommandSpec] = {
     "wake_up": CommandSpec(Domain.DOMAIN_BROADCAST, requires_signing=False),
     "set_managed_charge_current_request": CommandSpec(
+        Domain.DOMAIN_BROADCAST, requires_signing=False
+    ),
+    "set_managed_charger_location": CommandSpec(Domain.DOMAIN_BROADCAST, requires_signing=False),
+    "set_managed_scheduled_charging_time": CommandSpec(
         Domain.DOMAIN_BROADCAST, requires_signing=False
     ),
 }

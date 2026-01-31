@@ -72,7 +72,7 @@ class TestRemoveDriver:
         self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
     ) -> None:
         httpx_mock.add_response(
-            url=f"{FLEET_BASE}/api/1/vehicles/{VIN}/drivers/remove",
+            url=f"{FLEET_BASE}/api/1/vehicles/{VIN}/drivers",
             json={"response": {"result": True}},
         )
         api = SharingAPI(mock_client)
@@ -92,7 +92,7 @@ class TestRemoveDriver:
         body = _body(httpx_mock)
         assert body["share_user_id"] == 123
         request = httpx_mock.get_requests()[0]
-        assert request.method == "POST"
+        assert request.method == "DELETE"
 
 
 class TestCreateInvite:
@@ -143,7 +143,7 @@ class TestRedeemInvite:
         self, httpx_mock: HTTPXMock, mock_client: TeslaFleetClient
     ) -> None:
         httpx_mock.add_response(
-            url=f"{FLEET_BASE}/api/1/vehicles/{VIN}/invitations/redeem",
+            url=f"{FLEET_BASE}/api/1/invitations/redeem",
             json={
                 "response": {
                     "id": "inv_003",
@@ -155,7 +155,7 @@ class TestRedeemInvite:
             },
         )
         api = SharingAPI(mock_client)
-        result = await api.redeem_invite(VIN, code="abc123")
+        result = await api.redeem_invite(code="abc123")
 
         assert isinstance(result, ShareInvite)
         assert result.id == "inv_003"
@@ -170,12 +170,13 @@ class TestRedeemInvite:
             json={"response": {"id": "inv_004", "code": "xyz789"}},
         )
         api = SharingAPI(mock_client)
-        await api.redeem_invite(VIN, code="xyz789")
+        await api.redeem_invite(code="xyz789")
 
         body = _body(httpx_mock)
         assert body["code"] == "xyz789"
         request = httpx_mock.get_requests()[0]
         assert request.method == "POST"
+        assert request.url.path == "/api/1/invitations/redeem"
 
 
 class TestRevokeInvite:

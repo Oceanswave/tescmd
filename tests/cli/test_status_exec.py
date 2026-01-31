@@ -62,8 +62,12 @@ def _patch_token_store(
     """Return a patch for TokenStore."""
 
     class FakeTokenStore:
-        def __init__(self, profile: str = "default") -> None:
+        def __init__(self, profile: str = "default", **_kw: object) -> None:
             pass
+
+        @property
+        def backend_name(self) -> str:
+            return "keyring"
 
         @property
         def has_token(self) -> bool:
@@ -109,6 +113,7 @@ class TestStatusJsonOutput:
             "config_dir",
             "cache_dir",
             "key_pairs",
+            "token_backend",
         }
         assert expected_keys <= set(data.keys())
 

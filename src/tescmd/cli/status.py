@@ -23,7 +23,11 @@ def status_cmd(app_ctx: AppContext) -> None:
     """Show current configuration, authentication, and cache status."""
     formatter = app_ctx.formatter
     settings = AppSettings()
-    store = TokenStore(profile=app_ctx.profile)
+    store = TokenStore(
+        profile=app_ctx.profile,
+        token_file=settings.token_file,
+        config_dir=settings.config_dir,
+    )
     cache = get_cache(app_ctx)
     cache_info = cache.status()
 
@@ -60,6 +64,7 @@ def status_cmd(app_ctx: AppContext) -> None:
         "config_dir": settings.config_dir,
         "cache_dir": settings.cache_dir,
         "key_pairs": key_count,
+        "token_backend": store.backend_name,
     }
 
     if formatter.format == "json":
@@ -75,6 +80,7 @@ def status_cmd(app_ctx: AppContext) -> None:
         formatter.rich.info("")
 
         # Auth
+        formatter.rich.info(f"Token store: {data['token_backend']}")
         auth_str = "[green]authenticated[/green]" if has_token else "[red]not authenticated[/red]"
         formatter.rich.info(f"Auth:        {auth_str}")
         if has_token:

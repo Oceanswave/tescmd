@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import click
 
 from tescmd._internal.async_utils import run_async
-from tescmd.cli._client import get_user_api
+from tescmd.cli._client import TTL_DEFAULT, TTL_STATIC, cached_api_call, get_user_api
 from tescmd.cli._options import global_options
 
 if TYPE_CHECKING:
@@ -27,7 +27,14 @@ async def _cmd_me(app_ctx: AppContext) -> None:
     formatter = app_ctx.formatter
     client, api = get_user_api(app_ctx)
     try:
-        data = await api.me()
+        data = await cached_api_call(
+            app_ctx,
+            scope="account",
+            identifier="global",
+            endpoint="user.me",
+            fetch=lambda: api.me(),
+            ttl=TTL_STATIC,
+        )
     finally:
         await client.close()
 
@@ -48,7 +55,14 @@ async def _cmd_region(app_ctx: AppContext) -> None:
     formatter = app_ctx.formatter
     client, api = get_user_api(app_ctx)
     try:
-        data = await api.region()
+        data = await cached_api_call(
+            app_ctx,
+            scope="account",
+            identifier="global",
+            endpoint="user.region",
+            fetch=lambda: api.region(),
+            ttl=TTL_STATIC,
+        )
     finally:
         await client.close()
 
@@ -69,7 +83,14 @@ async def _cmd_orders(app_ctx: AppContext) -> None:
     formatter = app_ctx.formatter
     client, api = get_user_api(app_ctx)
     try:
-        data = await api.orders()
+        data = await cached_api_call(
+            app_ctx,
+            scope="account",
+            identifier="global",
+            endpoint="user.orders",
+            fetch=lambda: api.orders(),
+            ttl=TTL_DEFAULT,
+        )
     finally:
         await client.close()
 
@@ -78,9 +99,14 @@ async def _cmd_orders(app_ctx: AppContext) -> None:
     else:
         if data:
             for order in data:
-                oid = order.order_id or "?"
-                model = order.model or ""
-                status = order.status or ""
+                if isinstance(order, dict):
+                    oid = order.get("order_id") or "?"
+                    model = order.get("model") or ""
+                    status = order.get("status") or ""
+                else:
+                    oid = order.order_id or "?"
+                    model = order.model or ""
+                    status = order.status or ""
                 formatter.rich.info(f"  {oid}: {model} [{status}]")
         else:
             formatter.rich.info("[dim]No orders found.[/dim]")
@@ -97,14 +123,21 @@ async def _cmd_features(app_ctx: AppContext) -> None:
     formatter = app_ctx.formatter
     client, api = get_user_api(app_ctx)
     try:
-        data = await api.feature_config()
+        data = await cached_api_call(
+            app_ctx,
+            scope="account",
+            identifier="global",
+            endpoint="user.features",
+            fetch=lambda: api.feature_config(),
+            ttl=TTL_STATIC,
+        )
     finally:
         await client.close()
 
     if formatter.format == "json":
         formatter.output(data, command="user.features")
     else:
-        dumped = data.model_dump(exclude_none=True)
+        dumped = data.model_dump(exclude_none=True) if hasattr(data, "model_dump") else data
         if dumped:
             for key, val in sorted(dumped.items()):
                 formatter.rich.info(f"  {key}: {val}")

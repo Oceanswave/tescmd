@@ -81,6 +81,22 @@ def lock_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
     )
 
 
+@security_group.command("auto-secure")
+@click.argument("vin_positional", required=False, default=None, metavar="VIN")
+@global_options
+def auto_secure_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
+    """Close falcon-wing doors and lock (Model X only)."""
+    run_async(
+        execute_command(
+            app_ctx,
+            vin_positional,
+            "auto_secure_vehicle",
+            "security.auto-secure",
+            success_message="Vehicle secured (falcon-wing doors closed and locked).",
+        )
+    )
+
+
 @security_group.command("unlock")
 @click.argument("vin_positional", required=False, default=None, metavar="VIN")
 @global_options

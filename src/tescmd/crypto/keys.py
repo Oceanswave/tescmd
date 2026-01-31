@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import stat
 from pathlib import Path
 
 from cryptography.hazmat.primitives import serialization
@@ -43,7 +42,10 @@ def generate_ec_key_pair(
         encryption_algorithm=serialization.NoEncryption(),
     )
     priv_path.write_bytes(priv_pem)
-    priv_path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0o600
+
+    from tescmd._internal.permissions import secure_file
+
+    secure_file(priv_path)
 
     # Write public key — PEM
     pub_pem = private_key.public_key().public_bytes(

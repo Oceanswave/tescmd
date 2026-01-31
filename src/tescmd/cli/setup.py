@@ -685,7 +685,11 @@ async def _oauth_login_step(
     from tescmd.auth.token_store import TokenStore
     from tescmd.models.auth import DEFAULT_SCOPES
 
-    store = TokenStore(profile=app_ctx.profile)
+    store = TokenStore(
+        profile=app_ctx.profile,
+        token_file=settings.token_file,
+        config_dir=settings.config_dir,
+    )
 
     if store.has_token:
         # Check whether the stored scopes cover what we need.

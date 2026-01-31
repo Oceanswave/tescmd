@@ -22,7 +22,7 @@ tescmd is designed to work as a tool that AI agents can invoke directly. Platfor
 - **Energy products** — Powerwall live status, site info, backup reserve, operation mode, storm mode, time-of-use settings, charging history, calendar history, grid import/export
 - **User & sharing** — account info, region, orders, feature flags, driver management, vehicle sharing invites
 - **Fleet Telemetry awareness** — setup wizard highlights Fleet Telemetry streaming for up to 97% API cost reduction
-- **Response caching** — disk-based cache with configurable TTL reduces API costs; smart wake state tracking avoids redundant wake calls
+- **Universal response caching** — all read commands are cached with tiered TTLs (1h for specs/warranty, 5m for fleet lists, 1m standard, 30s for location-dependent); bots can call tescmd as often as needed — within the TTL window, responses are instant and free
 - **Cost-aware wake** — prompts before sending billable wake API calls; `--wake` flag for scripts that accept the cost
 - **Guided OAuth2 setup** — `tescmd auth login` walks you through browser-based authentication with PKCE
 - **Key management** — generate EC keys, register via Tesla Developer Portal (remote) or BLE enrollment (proximity)
@@ -102,10 +102,9 @@ pip install -e ".[dev]"
 
 tescmd resolves settings in this order (highest priority first):
 
-1. **CLI arguments** — `--vin`, `--region`, `--format`, etc.
+1. **CLI arguments** — `--vin`, `--region`, `--format`, `--units`, etc.
 2. **Environment variables** — `TESLA_VIN`, `TESLA_REGION`, etc. (`.env` files loaded automatically)
-3. **Config profile** — `~/.config/tescmd/config.toml` (active profile)
-4. **Defaults**
+3. **Defaults**
 
 ### Environment Variables
 
@@ -117,6 +116,9 @@ TESLA_CLIENT_SECRET=your-client-secret
 TESLA_VIN=5YJ3E1EA1NF000000
 TESLA_REGION=na
 
+# Token storage (optional — defaults to OS keyring with file fallback)
+TESLA_TOKEN_FILE=~/.config/tescmd/tokens.json
+
 # Cache settings (optional)
 TESLA_CACHE_ENABLED=true
 TESLA_CACHE_TTL=60
@@ -124,24 +126,36 @@ TESLA_CACHE_DIR=~/.cache/tescmd
 
 # Command protocol: auto | signed | unsigned (optional)
 TESLA_COMMAND_PROTOCOL=auto
+
+# Display units (optional — defaults to US units)
+TESLA_TEMP_UNIT=F          # F or C
+TESLA_DISTANCE_UNIT=mi     # mi or km
+TESLA_PRESSURE_UNIT=psi    # psi or bar
 ```
 
-### Config File
+## Token Storage
 
-```toml
-# ~/.config/tescmd/config.toml
+By default, tescmd stores OAuth tokens in the OS keyring (macOS Keychain, GNOME Keyring, Windows Credential Manager). On headless systems where no keyring daemon is available (Docker, CI, SSH sessions), tescmd automatically falls back to a file-based store at `~/.config/tescmd/tokens.json` with restricted permissions (`0600` on Unix, owner-only ACL on Windows).
 
-[default]
-region = "na"
-vin = "5YJ3E1EA1NF000000"
-output_format = "rich"
+You can force file-based storage by setting `TESLA_TOKEN_FILE`:
 
-[work-car]
-region = "na"
-vin = "7SA3E1EB2PF000000"
+```bash
+export TESLA_TOKEN_FILE=~/.config/tescmd/tokens.json
 ```
 
-Switch profiles: `tescmd --profile work-car vehicle info`
+To transfer tokens between machines, use `auth export` and `auth import`:
+
+```bash
+# On source machine
+tescmd auth export > tokens.json
+
+# On target machine (Docker, CI, etc.)
+tescmd auth import < tokens.json
+```
+
+Check which backend is active with `tescmd status` — the output includes a `Token store` line showing `keyring` or the file path.
+
+> **Security note:** File-based tokens are stored as plaintext JSON. The file is created with owner-only permissions, but treat it like any other credential file.
 
 ## Commands
 
@@ -149,18 +163,20 @@ Switch profiles: `tescmd --profile work-car vehicle info`
 |---|---|---|
 | `setup` | *(interactive wizard)* | First-run configuration: client ID, secret, region, domain, key enrollment |
 | `auth` | `login`, `logout`, `status`, `refresh`, `register`, `export`, `import` | OAuth2 authentication lifecycle |
-| `vehicle` | `list`, `info`, `data`, `location`, `wake`, `alerts`, `release-notes`, `service`, `drivers`, `low-power`, `accessory-power` | Vehicle discovery, state queries, wake, power management |
-| `charge` | `status`, `start`, `stop`, `limit`, `limit-max`, `limit-std`, `amps`, `schedule`, `port-open`, `port-close`, `departure`, `add-schedule`, `remove-schedule`, `managed-amps` | Charge queries, control, scheduling, and fleet management |
-| `climate` | `status`, `on`, `off`, `set`, `precondition`, `seat`, `seat-cool`, `wheel-heater`, `overheat`, `bioweapon`, `defrost`, `keeper`, `cop-temp`, `auto-seat`, `auto-wheel`, `wheel-level` | Climate, seat, and steering wheel control |
-| `security` | `status`, `lock`, `unlock`, `sentry`, `valet`, `valet-reset`, `remote-start`, `flash`, `honk`, `boombox`, `speed-limit`, `pin-to-drive`, `pin-reset`, `pin-clear-admin`, `speed-clear`, `speed-clear-admin`, `guest-mode`, `erase-data` | Security, access, and PIN management |
+| `vehicle` | `list`, `get`, `info`, `data`, `location`, `wake`, `rename`, `mobile-access`, `nearby-chargers`, `alerts`, `release-notes`, `service`, `drivers`, `calendar`, `subscriptions`, `upgrades`, `options`, `specs`, `warranty`, `fleet-status`, `low-power`, `accessory-power`, `telemetry {config,create,delete,errors}` | Vehicle discovery, state queries, fleet telemetry, power management |
+| `charge` | `status`, `start`, `stop`, `limit`, `limit-max`, `limit-std`, `amps`, `port-open`, `port-close`, `schedule`, `departure`, `precondition-add`, `precondition-remove`, `add-schedule`, `remove-schedule`, `clear-schedules`, `clear-preconditions`, `managed-amps`, `managed-location`, `managed-schedule` | Charge queries, control, scheduling, and fleet management |
+| `billing` | `history`, `sessions`, `invoice` | Supercharger billing history and invoices |
+| `climate` | `status`, `on`, `off`, `set`, `precondition`, `seat`, `seat-cool`, `wheel-heater`, `overheat`, `bioweapon`, `keeper`, `cop-temp`, `auto-seat`, `auto-wheel`, `wheel-level` | Climate, seat, and steering wheel control |
+| `security` | `status`, `lock`, `auto-secure`, `unlock`, `sentry`, `valet`, `valet-reset`, `remote-start`, `flash`, `honk`, `boombox`, `speed-limit`, `pin-to-drive`, `pin-reset`, `pin-clear-admin`, `speed-clear`, `speed-clear-admin`, `guest-mode`, `erase-data` | Security, access, and PIN management |
 | `trunk` | `open`, `close`, `frunk`, `window`, `sunroof`, `tonneau-open`, `tonneau-close`, `tonneau-stop` | Trunk, frunk, sunroof, tonneau, and window control |
 | `media` | `play-pause`, `next-track`, `prev-track`, `next-fav`, `prev-fav`, `volume-up`, `volume-down`, `adjust-volume` | Media playback control |
 | `nav` | `send`, `gps`, `supercharger`, `homelink`, `waypoints` | Navigation and HomeLink |
 | `software` | `status`, `schedule`, `cancel` | Software update management |
-| `energy` | `list`, `status`, `live`, `backup`, `mode`, `storm`, `tou`, `history`, `off-grid`, `grid-config`, `calendar` | Energy product (Powerwall) management |
+| `energy` | `list`, `status`, `live`, `backup`, `mode`, `storm`, `tou`, `history`, `off-grid`, `grid-config`, `telemetry`, `calendar` | Energy product (Powerwall) management |
 | `user` | `me`, `region`, `orders`, `features` | User account information |
 | `sharing` | `add-driver`, `remove-driver`, `create-invite`, `redeem-invite`, `revoke-invite`, `list-invites` | Vehicle sharing and driver management |
-| `key` | `generate`, `deploy`, `validate`, `show`, `enroll` | Key management and enrollment |
+| `key` | `generate`, `deploy`, `validate`, `show`, `enroll`, `unenroll` | Key management and enrollment |
+| `partner` | `public-key`, `telemetry-error-vins`, `telemetry-errors` | Partner account endpoints (require client credentials) |
 | `cache` | `status`, `clear` | Response cache management |
 | `raw` | `get`, `post` | Arbitrary Fleet API endpoint access |
 
@@ -205,15 +221,28 @@ tescmd vehicle wake --quiet && echo "Vehicle is awake"
 
 ### Display Units
 
-Rich output displays values in US units by default (°F, miles, PSI). The display unit system supports:
+Rich output displays values in US units by default (°F, miles, PSI). Switch to metric with a single flag:
 
-| Dimension | Default | Alternative |
-|---|---|---|
-| Temperature | °F | °C |
-| Distance | mi | km |
-| Pressure | psi | bar |
+```bash
+tescmd --units metric charge status        # All metric: °C, km, bar
+tescmd --units us charge status            # All US: °F, mi, psi (default)
+```
 
-The Tesla API returns Celsius, miles, and bar — conversions happen in the display layer only.
+Or configure individual units via environment variables:
+
+```dotenv
+TESLA_TEMP_UNIT=C          # F or C
+TESLA_DISTANCE_UNIT=km     # mi or km
+TESLA_PRESSURE_UNIT=bar    # psi or bar
+```
+
+| Dimension | US (default) | Metric | Env Variable |
+|---|---|---|---|
+| Temperature | °F | °C | `TESLA_TEMP_UNIT` |
+| Distance | mi | km | `TESLA_DISTANCE_UNIT` |
+| Pressure | psi | bar | `TESLA_PRESSURE_UNIT` |
+
+The `--units` flag overrides all three env vars at once. The Tesla API returns Celsius, miles, and bar — conversions happen in the display layer only.
 
 ## Tesla Fleet API Costs
 
@@ -235,11 +264,12 @@ A naive script that polls `vehicle_data` every 5 minutes generates **4-5 billabl
 
 ### How tescmd Reduces Costs
 
-tescmd implements three layers of cost protection:
+tescmd implements four layers of cost protection:
 
-1. **Response cache** — API responses are cached to disk (default 60s TTL). Repeated queries within the window return instantly with zero API calls.
-2. **Wake state cache** — Tracks whether the vehicle was recently confirmed online (30s TTL). Skips redundant wake attempts.
+1. **Universal read-command cache** — **all** read commands are cached with tiered TTLs: static data (specs, warranty) cached for 1 hour, fleet lists for 5 minutes, standard queries for 1 minute, location-dependent data for 30 seconds. Bots can call tescmd as often as needed — within the TTL, responses are instant and free.
+2. **Smart wake state** — Tracks whether the vehicle was recently confirmed online (30s TTL). Skips redundant wake attempts.
 3. **Wake confirmation prompt** — Prompts before sending billable wake calls in interactive mode. JSON/piped mode returns a structured error with `--wake` guidance.
+4. **Write-command invalidation** — write commands automatically invalidate the relevant cache scope (vehicle or energy site) so subsequent reads reflect the new state.
 
 ```bash
 # First call: hits API, caches response
@@ -247,6 +277,12 @@ tescmd charge status
 
 # Second call within 60s: instant cache hit, no API call
 tescmd charge status
+
+# All read commands are cached — even vehicle list, user info, billing, etc.
+tescmd vehicle list              # cached 5 min
+tescmd user me                   # cached 1 hour
+tescmd vehicle specs             # cached 1 hour
+tescmd billing history           # cached 1 min
 
 # Bypass cache when you need fresh data
 tescmd charge status --fresh
@@ -258,9 +294,9 @@ tescmd charge status --wake
 tescmd cache status              # entry counts, disk usage
 tescmd cache clear               # clear all
 tescmd cache clear --vin VIN     # clear for one vehicle
+tescmd cache clear --site 12345  # clear for an energy site
+tescmd cache clear --scope account  # clear account-level entries
 ```
-
-Write-commands (`charge start`, `climate on`, `security lock`, etc.) automatically invalidate the cache after success so that subsequent reads reflect the new state.
 
 For the full cost breakdown with more examples, savings calculations, and Fleet Telemetry streaming comparison, see [docs/api-costs.md](docs/api-costs.md).
 
@@ -311,7 +347,7 @@ tescmd is designed for use by AI agents and automation platforms. Agents like [C
 
 - **Structured JSON output** — piped/non-TTY mode automatically emits parseable JSON with consistent schema
 - **Cost protection** — agents won't accidentally trigger billable wake calls without `--wake`; the default behavior is safe
-- **Cache-aware** — repeated queries from an agent within the TTL window cost nothing
+- **Cache-aware** — every read command is cached; repeated queries from an agent within the TTL window cost nothing
 - **Meaningful exit codes** — agents can branch on success/failure without parsing output
 - **Stateless invocations** — each command is self-contained; no session state to manage
 - **Signed commands** — when keys are enrolled, commands are signed transparently; no agent-side crypto needed
