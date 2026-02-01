@@ -57,7 +57,6 @@ tescmd/
 │   ├── protocol/        # Vehicle Command Protocol tests
 │   └── conftest.py      # Shared fixtures
 ├── scripts/             # Developer scripts
-│   └── e2e_test.py      # Interactive E2E test runner
 ├── docs/                # Documentation
 ├── pyproject.toml       # Build config, deps, tool config
 ├── CLAUDE.md            # Claude Code context
@@ -411,34 +410,33 @@ def test_charge_status(httpx_mock):
 
 ## E2E Testing Against a Live Vehicle
 
-The `scripts/e2e_test.py` script runs each tescmd command interactively against a real vehicle. It pauses between commands so you can observe the vehicle's response.
+The `tests/cli/test_e2e_smoke.py` suite runs every tescmd command against the live Tesla Fleet API. It is excluded from normal `pytest` runs and requires explicit invocation.
+
+**Prerequisites:** Set `TESLA_ACCESS_TOKEN` (and optionally other credentials) in your environment. Set `E2E_VIN` and `E2E_SITE_ID` for your vehicle and energy site.
 
 ```bash
-# Run all tests (uses $TESLA_VIN)
-python scripts/e2e_test.py
+# Run all e2e tests (sequential, verbose)
+pytest -m e2e -v -n 0
 
-# Specify VIN explicitly
-python scripts/e2e_test.py --vin 5YJ3E1EA1NF000000
+# Stop on first failure
+pytest -m e2e -x -v -n 0
 
-# Skip physical actions (frunk/trunk open)
-python scripts/e2e_test.py --skip-destructive
-
-# Run only one category
-python scripts/e2e_test.py --category climate
-python scripts/e2e_test.py --category charge
-
-# Don't auto-wake between commands
-python scripts/e2e_test.py --no-wake
+# Run a specific category
+pytest -m e2e -v -n 0 -k "TestReadVehicleCommands"
+pytest -m e2e -v -n 0 -k "TestBenignWriteCommands"
+pytest -m e2e -v -n 0 -k "TestHelpOnlyCommands"
 ```
 
-For each command, the script shows what it will run and prompts:
-- **Enter** — execute the command
-- **s** — skip this command
-- **q** — quit the test run
+**Test categories:**
 
-Results are color-coded (PASS/FAIL/SKIP) with a summary at the end.
-
-**Available categories:** `climate`, `charge`, `security`, `trunk`, `media`, `nav`, `software`, `vehicle`
+| Category | Tests | What it does |
+|----------|-------|-------------|
+| `TestReadVehicleCommands` | 19 | Vehicle data reads with `--wake` |
+| `TestReadStatusCommands` | 4 | Charge/climate/security/software status |
+| `TestReadEnergyCommands` | 5 | Energy product reads |
+| `TestReadOtherCommands` | 14 | Billing, user, sharing, auth, key, cache, partner, raw |
+| `TestBenignWriteCommands` | 9 | Safe writes with save/restore (flash, honk, climate, etc.) |
+| `TestHelpOnlyCommands` | 128 | `--help` on every command — validates Click wiring |
 
 ## Building
 
