@@ -57,20 +57,32 @@ _WAKE_BACKOFF_FACTOR = 1.5
 def _make_token_refresher(
     store: TokenStore, settings: AppSettings
 ) -> Callable[[], Awaitable[str | None]] | None:
-    """Return an async callback that refreshes the access token, or *None*."""
+    """Return an async callback that refreshes the access token, or *None*.
+
+    When the refresh token is expired/revoked (``login_required``),
+    prompts the user to re-authenticate via the browser on TTY.
+    In non-TTY mode, raises with guidance to run ``tescmd auth login``.
+    """
     refresh_token = store.refresh_token
     client_id = settings.client_id
     if not refresh_token or not client_id:
         return None
 
     async def _refresh() -> str | None:
+        from tescmd.api.errors import AuthError
         from tescmd.auth.oauth import refresh_access_token
 
-        token_data = await refresh_access_token(
-            refresh_token=refresh_token,
-            client_id=client_id,
-            client_secret=settings.client_secret,
-        )
+        try:
+            token_data = await refresh_access_token(
+                refresh_token=refresh_token,
+                client_id=client_id,
+                client_secret=settings.client_secret,
+            )
+        except AuthError as exc:
+            if "login_required" in str(exc):
+                return await reauth_on_expired_refresh(store, settings)
+            raise
+
         meta = store.metadata or {}
         store.save(
             access_token=token_data.access_token,
@@ -82,6 +94,64 @@ def _make_token_refresher(
         return token_data.access_token
 
     return _refresh
+
+
+async def reauth_on_expired_refresh(store: TokenStore, settings: AppSettings) -> str:
+    """Handle an expired/revoked refresh token by prompting for re-auth.
+
+    On TTY: asks the user to re-authenticate via the browser.
+    Non-TTY: raises with guidance to run ``tescmd auth login``.
+
+    Returns the new access token on success.
+    """
+    from tescmd.api.errors import AuthError
+    from tescmd.models.auth import DEFAULT_SCOPES
+
+    client_id = settings.client_id
+    if not client_id:
+        raise AuthError(
+            "Refresh token expired and TESLA_CLIENT_ID is not set. "
+            "Run 'tescmd auth login' to re-authenticate.",
+            status_code=401,
+        )
+
+    if not sys.stdin.isatty():
+        raise AuthError(
+            "Refresh token is invalid or expired. Run 'tescmd auth login' to re-authenticate.",
+            status_code=401,
+        )
+
+    click.echo("")
+    click.echo("Your refresh token has expired or been revoked.")
+    if not click.confirm("Re-authenticate via browser?", default=True):
+        raise AuthError(
+            "Re-authentication cancelled. Run 'tescmd auth login' to authenticate manually.",
+            status_code=401,
+        )
+
+    from tescmd.auth.oauth import login_flow
+
+    meta = store.metadata or {}
+    region = meta.get("region", "na")
+    scopes = meta.get("scopes", DEFAULT_SCOPES)
+    port = 8085
+
+    click.echo("")
+    click.echo("Opening your browser to sign in to Tesla...")
+    click.echo("When prompted, click 'Select All' and then 'Allow'.")
+
+    token_data = await login_flow(
+        client_id=client_id,
+        client_secret=settings.client_secret,
+        redirect_uri=f"http://localhost:{port}/callback",
+        scopes=scopes,
+        port=port,
+        token_store=store,
+        region=region,
+    )
+
+    click.echo("Re-authenticated successfully.")
+    return token_data.access_token
 
 
 def _make_rate_limit_handler(

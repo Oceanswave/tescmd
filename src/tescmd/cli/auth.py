@@ -267,11 +267,24 @@ async def _cmd_refresh(app_ctx: AppContext) -> None:
     scopes: list[str] = meta.get("scopes", DEFAULT_SCOPES)
     region: str = meta.get("region", "na")
 
-    token_data = await refresh_access_token(
-        refresh_token=rt,
-        client_id=settings.client_id,
-        client_secret=settings.client_secret,
-    )
+    from tescmd.api.errors import AuthError
+    from tescmd.cli._client import reauth_on_expired_refresh
+
+    try:
+        token_data = await refresh_access_token(
+            refresh_token=rt,
+            client_id=settings.client_id,
+            client_secret=settings.client_secret,
+        )
+    except AuthError as exc:
+        if "login_required" not in str(exc):
+            raise
+        await reauth_on_expired_refresh(store, settings)
+        if formatter.format == "json":
+            formatter.output({"status": "re-authenticated"}, command="auth.refresh")
+        else:
+            formatter.rich.info("")
+        return
 
     store.save(
         access_token=token_data.access_token,
