@@ -24,6 +24,8 @@ from tescmd.cli._client import (
     require_vin,
 )
 from tescmd.cli._options import global_options
+from tescmd.models.sharing import ShareDriverInfo
+from tescmd.models.vehicle import NearbyChargingSites, Vehicle
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +66,7 @@ async def _cmd_list(app_ctx: AppContext) -> None:
             endpoint="vehicle.list",
             fetch=lambda: api.list_vehicles(),
             ttl=TTL_SLOW,
+            model_class=Vehicle,
         )
     finally:
         await client.close()
@@ -94,6 +97,7 @@ async def _cmd_get(app_ctx: AppContext, vin_positional: str | None) -> None:
             endpoint="vehicle.get",
             fetch=lambda: api.get_vehicle(vin),
             ttl=TTL_DEFAULT,
+            model_class=Vehicle,
         )
     finally:
         await client.close()
@@ -326,6 +330,7 @@ async def _cmd_nearby_chargers(app_ctx: AppContext, vin_positional: str | None) 
             endpoint="vehicle.nearby-chargers",
             fetch=lambda: api.nearby_charging_sites(vin),
             ttl=TTL_FAST,
+            model_class=NearbyChargingSites,
         )
     finally:
         await client.close()
@@ -452,6 +457,7 @@ async def _cmd_drivers(app_ctx: AppContext, vin_positional: str | None) -> None:
             endpoint="vehicle.drivers",
             fetch=lambda: api.list_drivers(vin),
             ttl=TTL_SLOW,
+            model_class=ShareDriverInfo,
         )
     finally:
         await client.close()
@@ -837,7 +843,7 @@ async def _cmd_telemetry_stream(
 
     # Pick a random high port if none specified
     if port is None:
-        port = random.randint(49152, 65535)
+        port = random.randint(49152, 65534)
 
     field_config = resolve_fields(fields_spec, interval_override)
 

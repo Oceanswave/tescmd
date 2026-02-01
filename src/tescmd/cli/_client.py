@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
+import sys
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -30,11 +32,14 @@ from tescmd.models.vehicle import VehicleData
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from pydantic import BaseModel
     from rich.status import Status
 
     from tescmd.api.signed_command import SignedCommandAPI
     from tescmd.cli.main import AppContext
     from tescmd.output.formatter import OutputFormatter
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -278,15 +283,17 @@ async def cached_api_call(
     fetch: Callable[[], Awaitable[Any]],
     ttl: int | None = None,
     params: dict[str, str] | None = None,
+    model_class: type[BaseModel] | None = None,
 ) -> Any:
     """Fetch API data with transparent caching.
 
     1. Compute cache key via :func:`generic_cache_key`.
-    2. On hit → emit cache metadata, return cached dict.
-    3. On miss → call *fetch()*, serialise, store, return result.
+    2. On hit → reconstruct via *model_class* (if given), else return dict.
+    3. On miss → call *fetch()*, serialise to dict for cache, return original.
 
-    The caller's ``formatter.output()`` handles both Pydantic models (miss)
-    and plain dicts (hit).
+    When *model_class* is provided, cache hits are reconstructed with
+    ``model_class.model_validate(cached_dict)`` so callers always receive
+    Pydantic models regardless of hit/miss.
     """
     formatter = app_ctx.formatter
     cache = get_cache(app_ctx)
@@ -306,7 +313,7 @@ async def cached_api_call(
                 f" (TTL {cached.ttl_seconds}s)."
                 f" Use --fresh for live data.[/dim]"
             )
-        return cached.data
+        return _reconstruct(cached.data, model_class)
 
     result = await fetch()
 
@@ -323,6 +330,37 @@ async def cached_api_call(
 
     cache.put_generic(key, data, ttl)
     return result
+
+
+def _reconstruct(data: Any, model_class: type[BaseModel] | None) -> Any:
+    """Rebuild a Pydantic model from cached dict data.
+
+    * *model_class* provided + dict → ``model_class.model_validate(data)``
+    * *model_class* provided + list → validate each element
+    * *model_class* provided + ``{"_value": x}`` wrapper → unwrap scalar
+    * *model_class* is ``None`` → return raw cached data (dict / list)
+
+    If validation fails (e.g. cache corruption, schema change after upgrade),
+    falls back to returning the raw cached data with a warning log.
+    """
+    if model_class is None:
+        return data
+    if isinstance(data, dict) and "_value" in data and len(data) == 1:
+        return data["_value"]
+    try:
+        if isinstance(data, list):
+            return [
+                model_class.model_validate(item) if isinstance(item, dict) else item
+                for item in data
+            ]
+        if isinstance(data, dict):
+            return model_class.model_validate(data)
+    except Exception:
+        logger.warning(
+            "Cache reconstruction failed for %s — returning raw dict",
+            model_class.__name__,
+        )
+    return data
 
 
 async def cached_vehicle_data(
@@ -513,7 +551,7 @@ async def auto_wake(
 
     # Vehicle is asleep — decide whether to wake.
     if not auto:
-        if formatter.format not in ("json",):
+        if formatter.format not in ("json",) and sys.stdin.isatty():
             # Interactive TTY prompt with retry loop
             while True:
                 formatter.rich.info("")
@@ -552,7 +590,7 @@ async def auto_wake(
             )
 
     # Proceed with wake.
-    if formatter.format not in ("json",):
+    if formatter.format not in ("json",) and sys.stdin.isatty():
         with formatter.console.status("", spinner="dots") as status:
             await _wake_and_wait(vehicle_api, vin, timeout, status=status)
         formatter.rich.info("[green]Vehicle is awake.[/green]")

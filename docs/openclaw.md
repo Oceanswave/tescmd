@@ -2,10 +2,15 @@
 
 The OpenClaw bridge streams filtered vehicle telemetry to an [OpenClaw](https://openclaw.ai/) Gateway, enabling real-time agent consumption of vehicle state. Unlike raw telemetry streaming, the bridge applies dual-gate filtering (delta threshold + throttle interval) to reduce noise and control event volume.
 
+> **Combined mode:** `tescmd serve VIN --openclaw ws://...` combines MCP + cache warming + OpenClaw bridging in a single command. Use this when you want agents to have cached reads AND OpenClaw events simultaneously. The dedicated `openclaw bridge` command remains available for standalone bridge use.
+
 ## Quick Start
 
 ```bash
-# Bridge to local gateway (default: ws://127.0.0.1:18789)
+# Combined: MCP + cache warming + OpenClaw
+tescmd serve 5YJ3... --openclaw ws://gateway.example.com:18789
+
+# Standalone bridge to local gateway (default: ws://127.0.0.1:18789)
 tescmd openclaw bridge
 
 # Bridge to remote gateway with auth

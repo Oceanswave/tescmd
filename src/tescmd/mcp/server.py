@@ -98,6 +98,7 @@ _WRITE_TOOLS: dict[str, tuple[list[str], str]] = {
 _EXCLUDED = {
     "vehicle telemetry stream",
     "openclaw bridge",
+    "serve",
     "auth login",
     "auth logout",
     "auth register",
@@ -358,9 +359,7 @@ class _InMemoryOAuthProvider:
         # If this is the configured client, attach the secret so token
         # endpoint authentication succeeds.
         secret = (
-            self._configured_client_secret
-            if client_id == self._configured_client_id
-            else None
+            self._configured_client_secret if client_id == self._configured_client_id else None
         )
         permissive = _PermissiveClient(client_id=client_id, client_secret=secret)
         self._clients[client_id] = permissive

@@ -175,6 +175,7 @@ def _register_commands() -> None:
     from tescmd.cli.partner import partner_group
     from tescmd.cli.raw import raw_group
     from tescmd.cli.security import security_group
+    from tescmd.cli.serve import serve_cmd
     from tescmd.cli.setup import setup_cmd
     from tescmd.cli.sharing import sharing_group
     from tescmd.cli.software import software_group
@@ -197,6 +198,7 @@ def _register_commands() -> None:
     cli.add_command(partner_group)
     cli.add_command(raw_group)
     cli.add_command(security_group)
+    cli.add_command(serve_cmd)
     cli.add_command(setup_cmd)
     cli.add_command(sharing_group)
     cli.add_command(status_cmd)

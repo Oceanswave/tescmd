@@ -76,18 +76,31 @@ class TelemetryServer:
         import websockets.asyncio.server as ws_server_mod
 
         # Internal WS server — only reachable from localhost
-        self._ws_server = await ws_server_mod.serve(
-            self._ws_handler,
-            host="127.0.0.1",
-            port=self._ws_port,
-        )
+        try:
+            self._ws_server = await ws_server_mod.serve(
+                self._ws_handler,
+                host="127.0.0.1",
+                port=self._ws_port,
+            )
+        except OSError as exc:
+            raise OSError(
+                f"Cannot bind internal WebSocket server to port {self._ws_port}: {exc}"
+            ) from exc
 
         # Public-facing TCP mux — bind to all interfaces (IPv4 + IPv6).
-        self._mux_server = await asyncio.start_server(
-            self._mux_handler,
-            host=None,
-            port=self._port,
-        )
+        try:
+            self._mux_server = await asyncio.start_server(
+                self._mux_handler,
+                host=None,
+                port=self._port,
+            )
+        except OSError as exc:
+            # Clean up the already-started WS server before re-raising
+            if self._ws_server is not None:
+                self._ws_server.close()
+                await self._ws_server.wait_closed()
+                self._ws_server = None
+            raise OSError(f"Cannot bind mux server to port {self._port}: {exc}") from exc
 
         logger.info(
             "Telemetry server listening on 0.0.0.0:%d (ws internal :%d)",

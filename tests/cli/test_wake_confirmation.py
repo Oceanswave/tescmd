@@ -42,9 +42,11 @@ class TestWakeConfirmation:
         operation = AsyncMock(side_effect=[VehicleAsleepError("asleep", 408), "result"])
 
         with (
+            patch("tescmd.cli._client.sys") as mock_sys,
             patch("tescmd.cli._client.click.prompt", return_value="w"),
             patch("tescmd.cli._client._wake_and_wait", new_callable=AsyncMock),
         ):
+            mock_sys.stdin.isatty.return_value = True
             result = await auto_wake(formatter, api, "VIN", operation)
 
         assert result == "result"
@@ -56,9 +58,11 @@ class TestWakeConfirmation:
         operation = AsyncMock(side_effect=VehicleAsleepError("asleep", 408))
 
         with (
+            patch("tescmd.cli._client.sys") as mock_sys,
             patch("tescmd.cli._client.click.prompt", return_value="c"),
             pytest.raises(VehicleAsleepError, match="Wake cancelled"),
         ):
+            mock_sys.stdin.isatty.return_value = True
             await auto_wake(formatter, api, "VIN", operation)
 
     async def test_retry_succeeds_when_vehicle_wakes_via_app(self) -> None:
@@ -68,7 +72,11 @@ class TestWakeConfirmation:
         # First call: asleep (triggers prompt). Retry: succeeds.
         operation = AsyncMock(side_effect=[VehicleAsleepError("asleep", 408), "result"])
 
-        with patch("tescmd.cli._client.click.prompt", return_value="r"):
+        with (
+            patch("tescmd.cli._client.sys") as mock_sys,
+            patch("tescmd.cli._client.click.prompt", return_value="r"),
+        ):
+            mock_sys.stdin.isatty.return_value = True
             result = await auto_wake(formatter, api, "VIN", operation)
 
         assert result == "result"
@@ -90,9 +98,11 @@ class TestWakeConfirmation:
         )
 
         with (
+            patch("tescmd.cli._client.sys") as mock_sys,
             patch("tescmd.cli._client.click.prompt", side_effect=["r", "r", "w"]),
             patch("tescmd.cli._client._wake_and_wait", new_callable=AsyncMock),
         ):
+            mock_sys.stdin.isatty.return_value = True
             result = await auto_wake(formatter, api, "VIN", operation)
 
         assert result == "result"
@@ -104,9 +114,11 @@ class TestWakeConfirmation:
         operation = AsyncMock(side_effect=VehicleAsleepError("asleep", 408))
 
         with (
+            patch("tescmd.cli._client.sys") as mock_sys,
             patch("tescmd.cli._client.click.prompt", side_effect=["r", "c"]),
             pytest.raises(VehicleAsleepError, match="Wake cancelled"),
         ):
+            mock_sys.stdin.isatty.return_value = True
             await auto_wake(formatter, api, "VIN", operation)
 
     async def test_skips_prompt_with_auto_flag(self) -> None:

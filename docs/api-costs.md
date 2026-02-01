@@ -200,6 +200,20 @@ The `--wake` flag is an explicit opt-in. Scripts and agents that include it are 
 | Script runs charge status in a loop | Unbounded API calls | 1 call per TTL window |
 | Vehicle is asleep, user just wants to check | Billable wake sent silently | Prompt first, suggest free Tesla app wake |
 
+## Cache Warming via Telemetry
+
+`tescmd serve` eliminates polling costs entirely by using Fleet Telemetry to push data into the response cache. While telemetry is active, MCP tool reads and CLI queries hit the warmed cache with zero API calls.
+
+| Approach | Polling Requests/day | Cost |
+|---|---|---|
+| Naive `vehicle_data` polling (1/min) | ~1,400+ | High |
+| tescmd with response cache (60s TTL) | ~290 | Moderate |
+| `tescmd serve` with telemetry cache warming | 0 (streaming) | Very low |
+
+The `CacheSink` translates telemetry field updates into VehicleData paths and merges them into the disk cache with a generous TTL (120s by default). As long as telemetry frames arrive, the cache stays warm and reads are free.
+
+This is particularly effective for agent workflows where an MCP client makes frequent read requests — charge status, location, climate — while the vehicle is streaming telemetry.
+
 ## Recommendations for Users
 
 1. **Use the Tesla app to wake your vehicle** before running tescmd commands. Waking from the app is free; waking via the API is billable.

@@ -9,6 +9,7 @@ import click
 from tescmd._internal.async_utils import run_async
 from tescmd.cli._client import TTL_SLOW, cached_api_call, get_energy_api, invalidate_cache_for_site
 from tescmd.cli._options import global_options
+from tescmd.models.energy import SiteInfo
 
 if TYPE_CHECKING:
     from tescmd.cli.main import AppContext
@@ -66,6 +67,7 @@ async def _cmd_status(app_ctx: AppContext, site_id: int) -> None:
             endpoint="energy.status",
             fetch=lambda: api.site_info(site_id),
             ttl=TTL_SLOW,
+            model_class=SiteInfo,
         )
     finally:
         await client.close()

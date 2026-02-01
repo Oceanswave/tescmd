@@ -160,7 +160,12 @@ class TeslaFleetClient:
         """Translate HTTP status codes to domain exceptions and return JSON."""
         if response.status_code == 429:
             raw = response.headers.get("retry-after")
-            retry_after: int | None = int(raw) if raw is not None else None
+            retry_after: int | None = None
+            if raw is not None:
+                try:
+                    retry_after = int(raw)
+                except ValueError:
+                    retry_after = 30  # Fallback for HTTP-date strings
             raise RateLimitError(retry_after=retry_after)
 
         if response.status_code == 408:
@@ -185,6 +190,10 @@ class TeslaFleetClient:
                 f"HTTP {response.status_code}: {text}",
                 status_code=response.status_code,
             )
+
+        # 204 No Content — return empty dict (no body to parse)
+        if response.status_code == 204:
+            return {}
 
         try:
             result: dict[str, Any] = response.json()

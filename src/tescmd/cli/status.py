@@ -36,7 +36,7 @@ def status_cmd(app_ctx: AppContext) -> None:
     meta = store.metadata or {}
     expires_at = meta.get("expires_at", 0.0)
     expires_in = max(0, int(expires_at - time.time())) if has_token else 0
-    has_refresh = store.refresh_token is not None
+    has_refresh = bool(store.refresh_token)
 
     # Key info
     key_dir = Path(settings.config_dir).expanduser() / "keys"

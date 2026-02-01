@@ -97,6 +97,8 @@ def decode_jwt_scopes(token: str) -> list[str] | None:
     scp = payload.get("scp")
     if isinstance(scp, list):
         return [str(s) for s in scp]
+    if isinstance(scp, str):
+        return scp.split()
     return None
 
 

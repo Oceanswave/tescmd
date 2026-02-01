@@ -15,6 +15,7 @@ from tescmd.cli._client import (
     require_vin,
 )
 from tescmd.cli._options import global_options
+from tescmd.models.sharing import ShareInvite
 
 if TYPE_CHECKING:
     from tescmd.cli.main import AppContext
@@ -172,6 +173,7 @@ async def _cmd_list_invites(app_ctx: AppContext, vin_positional: str | None) -> 
             endpoint="sharing.list-invites",
             fetch=lambda: api.list_invites(vin),
             ttl=TTL_SLOW,
+            model_class=ShareInvite,
         )
     finally:
         await client.close()

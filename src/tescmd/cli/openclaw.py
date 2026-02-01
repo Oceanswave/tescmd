@@ -106,7 +106,7 @@ async def _cmd_bridge(
     vin = require_vin(vin_positional, app_ctx.vin)
 
     if port is None:
-        port = random.randint(49152, 65535)
+        port = random.randint(49152, 65534)
 
     field_config = resolve_fields(fields_spec, interval_override)
 
@@ -128,6 +128,12 @@ async def _cmd_bridge(
     )
     bridge = TelemetryBridge(gw, filt, emitter, dry_run=dry_run)
 
+    # Build fanout with the OpenClaw bridge as the primary sink
+    from tescmd.telemetry.fanout import FrameFanout
+
+    fanout = FrameFanout()
+    fanout.add_sink(bridge.on_frame)
+
     # Connect to gateway (unless dry-run)
     if not dry_run:
         if formatter.format != "json":
@@ -141,7 +147,7 @@ async def _cmd_bridge(
 
     try:
         async with telemetry_session(
-            app_ctx, vin, port, field_config, bridge.on_frame, interactive=False
+            app_ctx, vin, port, field_config, fanout.on_frame, interactive=False
         ):
             if formatter.format != "json":
                 formatter.rich.info(f"Bridge running: telemetry → {config.gateway_url}")
@@ -154,8 +160,7 @@ async def _cmd_bridge(
 
             if formatter.format != "json":
                 formatter.rich.info(
-                    f"\n[dim]Events sent: {bridge.event_count},"
-                    f" dropped: {bridge.drop_count}[/dim]"
+                    f"\n[dim]Events sent: {bridge.event_count}, dropped: {bridge.drop_count}[/dim]"
                 )
     finally:
         await gw.close()

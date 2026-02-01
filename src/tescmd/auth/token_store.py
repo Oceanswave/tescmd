@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import tempfile
 import warnings
 from pathlib import Path
 from typing import Any, Protocol
+
+logger = logging.getLogger(__name__)
 
 SERVICE_NAME = "tescmd"
 
@@ -227,7 +230,11 @@ class TokenStore:
         raw = self._backend.get(self._key("metadata"))
         if raw is None:
             return None
-        result: dict[str, Any] = json.loads(raw)
+        try:
+            result: dict[str, Any] = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            logger.warning("Corrupt token metadata — ignoring")
+            return None
         return result
 
     # -- mutators ------------------------------------------------------------

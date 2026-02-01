@@ -339,10 +339,14 @@ class RichOutput:
         ):
             rows.append(("Time to full", f"{cs.time_to_full_charge:.1f}h"))
         if cs.scheduled_charging_start_time is not None:
+            from datetime import UTC
+
             rows.append(
                 (
                     "Scheduled start",
-                    datetime.fromtimestamp(cs.scheduled_charging_start_time).strftime("%I:%M %p"),
+                    datetime.fromtimestamp(cs.scheduled_charging_start_time, tz=UTC)
+                    .astimezone()
+                    .strftime("%I:%M %p"),
                 )
             )
         if cs.scheduled_departure_time_minutes is not None:

@@ -10,7 +10,7 @@ tescmd follows a layered architecture with strict separation of concerns. Each l
 │  cli/main.py ─ cli/auth.py ─ cli/vehicle.py     │
 │  cli/charge.py ─ cli/climate.py ─ cli/key.py    │
 │  cli/security.py ─ cli/setup.py ─ cli/trunk.py  │
-│  cli/openclaw.py ─ cli/mcp_cmd.py               │
+│  cli/openclaw.py ─ cli/mcp_cmd.py ─ cli/serve.py │
 │        (Click groups, dispatch, output)          │
 ├─────────────────────────────────────────────────┤
 │                   API Layer                      │
@@ -36,7 +36,10 @@ tescmd follows a layered architecture with strict separation of concerns. Each l
 │  telemetry/server.py ─ telemetry/decoder.py      │
 │  telemetry/dashboard.py ─ telemetry/fields.py    │
 │  telemetry/tailscale.py ─ telemetry/flatbuf.py   │
-│  (WebSocket server, protobuf decode, Rich TUI)   │
+│  telemetry/fanout.py ─ telemetry/mapper.py       │
+│  telemetry/cache_sink.py                         │
+│  (WebSocket server, protobuf decode, Rich TUI,   │
+│   frame fan-out, cache warming, field mapping)    │
 ├─────────────────────────────────────────────────┤
 │              OpenClaw Layer                       │
 │  openclaw/config.py ─ openclaw/filters.py        │
@@ -264,6 +267,9 @@ See [vehicle-command-protocol.md](vehicle-command-protocol.md) for the full prot
 - **`dashboard.py`** (`TelemetryDashboard`) — Rich Live TUI with field name, value, and last-update columns. Supports unit conversion via `DisplayUnits`, connection status, frame counter, and uptime display.
 - **`setup.py`** (`telemetry_session()`) — Async context manager encapsulating the full telemetry lifecycle: server start → Tailscale tunnel → partner domain re-registration → fleet config → yield → cleanup. Shared by both `cli/vehicle.py` (stream) and `cli/openclaw.py` (bridge).
 - **`tailscale.py`** (`TailscaleManager`) — Subprocess-based Tailscale management: check installation, start/stop Funnel, retrieve TLS certs, serve files at specific paths.
+- **`fanout.py`** (`FrameFanout`) — Multiplexes a single `on_frame` callback to N sinks. Each sink is error-isolated; one failing sink does not affect others.
+- **`mapper.py`** (`TelemetryMapper`) — Maps Fleet Telemetry field names (e.g. `Soc`, `Location`) to VehicleData JSON paths (e.g. `charge_state.usable_battery_level`). Includes type-safe transforms for each field.
+- **`cache_sink.py`** (`CacheSink`) — Telemetry sink that warms the `ResponseCache` by translating incoming frames via `TelemetryMapper` and merging them into the disk cache. Buffered writes with configurable flush interval.
 
 **Dependency:** `websockets>=14.0` (core dependency).
 
@@ -341,6 +347,31 @@ The Tesla API returns temperatures in Celsius, distances in miles, and tire pres
 ### Why Keyring for Token Storage
 
 OS-level credential storage (macOS Keychain, GNOME Keyring, Windows Credential Locker) is more secure than plaintext files. The `keyring` library provides a cross-platform interface with graceful fallback to file-based storage.
+
+### Why a Unified Serve Pipeline
+
+`tescmd serve` consolidates MCP server, telemetry streaming, cache warming, and OpenClaw bridging into a single command. The key abstraction is `FrameFanout` — a multiplexer that delivers each telemetry frame to N sinks independently:
+
+```
+Tesla Vehicle (Fleet Telemetry push)
+    → TelemetryServer (WebSocket, exposed via Tailscale Funnel)
+        → TelemetryDecoder (protobuf → TelemetryFrame)
+            → FrameFanout.on_frame()
+                ├→ CacheSink (warms ResponseCache from telemetry)
+                ├→ TelemetryDashboard (Rich Live TUI, TTY only)
+                ├→ JSONL stdout sink (piped/JSON mode)
+                └→ TelemetryBridge → OpenClaw Gateway (optional)
+    ┊
+    └→ MCP Server (HTTP or stdio, reads from warmed cache)
+```
+
+Each sink is error-isolated: one failing sink does not affect others. The `CacheSink` translates telemetry field names to VehicleData paths via `TelemetryMapper`, merging updates into the `ResponseCache` so MCP tool reads are free while telemetry is active.
+
+Mode selection:
+- **Default** (`serve VIN`): MCP + telemetry + cache warming + dashboard (TTY) or JSONL (piped)
+- **MCP-only** (`serve --no-telemetry`): Lightweight MCP server, no telemetry
+- **Telemetry-only** (`serve VIN --no-mcp`): Dashboard/JSONL without MCP
+- **Combined** (`serve VIN --openclaw ws://...`): All of the above + OpenClaw bridge
 
 ### Why python-dotenv
 

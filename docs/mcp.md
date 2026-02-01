@@ -2,18 +2,35 @@
 
 tescmd includes a built-in [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that exposes all CLI commands as tools. AI agents like Claude Desktop and Claude Code can connect to this server and query or control Tesla vehicles programmatically.
 
+> **Recommended:** Use `tescmd serve` instead of `tescmd mcp serve` for most use cases. `tescmd serve` combines the MCP server with telemetry-driven cache warming, so agent reads are free while telemetry is active. See [When to Use Which](#when-to-use-which) below.
+
 ## Quick Start
 
 ```bash
-# Start MCP server (HTTP on port 8080)
+# Recommended: MCP + telemetry cache warming
+tescmd serve 5YJ3...
+
+# MCP-only (same as tescmd mcp serve)
+tescmd serve --no-telemetry
+
+# stdio transport for Claude Desktop
+tescmd serve --transport stdio
+
+# Legacy: standalone MCP server
 tescmd mcp serve
-
-# Start on a custom port
-tescmd mcp serve --port 9090
-
-# Start with stdio transport (for Claude Desktop config)
-tescmd mcp serve --transport stdio
 ```
+
+## When to Use Which
+
+| Command | MCP | Telemetry | Cache Warming | OpenClaw | Best For |
+|---|---|---|---|---|---|
+| `tescmd serve VIN` | yes | yes | yes | optional | Production agent use |
+| `tescmd serve --no-telemetry` | yes | - | - | - | Simple MCP-only setup |
+| `tescmd serve --transport stdio` | yes (stdio) | - | - | - | Claude Desktop/Code subprocess |
+| `tescmd serve VIN --no-mcp` | - | yes | - | optional | Telemetry dashboard/monitoring |
+| `tescmd mcp serve` | yes | - | - | - | Lightweight MCP (legacy alias) |
+| `tescmd openclaw bridge` | - | yes | - | yes | Dedicated OpenClaw bridge |
+| `tescmd vehicle telemetry stream` | - | yes | - | - | Interactive telemetry dashboard |
 
 ## CLI Options
 
@@ -72,7 +89,7 @@ Add to your `claude_desktop_config.json`:
   "mcpServers": {
     "tescmd": {
       "command": "tescmd",
-      "args": ["mcp", "serve", "--transport", "stdio"],
+      "args": ["serve", "--transport", "stdio"],
       "env": {
         "TESCMD_MCP_CLIENT_ID": "claude-desktop",
         "TESCMD_MCP_CLIENT_SECRET": "your-secret-here"
@@ -91,7 +108,7 @@ Add to `.mcp.json` in your project root:
   "mcpServers": {
     "tescmd": {
       "command": "tescmd",
-      "args": ["mcp", "serve", "--transport", "stdio"],
+      "args": ["serve", "--transport", "stdio"],
       "env": {
         "TESCMD_MCP_CLIENT_ID": "claude-code",
         "TESCMD_MCP_CLIENT_SECRET": "your-secret-here"

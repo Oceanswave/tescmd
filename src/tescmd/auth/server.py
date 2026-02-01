@@ -104,5 +104,6 @@ class OAuthCallbackServer(HTTPServer):
     def stop(self) -> None:
         """Shut down the server and join the daemon thread."""
         self.shutdown()
+        self.server_close()
         if self._thread is not None:
             self._thread.join(timeout=5)

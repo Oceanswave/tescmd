@@ -1223,6 +1223,89 @@ The bridge uses dual-gate filtering: each field must exceed both a delta thresho
 
 ---
 
+## `serve` — Unified Server
+
+The recommended way to run tescmd as a server. Combines MCP, telemetry cache warming, Rich TUI dashboard, and OpenClaw bridging into a single command. Auto-detects TTY for dashboard vs JSONL output.
+
+```bash
+# MCP + telemetry cache warming (recommended for agents)
+tescmd serve 5YJ3...
+
+# MCP only (no telemetry)
+tescmd serve --no-telemetry
+
+# Telemetry dashboard only (no MCP)
+tescmd serve 5YJ3... --no-mcp
+
+# MCP + cache warming + OpenClaw bridge
+tescmd serve 5YJ3... --openclaw ws://gw.example.com:18789
+
+# stdio transport for Claude Desktop / Claude Code
+tescmd serve --transport stdio
+
+# OpenClaw dry-run: log events as JSONL without sending
+tescmd serve 5YJ3... --openclaw ws://gw.example.com:18789 --dry-run
+
+# Custom OpenClaw config file
+tescmd serve 5YJ3... --openclaw ws://gw.example.com:18789 --openclaw-config bridge.json
+```
+
+**Options:**
+
+| Option | Description | Default |
+|---|---|---|
+| `VIN` | Vehicle identification number (positional) | Profile default |
+| `--transport` | `streamable-http` or `stdio` | `streamable-http` |
+| `--port PORT` | MCP HTTP port (streamable-http only) | `8080` |
+| `--telemetry-port PORT` | WebSocket port for telemetry | Random ephemeral |
+| `--fields PRESET` | Field preset or comma-separated names | `default` |
+| `--interval SECONDS` | Override telemetry interval for all fields | Per-field defaults |
+| `--no-telemetry` | MCP-only mode — skip telemetry and cache warming | Off |
+| `--no-mcp` | Telemetry-only mode — skip MCP server | Off |
+| `--openclaw URL` | Bridge telemetry to an OpenClaw gateway | Off |
+| `--openclaw-token TOKEN` | OpenClaw gateway auth token (env: `OPENCLAW_GATEWAY_TOKEN`) | None |
+| `--openclaw-config PATH` | OpenClaw bridge config file (JSON) | Default config |
+| `--dry-run` | OpenClaw dry-run: log events as JSONL | Off |
+| `--tailscale` | Expose MCP via Tailscale Funnel | Off |
+| `--client-id ID` | MCP client ID (env: `TESCMD_MCP_CLIENT_ID`) | Required (unless `--no-mcp`) |
+| `--client-secret SECRET` | MCP client secret (env: `TESCMD_MCP_CLIENT_SECRET`) | Required (unless `--no-mcp`) |
+
+### Mode Matrix
+
+| Invocation | MCP | Telemetry | Dashboard | Cache | OpenClaw |
+|---|---|---|---|---|---|
+| `serve VIN` (TTY) | HTTP | yes | Rich TUI | yes | - |
+| `serve VIN` (piped) | HTTP | yes | - | yes | - |
+| `serve --no-telemetry` | HTTP | - | - | - | - |
+| `serve --transport stdio` | stdio | - | - | - | - |
+| `serve VIN --openclaw ws://..` | HTTP | yes | auto | yes | yes |
+| `serve VIN --no-mcp` (TTY) | - | yes | Rich TUI | - | - |
+| `serve VIN --no-mcp --format json` | - | yes | JSONL stdout | - | - |
+
+### When to Use Which
+
+| Need | Command |
+|---|---|
+| Production agent setup | `tescmd serve VIN` |
+| Claude Desktop / Claude Code | `tescmd serve --transport stdio` |
+| Quick MCP test without telemetry | `tescmd serve --no-telemetry` |
+| Watch live telemetry dashboard | `tescmd serve VIN --no-mcp` |
+| Agent + OpenClaw in one process | `tescmd serve VIN --openclaw ws://...` |
+| Standalone OpenClaw bridge | `tescmd openclaw bridge` |
+| Interactive telemetry with q-to-quit | `tescmd vehicle telemetry stream` |
+
+### Configuration
+
+The `serve` command reads `.env` files automatically via `python-dotenv`. The resolution order:
+
+1. `.env` in the current working directory
+2. `~/.config/tescmd/.env` (created by `tescmd setup`)
+3. Environment variables set in the shell
+
+See `.env.example` in the repository root for a template with all supported variables.
+
+---
+
 ## `mcp` — MCP Server
 
 Expose tescmd commands as MCP (Model Context Protocol) tools for AI agent frameworks.
