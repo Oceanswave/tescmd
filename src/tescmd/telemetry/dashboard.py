@@ -30,7 +30,7 @@ class TelemetryDashboard:
         self._started_at: datetime = datetime.now(tz=UTC)
         self._live: Live | None = None
         self._connected: bool = False
-        self._funnel_url: str = ""
+        self._tunnel_url: str = ""
 
     def update(self, frame: TelemetryFrame) -> None:
         """Ingest a telemetry frame and refresh the display."""
@@ -50,9 +50,9 @@ class TelemetryDashboard:
         """Attach a Rich Live instance for auto-refresh."""
         self._live = live
 
-    def set_funnel_url(self, url: str) -> None:
-        """Set the Tailscale Funnel URL for display."""
-        self._funnel_url = url
+    def set_tunnel_url(self, url: str) -> None:
+        """Set the tunnel URL for display."""
+        self._tunnel_url = url
 
     def render(self) -> RenderableType:
         """Build the full dashboard renderable."""
@@ -121,11 +121,11 @@ class TelemetryDashboard:
     def _render_footer(self) -> Text:
         """Render the footer with stream URL and exit hint."""
         footer = Text()
-        if self._funnel_url:
+        if self._tunnel_url:
             footer.append("  Stream: ", style="dim")
-            footer.append(self._funnel_url, style="dim cyan")
+            footer.append(self._tunnel_url, style="dim cyan")
             footer.append("  |  ", style="dim")
-        footer.append("Press Ctrl+C to stop", style="dim")
+        footer.append("Press q or Ctrl+C to stop", style="dim")
         return footer
 
     def _format_value(self, field_name: str, value: Any) -> str:

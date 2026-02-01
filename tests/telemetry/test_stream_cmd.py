@@ -19,8 +19,8 @@ class TestStreamHelp:
 
 
 class TestStreamTailscaleNotInstalled:
-    def test_exits_with_error(self, cli_env: dict[str, str]) -> None:
-        """When tailscale is not on PATH, the command raises TailscaleError."""
+    def test_exits_with_error_when_tailscale_missing(self, cli_env: dict[str, str]) -> None:
+        """When tailscale is not on PATH, raises TailscaleError."""
         from unittest.mock import patch
 
         from tescmd.api.errors import TailscaleError
@@ -29,9 +29,14 @@ class TestStreamTailscaleNotInstalled:
             runner = CliRunner()
             result = runner.invoke(
                 cli,
-                ["--format", "json", "vehicle", "telemetry", "stream"],
+                [
+                    "--format",
+                    "json",
+                    "vehicle",
+                    "telemetry",
+                    "stream",
+                ],
             )
-            # The exception is caught by Click — check exit code or exception
             assert result.exit_code != 0
             assert result.exception is not None
             assert isinstance(result.exception, (TailscaleError, SystemExit))

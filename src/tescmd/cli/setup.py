@@ -247,6 +247,11 @@ def _automated_domain_setup(formatter: OutputFormatter, settings: AppSettings) -
     info(f"GitHub CLI detected. Logged in as [cyan]{username}[/cyan].")
     info(f"Suggested domain: [cyan]{suggested_domain}[/cyan]")
     info("")
+    info("[dim]Note: GitHub Pages provides always-on key hosting but cannot")
+    info("serve as a Fleet Telemetry server. If you plan to use telemetry")
+    info("streaming, choose Tailscale instead (install Tailscale, then")
+    info("re-run setup).[/dim]")
+    info("")
 
     try:
         answer = input(f"Create/use {suggested_domain} as your domain? [Y/n] ").strip()
@@ -289,6 +294,11 @@ def _tailscale_domain_setup(formatter: OutputFormatter, settings: AppSettings) -
     info("If your machine is off or Tailscale stops, Tesla cannot reach your")
     info("public key. This is fine for development and testing.")
     info("For always-on hosting, use GitHub Pages instead (install gh CLI).")
+    info("")
+    info("[green]Telemetry streaming:[/green] If you plan to use Fleet Telemetry")
+    info("streaming (tescmd vehicle telemetry stream), you should use your")
+    info("Tailscale hostname as your domain. Tesla requires the telemetry")
+    info("server hostname to match your registered domain.")
     info("")
 
     try:
@@ -826,6 +836,10 @@ def _remediate_412(info: _InfoFn, domain: str) -> None:
     info("  2. Open your application")
     info("  3. Set [cyan]Allowed Origin URL[/cyan] to:")
     info(f"     [bold]https://{domain}[/bold]")
+    info(
+        "     [dim]For telemetry streaming, also add your Tailscale origin"
+        " (e.g. https://<machine>.tailnet.ts.net)[/dim]"
+    )
     info("  4. Save, then re-run [cyan]tescmd setup[/cyan]")
 
 

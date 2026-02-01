@@ -14,8 +14,8 @@ from tescmd.api.errors import (
     MissingScopesError,
     RegistrationRequiredError,
     SessionError,
-    TailscaleError,
     TierError,
+    TunnelError,
     VehicleAsleepError,
 )
 from tescmd.output.formatter import OutputFormatter
@@ -288,8 +288,8 @@ def _handle_known_error(
     if isinstance(exc, SessionError):
         _handle_session_error(exc, formatter, cmd_name)
         return True
-    if isinstance(exc, TailscaleError):
-        _handle_tailscale_error(exc, formatter, cmd_name)
+    if isinstance(exc, TunnelError):
+        _handle_tunnel_error(exc, formatter, cmd_name)
         return True
 
     # Keyring failures (e.g. headless Linux with no keyring daemon)
@@ -605,31 +605,41 @@ def _handle_keyring_error(
     )
 
 
-def _handle_tailscale_error(
-    exc: TailscaleError,
+def _handle_tunnel_error(
+    exc: TunnelError,
     formatter: OutputFormatter,
     cmd_name: str,
 ) -> None:
-    """Show a friendly error when Tailscale is unavailable or misconfigured."""
-    message = str(exc) or "Tailscale is not available or Funnel setup failed."
+    """Show a friendly error for tunnel-related failures.
+
+    Only shows install guidance when no provider is found on PATH.
+    TailscaleError means Tailscale IS installed but hit an operational
+    error — install guidance would be confusing.
+    """
+    message = str(exc) or "No tunnel provider available for telemetry streaming."
 
     if formatter.format == "json":
         formatter.output_error(
-            code="tailscale_error",
+            code="tunnel_error",
             message=message,
             command=cmd_name,
         )
         return
 
     formatter.rich.error(message)
+
+    # Only show install guidance when no provider was found at all.
+    if "No tunnel provider" not in message:
+        return
+
     formatter.rich.info("")
-    formatter.rich.info("Telemetry streaming requires Tailscale with Funnel enabled.")
+    formatter.rich.info("Telemetry streaming requires Tailscale Funnel:")
     formatter.rich.info("")
-    formatter.rich.info("Setup steps:")
     formatter.rich.info("  1. Install Tailscale: [cyan]https://tailscale.com/download[/cyan]")
     formatter.rich.info("  2. Authenticate: [cyan]tailscale up[/cyan]")
     formatter.rich.info(
         "  3. Enable Funnel in your tailnet ACL:"
         " [cyan]https://login.tailscale.com/admin/acls[/cyan]"
     )
-    formatter.rich.info("  4. Install telemetry deps: [cyan]pip install tescmd[telemetry][/cyan]")
+    formatter.rich.info("")
+    formatter.rich.info("Install telemetry deps: [cyan]pip install tescmd[telemetry][/cyan]")

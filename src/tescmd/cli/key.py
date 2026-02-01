@@ -151,12 +151,10 @@ async def _cmd_deploy(app_ctx: AppContext, repo: str | None, *, method: str = "a
 
 def _resolve_deploy_method(method: str, settings: AppSettings) -> str | None:
     """Resolve 'auto' to a concrete method, or validate explicit choice."""
-    if method == "tailscale":
-        return "tailscale"
-    if method == "github":
-        return "github"
+    if method in ("tailscale", "github"):
+        return method
 
-    # Auto-detect: GitHub Pages first, then Tailscale
+    # Auto-detect: GitHub Pages (always-on) > Tailscale (stable hostname)
     from tescmd.deploy.github_pages import is_gh_authenticated, is_gh_available
 
     if is_gh_available() and is_gh_authenticated():

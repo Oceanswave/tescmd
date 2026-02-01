@@ -20,7 +20,13 @@ from tescmd.auth.oauth import (
 )
 from tescmd.auth.token_store import TokenStore
 from tescmd.cli._options import global_options
-from tescmd.models.auth import DEFAULT_SCOPES, PARTNER_SCOPES, TokenData, decode_jwt_scopes
+from tescmd.models.auth import (
+    DEFAULT_SCOPES,
+    PARTNER_SCOPES,
+    TokenData,
+    decode_jwt_payload,
+    decode_jwt_scopes,
+)
 from tescmd.models.config import AppSettings
 
 if TYPE_CHECKING:
@@ -182,11 +188,23 @@ async def _cmd_status(app_ctx: AppContext) -> None:
     region: str = meta.get("region", "unknown")
     has_refresh = store.refresh_token is not None
 
-    # Decode the JWT to show the *actual* granted scopes
+    # Decode the JWT to show the *actual* granted scopes and audience
     token_scopes: list[str] | None = None
+    audience: str | None = None
     access_token = store.access_token
     if access_token:
         token_scopes = decode_jwt_scopes(access_token)
+        jwt_payload = decode_jwt_payload(access_token)
+        if jwt_payload is not None:
+            aud_raw = jwt_payload.get("aud")
+            if isinstance(aud_raw, list) and aud_raw:
+                audience = aud_raw[0] if len(aud_raw) == 1 else ", ".join(str(a) for a in aud_raw)
+            elif isinstance(aud_raw, str):
+                audience = aud_raw
+            # Also check for 'ou' (origin URL) — Tesla-specific claim
+            ou = jwt_payload.get("ou")
+            if isinstance(ou, str) and ou:
+                audience = ou
 
     if formatter.format == "json":
         data: dict[str, object] = {
@@ -198,6 +216,8 @@ async def _cmd_status(app_ctx: AppContext) -> None:
         }
         if token_scopes is not None:
             data["token_scopes"] = token_scopes
+        if audience is not None:
+            data["audience"] = audience
         formatter.output(data, command="auth.status")
     else:
         formatter.rich.info("Authenticated: yes")
@@ -211,6 +231,8 @@ async def _cmd_status(app_ctx: AppContext) -> None:
                 formatter.rich.info(
                     f"  [yellow]Warning: requested but not granted: {not_granted}[/yellow]"
                 )
+        if audience is not None:
+            formatter.rich.info(f"Audience: {audience}")
         formatter.rich.info(f"Region: {region}")
         formatter.rich.info(f"Refresh token: {'yes' if has_refresh else 'no'}")
 
@@ -484,6 +506,12 @@ def _interactive_setup(
     info(f"  Allowed Origin URL:  [cyan]{origin_url}[/cyan]")
     info(f"  Allowed Redirect URI: [cyan]{redirect_uri}[/cyan]")
     info("  Allowed Returned URL: (leave empty)")
+    info("")
+    info(
+        "  [dim]For telemetry streaming, add your Tailscale hostname"
+        " as an additional origin:[/dim]"
+    )
+    info("  [dim]  https://<machine>.tailnet.ts.net[/dim]")
     info("  Click Next.")
     info("")
 

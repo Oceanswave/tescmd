@@ -209,10 +209,10 @@ class TestDashboardSpecialValues:
         output = console.file.getvalue()  # type: ignore[union-attr]
         assert "Yes" in output
 
-    def test_funnel_url_in_footer(self) -> None:
+    def test_tunnel_url_in_footer(self) -> None:
         console = Console(file=StringIO(), width=120)
         dashboard = TelemetryDashboard(console, DisplayUnits())
-        dashboard.set_funnel_url("https://mybox.tail.ts.net")
+        dashboard.set_tunnel_url("https://mybox.tail.ts.net")
 
         renderable = dashboard.render()
         console.print(renderable)

@@ -84,6 +84,10 @@ Yes. If Tailscale is installed and Funnel is enabled in your tailnet ACL, `tescm
 
 **Trade-off**: Tailscale requires your machine to be running. If it's off, Tesla can't reach your key. This is fine for development but consider GitHub Pages for always-on hosting.
 
+### Can I stream telemetry without Tailscale?
+
+Not currently. Telemetry streaming requires Tailscale Funnel to expose a publicly reachable HTTPS endpoint for Tesla's fleet telemetry push. Tailscale handles NAT traversal and TLS termination automatically.
+
 ### Does tescmd work behind a firewall?
 
 For vehicle data queries and commands, tescmd only needs outbound HTTPS access to Tesla's API servers. For key hosting via Tailscale Funnel, Tailscale handles NAT traversal automatically -- no port forwarding needed. For GitHub Pages, the key is hosted on GitHub's infrastructure.

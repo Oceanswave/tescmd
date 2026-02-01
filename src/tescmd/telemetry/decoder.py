@@ -1,52 +1,72 @@
-"""Decode protobuf-encoded Fleet Telemetry Payload messages.
+"""Decode Fleet Telemetry messages from Tesla vehicles.
 
-Reuses the low-level varint / field decoders from
-:mod:`tescmd.protocol.protobuf.messages` to parse the telemetry wire
-format without vendoring ``.proto`` files.
+Tesla vehicles send telemetry data as **Flatbuffers envelopes** wrapping
+protobuf payloads.  The :class:`TelemetryDecoder` handles both layers:
 
-Telemetry Payload wire format (from fleet_telemetry.proto):
-  message Payload {
-    repeated Datum data = 1;
-    google.protobuf.Timestamp created_at = 2;
-    string vin = 3;
-    bool is_resend = 4;
-  }
+1. Unwrap the Flatbuffers ``FlatbuffersEnvelope`` → ``FlatbuffersStream``
+   to extract the topic, VIN, timestamp, and raw protobuf bytes.
+2. Decode the protobuf ``Payload`` message using generated bindings from
+   Tesla's ``vehicle_data.proto``.
 
-  message Datum {
-    Field key = 1;        // varint enum
-    Value value = 2;      // sub-message
-  }
-
-  message Value {
-    oneof value {
-      string string_value = 1;
-      int32 int_value = 2;
-      int64 long_value = 3;
-      float float_value = 4;
-      double double_value = 5;
-      bool boolean_value = 6;
-      LocationValue location_value = 7;
-    }
-  }
-
-  message LocationValue {
-    double latitude = 1;
-    double longitude = 2;
-  }
+Proto source: https://github.com/teslamotors/fleet-telemetry/tree/main/protos
 """
 
 from __future__ import annotations
 
 import logging
-import struct
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from tescmd.protocol.protobuf.messages import _decode_field
-from tescmd.telemetry.fields import FIELD_NAMES
-
 logger = logging.getLogger(__name__)
+
+# Value oneof variants that are enum types (wire varint) — map to enum name.
+_ENUM_VARIANTS: frozenset[str] = frozenset(
+    {
+        "charging_value",
+        "shift_state_value",
+        "lane_assist_level_value",
+        "scheduled_charging_mode_value",
+        "sentry_mode_state_value",
+        "speed_assist_level_value",
+        "bms_state_value",
+        "buckle_status_value",
+        "car_type_value",
+        "charge_port_value",
+        "charge_port_latch_value",
+        "drive_inverter_state_value",
+        "hvil_status_value",
+        "window_state_value",
+        "seat_fold_position_value",
+        "tractor_air_status_value",
+        "follow_distance_value",
+        "forward_collision_sensitivity_value",
+        "guest_mode_mobile_access_value",
+        "trailer_air_status_value",
+        "detailed_charge_state_value",
+        "hvac_auto_mode_value",
+        "cabin_overheat_protection_mode_value",
+        "cabin_overheat_protection_temperature_limit_value",
+        "defrost_mode_value",
+        "climate_keeper_mode_value",
+        "hvac_power_value",
+        "fast_charger_value",
+        "cable_type_value",
+        "tonneau_tent_mode_value",
+        "tonneau_position_value",
+        "powershare_type_value",
+        "powershare_state_value",
+        "powershare_stop_reason_value",
+        "display_state_value",
+        "distance_unit_value",
+        "temperature_unit_value",
+        "pressure_unit_value",
+        "charge_unit_preference_value",
+        "turn_signal_state_value",
+        "media_status_value",
+        "sunroof_installed_state_value",
+    }
+)
 
 
 @dataclass
@@ -56,7 +76,7 @@ class TelemetryDatum:
     field_name: str
     field_id: int
     value: Any
-    value_type: str  # "string", "int", "float", "bool", "location"
+    value_type: str  # "string", "int", "float", "bool", "location", "enum"
 
 
 @dataclass
@@ -67,16 +87,23 @@ class TelemetryFrame:
     created_at: datetime
     data: list[TelemetryDatum] = field(default_factory=list)
     is_resend: bool = False
+    topic: str = "V"
 
 
 class TelemetryDecoder:
-    """Decodes binary protobuf Payload messages into :class:`TelemetryFrame`."""
+    """Decodes binary Fleet Telemetry messages into :class:`TelemetryFrame`.
+
+    Handles the full Flatbuffers → protobuf pipeline.
+    """
 
     def decode(self, raw: bytes) -> TelemetryFrame:
-        """Decode a Payload protobuf message.
+        """Decode a raw WebSocket binary message.
+
+        The message is expected to be a Flatbuffers ``FlatbuffersEnvelope``
+        containing a ``FlatbuffersStream`` with a protobuf payload.
 
         Args:
-            raw: The raw protobuf bytes.
+            raw: The raw binary WebSocket message.
 
         Returns:
             A :class:`TelemetryFrame` with decoded telemetry data.
@@ -84,124 +111,172 @@ class TelemetryDecoder:
         Raises:
             ValueError: If the message is fundamentally malformed.
         """
+        from tescmd.telemetry.flatbuf import parse_envelope
+
+        envelope = parse_envelope(raw)
+        topic = envelope.topic.decode("utf-8", errors="replace")
+        vin = envelope.device_id.decode("utf-8", errors="replace")
+        created_at = datetime.fromtimestamp(envelope.created_at, tz=UTC)
+
+        if topic != "V":
+            # Non-telemetry topics (alerts, errors, connectivity) — return
+            # a frame with no data items for now.
+            logger.debug("Received non-telemetry topic: %s", topic)
+            return TelemetryFrame(
+                vin=vin,
+                created_at=created_at,
+                topic=topic,
+            )
+
+        return self._decode_payload(envelope.payload, vin, created_at, topic)
+
+    def decode_protobuf(self, raw: bytes) -> TelemetryFrame:
+        """Decode a raw protobuf ``Payload`` message directly.
+
+        Bypasses the Flatbuffers envelope — use this when the envelope has
+        already been unwrapped, or for testing with hand-crafted protobuf.
+
+        Args:
+            raw: Raw protobuf bytes of a ``Payload`` message.
+
+        Returns:
+            A :class:`TelemetryFrame` with decoded telemetry data.
+        """
+        return self._decode_payload(raw, vin="", created_at=datetime.now(tz=UTC), topic="V")
+
+    def _decode_payload(
+        self,
+        payload_bytes: bytes,
+        vin: str,
+        created_at: datetime,
+        topic: str,
+    ) -> TelemetryFrame:
+        """Decode the protobuf Payload message using generated bindings."""
+        from tescmd.telemetry.protos import vehicle_data_pb2
+
+        payload = vehicle_data_pb2.Payload()
+        payload.ParseFromString(payload_bytes)
+
+        # Use VIN and timestamp from protobuf if present (more accurate
+        # than the Flatbuffers envelope which has second granularity).
+        if payload.vin:
+            vin = payload.vin
+        if payload.HasField("created_at"):
+            ts = payload.created_at
+            created_at = datetime.fromtimestamp(ts.seconds + ts.nanos / 1_000_000_000, tz=UTC)
+
         data_items: list[TelemetryDatum] = []
-        created_at = datetime.now(tz=UTC)
-        vin = ""
-        is_resend = False
-
-        pos = 0
-        while pos < len(raw):
-            field_number, wire_type, value, pos = _decode_field(raw, pos)
-
-            if field_number == 1 and wire_type == 2:
-                # repeated Datum — length-delimited sub-message
-                datum = self._decode_datum(value)
-                if datum is not None:
-                    data_items.append(datum)
-            elif field_number == 2 and wire_type == 2:
-                # google.protobuf.Timestamp sub-message
-                created_at = self._decode_timestamp(value)
-            elif field_number == 3 and wire_type == 2:
-                # string vin
-                vin = value.decode("utf-8", errors="replace")
-            elif field_number == 4 and wire_type == 0:
-                # bool is_resend
-                is_resend = bool(value)
+        for datum in payload.data:
+            item = self._decode_datum(datum)
+            if item is not None:
+                data_items.append(item)
 
         return TelemetryFrame(
             vin=vin,
             created_at=created_at,
             data=data_items,
-            is_resend=is_resend,
+            is_resend=payload.is_resend,
+            topic=topic,
         )
 
-    def _decode_datum(self, raw: bytes) -> TelemetryDatum | None:
-        """Decode a single Datum sub-message."""
-        field_id = 0
-        value: Any = None
-        value_type = "unknown"
+    @staticmethod
+    def _decode_datum(
+        datum: Any,
+    ) -> TelemetryDatum | None:
+        """Extract a single Datum into a TelemetryDatum."""
+        from tescmd.telemetry.protos import vehicle_data_pb2
 
-        pos = 0
-        while pos < len(raw):
-            fn, wt, val, pos = _decode_field(raw, pos)
-            if fn == 1 and wt == 0:
-                field_id = val
-            elif fn == 2 and wt == 2:
-                value, value_type = self._decode_value(val)
-
+        field_id: int = datum.key
         if field_id == 0:
             return None
 
-        field_name = FIELD_NAMES.get(field_id, f"Unknown({field_id})")
+        # Get field name from proto enum, fall back to our registry
+        try:
+            field_name = vehicle_data_pb2.Field.Name(field_id)
+        except ValueError:
+            from tescmd.telemetry.fields import FIELD_NAMES
+
+            field_name = FIELD_NAMES.get(field_id, f"Unknown({field_id})")
+
+        value_msg = datum.value
+        which = value_msg.WhichOneof("value")
+        if which is None:
+            return None
+
+        val: Any
+        value_type: str
+
+        # --- Primitive types ---
+        if which == "string_value":
+            val, value_type = value_msg.string_value, "string"
+        elif which == "int_value":
+            val, value_type = value_msg.int_value, "int"
+        elif which == "long_value":
+            val, value_type = value_msg.long_value, "int"
+        elif which == "float_value":
+            val, value_type = value_msg.float_value, "float"
+        elif which == "double_value":
+            val, value_type = value_msg.double_value, "float"
+        elif which == "boolean_value":
+            val, value_type = value_msg.boolean_value, "bool"
+        elif which == "invalid":
+            val, value_type = None, "invalid"
+
+        # --- Structured types ---
+        elif which == "location_value":
+            loc = value_msg.location_value
+            val = {"latitude": loc.latitude, "longitude": loc.longitude}
+            value_type = "location"
+        elif which == "door_value":
+            doors = value_msg.door_value
+            val = {
+                "DriverFront": doors.DriverFront,
+                "DriverRear": doors.DriverRear,
+                "PassengerFront": doors.PassengerFront,
+                "PassengerRear": doors.PassengerRear,
+                "TrunkFront": doors.TrunkFront,
+                "TrunkRear": doors.TrunkRear,
+            }
+            value_type = "doors"
+        elif which == "tire_location_value":
+            tire = value_msg.tire_location_value
+            val = {
+                "front_left": tire.front_left,
+                "front_right": tire.front_right,
+                "rear_left": tire.rear_left,
+                "rear_right": tire.rear_right,
+            }
+            value_type = "tires"
+        elif which == "time_value":
+            t = value_msg.time_value
+            val = f"{t.hour:02d}:{t.minute:02d}:{t.second:02d}"
+            value_type = "time"
+
+        # --- Enum types → resolve to human-readable name ---
+        elif which in _ENUM_VARIANTS:
+            raw_val = getattr(value_msg, which)
+            # Enum fields are ints; get the name from the descriptor
+            enum_descriptor = value_msg.DESCRIPTOR.fields_by_name[which].enum_type
+            if enum_descriptor is not None:
+                try:
+                    val = enum_descriptor.values_by_number[raw_val].name
+                except (KeyError, IndexError):
+                    val = raw_val
+            else:
+                val = raw_val
+            value_type = "enum"
+
+        else:
+            # Unknown variant — store the raw value
+            val = getattr(value_msg, which, None)
+            value_type = which
+
         return TelemetryDatum(
             field_name=field_name,
             field_id=field_id,
-            value=value,
+            value=val,
             value_type=value_type,
         )
-
-    def _decode_value(self, raw: bytes) -> tuple[Any, str]:
-        """Decode a Value oneof sub-message.
-
-        Returns ``(decoded_value, type_name)``.
-        """
-        pos = 0
-        while pos < len(raw):
-            fn, wt, val, pos = _decode_field(raw, pos)
-
-            if fn == 1 and wt == 2:
-                return val.decode("utf-8", errors="replace"), "string"
-            elif fn == 2 and wt == 0:
-                # int32 — regular varint (not zigzag)
-                return val, "int"
-            elif fn == 3 and wt == 0:
-                # int64 — regular varint (not zigzag)
-                return val, "int"
-            elif fn == 4 and wt == 5:
-                # float — wire type 5 = 32-bit
-                return struct.unpack("<f", struct.pack("<I", val))[0], "float"
-            elif fn == 5 and wt == 1:
-                # double — wire type 1 = 64-bit
-                return struct.unpack("<d", struct.pack("<Q", val))[0], "float"
-            elif fn == 6 and wt == 0:
-                return bool(val), "bool"
-            elif fn == 7 and wt == 2:
-                return self._decode_location(val), "location"
-
-        return None, "unknown"
-
-    @staticmethod
-    def _decode_location(raw: bytes) -> dict[str, float]:
-        """Decode a LocationValue sub-message."""
-        lat = 0.0
-        lng = 0.0
-        pos = 0
-        while pos < len(raw):
-            fn, wt, val, pos = _decode_field(raw, pos)
-            if fn == 1 and wt == 1:
-                lat = struct.unpack("<d", struct.pack("<Q", val))[0]
-            elif fn == 2 and wt == 1:
-                lng = struct.unpack("<d", struct.pack("<Q", val))[0]
-        return {"latitude": lat, "longitude": lng}
-
-    @staticmethod
-    def _decode_timestamp(raw: bytes) -> datetime:
-        """Decode a google.protobuf.Timestamp sub-message.
-
-        Timestamp: field 1 = seconds (int64), field 2 = nanos (int32).
-        """
-        seconds = 0
-        nanos = 0
-        pos = 0
-        while pos < len(raw):
-            fn, wt, val, pos = _decode_field(raw, pos)
-            if fn == 1 and wt == 0:
-                seconds = val
-            elif fn == 2 and wt == 0:
-                nanos = val
-
-        ts = seconds + nanos / 1_000_000_000
-        return datetime.fromtimestamp(ts, tz=UTC)
 
 
 def _zigzag_decode(n: int) -> int:

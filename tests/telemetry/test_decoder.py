@@ -10,6 +10,7 @@ from tescmd.protocol.protobuf.messages import (
     _encode_varint_field,
 )
 from tescmd.telemetry.decoder import TelemetryDecoder, _zigzag_decode
+from tescmd.telemetry.protos import vehicle_data_pb2 as pb
 
 # ---------------------------------------------------------------------------
 # Protobuf encoding helpers (for crafting test payloads)
@@ -88,7 +89,7 @@ def _encode_payload(
 
 
 # ---------------------------------------------------------------------------
-# Tests
+# Tests — use proto Field enum values for correct field IDs
 # ---------------------------------------------------------------------------
 
 
@@ -108,11 +109,11 @@ class TestZigzagDecode:
 class TestDecodeStringValue:
     def test_string_datum(self) -> None:
         decoder = TelemetryDecoder()
-        datum_bytes = _encode_datum(60, _encode_string_value("2024.8.9"))
+        datum_bytes = _encode_datum(pb.Version, _encode_string_value("2024.8.9"))
         payload = _encode_payload([datum_bytes])
-        frame = decoder.decode(payload)
+        frame = decoder.decode_protobuf(payload)
         assert len(frame.data) == 1
-        assert frame.data[0].field_name == "SoftwareVersion"
+        assert frame.data[0].field_name == "Version"
         assert frame.data[0].value == "2024.8.9"
         assert frame.data[0].value_type == "string"
 
@@ -120,9 +121,9 @@ class TestDecodeStringValue:
 class TestDecodeIntValue:
     def test_int_datum(self) -> None:
         decoder = TelemetryDecoder()
-        datum_bytes = _encode_datum(8, _encode_int_value(72))
+        datum_bytes = _encode_datum(pb.BatteryLevel, _encode_int_value(72))
         payload = _encode_payload([datum_bytes])
-        frame = decoder.decode(payload)
+        frame = decoder.decode_protobuf(payload)
         assert len(frame.data) == 1
         assert frame.data[0].field_name == "BatteryLevel"
         assert frame.data[0].value == 72
@@ -132,9 +133,9 @@ class TestDecodeIntValue:
 class TestDecodeFloatValue:
     def test_float_datum(self) -> None:
         decoder = TelemetryDecoder()
-        datum_bytes = _encode_datum(6, _encode_float_value(350.5))
+        datum_bytes = _encode_datum(pb.PackVoltage, _encode_float_value(350.5))
         payload = _encode_payload([datum_bytes])
-        frame = decoder.decode(payload)
+        frame = decoder.decode_protobuf(payload)
         assert len(frame.data) == 1
         assert frame.data[0].field_name == "PackVoltage"
         assert abs(frame.data[0].value - 350.5) < 0.1
@@ -144,9 +145,9 @@ class TestDecodeFloatValue:
 class TestDecodeDoubleValue:
     def test_double_datum(self) -> None:
         decoder = TelemetryDecoder()
-        datum_bytes = _encode_datum(6, _encode_double_value(350.123456789))
+        datum_bytes = _encode_datum(pb.PackVoltage, _encode_double_value(350.123456789))
         payload = _encode_payload([datum_bytes])
-        frame = decoder.decode(payload)
+        frame = decoder.decode_protobuf(payload)
         assert len(frame.data) == 1
         assert abs(frame.data[0].value - 350.123456789) < 1e-6
         assert frame.data[0].value_type == "float"
@@ -155,9 +156,9 @@ class TestDecodeDoubleValue:
 class TestDecodeBoolValue:
     def test_bool_true(self) -> None:
         decoder = TelemetryDecoder()
-        datum_bytes = _encode_datum(51, _encode_bool_value(True))
+        datum_bytes = _encode_datum(pb.Locked, _encode_bool_value(True))
         payload = _encode_payload([datum_bytes])
-        frame = decoder.decode(payload)
+        frame = decoder.decode_protobuf(payload)
         assert len(frame.data) == 1
         assert frame.data[0].field_name == "Locked"
         assert frame.data[0].value is True
@@ -165,18 +166,18 @@ class TestDecodeBoolValue:
 
     def test_bool_false(self) -> None:
         decoder = TelemetryDecoder()
-        datum_bytes = _encode_datum(51, _encode_bool_value(False))
+        datum_bytes = _encode_datum(pb.Locked, _encode_bool_value(False))
         payload = _encode_payload([datum_bytes])
-        frame = decoder.decode(payload)
+        frame = decoder.decode_protobuf(payload)
         assert frame.data[0].value is False
 
 
 class TestDecodeLocationValue:
     def test_location(self) -> None:
         decoder = TelemetryDecoder()
-        datum_bytes = _encode_datum(9, _encode_location_value(37.7749, -122.4194))
+        datum_bytes = _encode_datum(pb.Location, _encode_location_value(37.7749, -122.4194))
         payload = _encode_payload([datum_bytes])
-        frame = decoder.decode(payload)
+        frame = decoder.decode_protobuf(payload)
         assert len(frame.data) == 1
         assert frame.data[0].field_name == "Location"
         assert frame.data[0].value_type == "location"
@@ -189,23 +190,23 @@ class TestDecodePayload:
     def test_vin_and_timestamp(self) -> None:
         decoder = TelemetryDecoder()
         payload = _encode_payload([], timestamp_seconds=1700000000, vin="TEST_VIN")
-        frame = decoder.decode(payload)
+        frame = decoder.decode_protobuf(payload)
         assert frame.vin == "TEST_VIN"
         assert frame.created_at.year >= 2023
 
     def test_is_resend(self) -> None:
         decoder = TelemetryDecoder()
         payload = _encode_payload([], is_resend=True)
-        frame = decoder.decode(payload)
+        frame = decoder.decode_protobuf(payload)
         assert frame.is_resend is True
 
     def test_multiple_data_items(self) -> None:
         decoder = TelemetryDecoder()
-        d1 = _encode_datum(3, _encode_int_value(85))
-        d2 = _encode_datum(4, _encode_int_value(65))
-        d3 = _encode_datum(33, _encode_float_value(22.5))
+        d1 = _encode_datum(pb.Soc, _encode_int_value(85))
+        d2 = _encode_datum(pb.VehicleSpeed, _encode_int_value(65))
+        d3 = _encode_datum(pb.InsideTemp, _encode_float_value(22.5))
         payload = _encode_payload([d1, d2, d3])
-        frame = decoder.decode(payload)
+        frame = decoder.decode_protobuf(payload)
         assert len(frame.data) == 3
         names = {d.field_name for d in frame.data}
         assert names == {"Soc", "VehicleSpeed", "InsideTemp"}
@@ -214,12 +215,66 @@ class TestDecodePayload:
         decoder = TelemetryDecoder()
         datum_bytes = _encode_datum(9999, _encode_int_value(42))
         payload = _encode_payload([datum_bytes])
-        frame = decoder.decode(payload)
+        frame = decoder.decode_protobuf(payload)
         assert len(frame.data) == 1
-        assert frame.data[0].field_name == "Unknown(9999)"
+        assert "9999" in frame.data[0].field_name
 
     def test_empty_payload(self) -> None:
         decoder = TelemetryDecoder()
-        frame = decoder.decode(b"")
+        frame = decoder.decode_protobuf(b"")
         assert frame.data == []
         assert frame.vin == ""
+
+
+class TestDecodeWithGeneratedProto:
+    """Tests using generated protobuf bindings to build payloads."""
+
+    def test_enum_value_resolves_to_name(self) -> None:
+        payload = pb.Payload(
+            data=[
+                pb.Datum(
+                    key=pb.ChargeState,
+                    value=pb.Value(charging_value=pb.ChargeStateCharging),
+                ),
+            ],
+            vin="TEST_VIN",
+        )
+        decoder = TelemetryDecoder()
+        frame = decoder.decode_protobuf(payload.SerializeToString())
+        assert len(frame.data) == 1
+        assert frame.data[0].value_type == "enum"
+        assert frame.data[0].value == "ChargeStateCharging"
+
+    def test_door_value(self) -> None:
+        payload = pb.Payload(
+            data=[
+                pb.Datum(
+                    key=pb.DoorState,
+                    value=pb.Value(door_value=pb.Doors(DriverFront=True, PassengerFront=False)),
+                ),
+            ],
+            vin="TEST_VIN",
+        )
+        decoder = TelemetryDecoder()
+        frame = decoder.decode_protobuf(payload.SerializeToString())
+        assert len(frame.data) == 1
+        assert frame.data[0].value_type == "doors"
+        assert frame.data[0].value["DriverFront"] is True
+        assert frame.data[0].value["PassengerFront"] is False
+
+    def test_location_value_via_proto(self) -> None:
+        payload = pb.Payload(
+            data=[
+                pb.Datum(
+                    key=pb.Location,
+                    value=pb.Value(
+                        location_value=pb.LocationValue(latitude=37.7749, longitude=-122.4194)
+                    ),
+                ),
+            ],
+            vin="TEST_VIN",
+        )
+        decoder = TelemetryDecoder()
+        frame = decoder.decode_protobuf(payload.SerializeToString())
+        assert frame.data[0].value_type == "location"
+        assert abs(frame.data[0].value["latitude"] - 37.7749) < 1e-4

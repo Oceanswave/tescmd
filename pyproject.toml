@@ -43,6 +43,7 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "pytest-httpx>=0.34",
+    "pytest-xdist>=3.0",
     "pytest-cov>=5.0",
     "ruff>=0.8",
     "mypy>=1.13",
@@ -67,6 +68,7 @@ packages = ["src/tescmd"]
 target-version = "py311"
 line-length = 99
 src = ["src", "tests"]
+extend-exclude = ["src/tescmd/telemetry/protos/*_pb2*"]
 
 [tool.ruff.lint]
 select = [
@@ -81,9 +83,15 @@ plugins = ["pydantic.mypy"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "-n auto"
 
 [[tool.mypy.overrides]]
 module = "tescmd.protocol.protobuf.*"
+ignore_missing_imports = true
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "tescmd.telemetry.protos.*"
 ignore_missing_imports = true
 ignore_errors = true
 
