@@ -73,15 +73,7 @@ class TelemetryServer:
 
     async def start(self) -> None:
         """Start the mux + WebSocket servers."""
-        try:
-            import websockets.asyncio.server as ws_server_mod
-        except ImportError as exc:
-            from tescmd.api.errors import ConfigError
-
-            raise ConfigError(
-                "websockets is required for telemetry streaming. "
-                "Install with: pip install tescmd[telemetry]"
-            ) from exc
+        import websockets.asyncio.server as ws_server_mod
 
         # Internal WS server — only reachable from localhost
         self._ws_server = await ws_server_mod.serve(

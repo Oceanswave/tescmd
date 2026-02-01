@@ -329,7 +329,7 @@ tescmd vehicle telemetry stream --format json
 - `--interval SECONDS` — Override polling interval for all fields
 - `--format json` — Emit one JSON line per telemetry frame instead of Rich dashboard
 
-**Requires:** `pip install tescmd[telemetry]` and Tailscale with Funnel enabled.
+**Requires:** Tailscale with Funnel enabled.
 
 Press `q` to stop. Cleanup is automatic (removes telemetry config, restores partner domain, stops tunnel).
 
@@ -1179,6 +1179,103 @@ tescmd sharing list-invites
 
 ---
 
+## `openclaw` — OpenClaw Integration
+
+Stream filtered vehicle telemetry to an OpenClaw Gateway for real-time agent consumption.
+
+### `openclaw bridge [VIN]`
+
+Start a long-running bridge that streams Fleet Telemetry through a dual-gate filter (delta threshold + throttle interval) to an OpenClaw Gateway.
+
+```bash
+# Connect to a local OpenClaw Gateway
+tescmd openclaw bridge
+
+# Specify gateway URL and auth token
+tescmd openclaw bridge --gateway ws://gateway.example.com:18789 --token SECRET
+
+# Use a config file for filter settings
+tescmd openclaw bridge --config ~/.config/tescmd/bridge.json
+
+# Dry-run mode (print JSONL to stdout, no gateway connection)
+tescmd openclaw bridge --dry-run
+
+# Override field polling interval
+tescmd openclaw bridge --interval 10
+
+# Select specific field presets
+tescmd openclaw bridge --fields driving
+
+```
+
+**Options:**
+- `--gateway URL` — Gateway WebSocket URL (default: `ws://127.0.0.1:18789`, env: `OPENCLAW_GATEWAY_URL`)
+- `--token TOKEN` — Gateway authentication token (env: `OPENCLAW_GATEWAY_TOKEN`)
+- `--config PATH` — Bridge config JSON file with per-field filter settings
+- `--port PORT` — Local WebSocket server port for telemetry
+- `--fields PRESET` — Field preset (`default`, `driving`, `charging`, `climate`, `all`) or comma-separated names
+- `--interval SECONDS` — Override polling interval for all fields
+- `--dry-run` — Print filtered events as JSONL without connecting to gateway
+
+**Requires:** Tailscale with Funnel enabled.
+
+The bridge uses dual-gate filtering: each field must exceed both a delta threshold (value change) AND a throttle interval (minimum time between emissions) before being forwarded to the gateway. Default thresholds: location 50m/1s, battery 5%/10s, temperature 5deg/30s, speed 5mph/2s, state changes emit immediately.
+
+---
+
+## `mcp` — MCP Server
+
+Expose tescmd commands as MCP (Model Context Protocol) tools for AI agent frameworks.
+
+### `mcp serve`
+
+Start an MCP server that registers all tescmd read and write commands as tools. Each tool invokes the corresponding CLI command via Click's CliRunner, guaranteeing behavioral parity with the CLI (caching, wake, auth, error handling all work).
+
+```bash
+# Start HTTP server on port 8080 (default)
+tescmd mcp serve
+
+# Start stdio transport (for Claude Desktop, Claude Code)
+tescmd mcp serve --transport stdio
+
+# Start on a custom port
+tescmd mcp serve --port 9090
+
+# Expose publicly via Tailscale Funnel
+tescmd mcp serve --tailscale
+```
+
+**Options:**
+- `--transport {stdio,streamable-http}` — MCP transport type (default: `streamable-http`)
+- `--port PORT` — HTTP port for streamable-http transport (default: `8080`)
+- `--tailscale` — Expose via Tailscale Funnel (cannot combine with `--transport stdio`)
+- `--client-id ID` — MCP client ID (env: `TESCMD_MCP_CLIENT_ID`, required)
+- `--client-secret SECRET` — MCP client secret / bearer token (env: `TESCMD_MCP_CLIENT_SECRET`, required)
+
+**Authentication:** All transports require `TESCMD_MCP_CLIENT_ID` and `TESCMD_MCP_CLIENT_SECRET`. The HTTP transport implements the full MCP OAuth 2.1 specification — clients authenticate via an authorization code flow with PKCE (the server auto-approves). MCP clients like Claude.ai and Claude Code handle this flow automatically. The stdio transport requires credentials for consistency but does not validate on the wire.
+
+**Requires:** Included in standard install. `--tailscale` requires Tailscale with Funnel enabled.
+
+**Claude Code configuration** (`.mcp.json`):
+```json
+{
+  "mcpServers": {
+    "tescmd": {
+      "command": "tescmd",
+      "args": ["mcp", "serve", "--transport", "stdio"],
+      "env": {
+        "TESCMD_MCP_CLIENT_ID": "claude-code",
+        "TESCMD_MCP_CLIENT_SECRET": "your-secret-here"
+      }
+    }
+  }
+}
+```
+
+All read tools are annotated with `readOnlyHint: true`; write tools with `readOnlyHint: false`. Long-running and interactive commands (telemetry stream, openclaw bridge, auth login, setup) are excluded from the MCP server.
+
+---
+
 ## `cache` — Response Cache
 
 Manage the local response cache.
@@ -1223,6 +1320,88 @@ Make a POST request to any Fleet API path with an optional JSON body.
 tescmd raw post "/api/1/vehicles/{VIN}/command/flash_lights"
 tescmd raw post "/api/1/vehicles/{VIN}/command/set_temps" --body '{"driver_temp": 22}'
 ```
+
+---
+
+## `billing` — Supercharger Billing
+
+View Supercharger charging history, sessions, and invoices.
+
+### `billing history`
+
+Show Supercharger charging history with optional filters.
+
+```bash
+tescmd billing history
+tescmd billing history --vin 5YJ3E1EA1NF000000
+tescmd billing history --start 2025-01-01T00:00:00Z --end 2025-02-01T00:00:00Z
+tescmd billing history --page 0 --page-size 50
+```
+
+**Options:**
+- `--vin VIN` — Filter by vehicle VIN
+- `--start` / `--end` — Date range (ISO-8601)
+- `--page` / `--page-size` — Pagination
+
+### `billing sessions`
+
+Show charging sessions (business/fleet accounts).
+
+```bash
+tescmd billing sessions
+tescmd billing sessions --vin VIN --from 2025-01-01T00:00:00Z --limit 25
+```
+
+### `billing invoice INVOICE_ID`
+
+Download a charging invoice by ID.
+
+```bash
+tescmd billing invoice INV-123456
+tescmd billing invoice INV-123456 -o invoice.pdf
+```
+
+---
+
+## `partner` — Partner Account
+
+Partner-level endpoints for managing Fleet API registration and telemetry diagnostics. Requires client credentials.
+
+### `partner public-key`
+
+Look up the public key registered for a domain.
+
+```bash
+tescmd partner public-key --domain yourdomain.github.io
+```
+
+### `partner telemetry-error-vins`
+
+List VINs with recent fleet telemetry errors.
+
+```bash
+tescmd partner telemetry-error-vins
+```
+
+### `partner telemetry-errors`
+
+Get recent fleet telemetry errors across all vehicles.
+
+```bash
+tescmd partner telemetry-errors
+```
+
+---
+
+## `status` — Configuration Overview
+
+Single-command overview of current configuration, authentication, and cache state.
+
+```bash
+tescmd status
+```
+
+Displays: active profile, region, VIN, setup tier, domain, client ID, auth state (token expiry, refresh availability), cache statistics (entries, fresh/stale), config/cache directory paths, key pairs, and token backend.
 
 ---
 

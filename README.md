@@ -10,7 +10,9 @@ A Python CLI for querying and controlling Tesla vehicles via the Fleet API — b
 
 ## Why tescmd?
 
-Tesla's Fleet API gives developers full access to vehicle data and commands, but working with it directly means juggling OAuth2 PKCE flows, token refresh, regional endpoints, key enrollment, and raw JSON responses. tescmd wraps all of that into a single command-line tool that handles authentication, token management, and output formatting so you can focus on what you actually want to do — check your battery, find your car, or control your vehicle.
+Tesla's Fleet API gives developers full access to vehicle data and commands, but working with it directly means juggling OAuth2 PKCE flows, token refresh, regional endpoints, key enrollment, and raw JSON responses.
+
+tescmd wraps all of that into a single command-line tool that handles authentication, token management, and output formatting so you can focus on what you actually want to do — check your battery, find your car, or control your vehicle.
 
 tescmd is designed to work as a tool that AI agents can invoke directly. Platforms like [OpenClaw](https://openclaw.ai/), [Claude Desktop](https://claude.ai), and other agent frameworks can call tescmd commands, parse the structured JSON output, and take actions on your behalf — "lock my car", "what's my battery at?", "start climate control". The deterministic JSON output, meaningful exit codes, cost-aware wake confirmation, and `--wake` opt-in flag make it safe for autonomous agent use without surprise billing.
 
@@ -24,6 +26,8 @@ tescmd is designed to work as a tool that AI agents can invoke directly. Platfor
 - **Energy products** — Powerwall live status, site info, backup reserve, operation mode, storm mode, time-of-use settings, charging history, calendar history, grid import/export
 - **User & sharing** — account info, region, orders, feature flags, driver management, vehicle sharing invites
 - **Fleet Telemetry streaming** — `tescmd vehicle telemetry stream` starts a real-time dashboard with push-based data from your vehicle via Tailscale Funnel — no polling, 99%+ cost reduction
+- **OpenClaw Bridge** — `tescmd openclaw bridge` streams filtered telemetry to an OpenClaw Gateway with configurable delta+throttle filtering per field
+- **MCP Server** — `tescmd mcp serve` exposes all commands as MCP tools for Claude.ai, Claude Desktop, Claude Code, and other agent frameworks via OAuth 2.1
 - **Universal response caching** — all read commands are cached with tiered TTLs (1h for specs/warranty, 5m for fleet lists, 1m standard, 30s for location-dependent); bots can call tescmd as often as needed — within the TTL window, responses are instant and free
 - **Cost-aware wake** — prompts before sending billable wake API calls; `--wake` flag for scripts that accept the cost
 - **Guided OAuth2 setup** — `tescmd auth login` walks you through browser-based authentication with PKCE
@@ -63,11 +67,20 @@ The following tools should be installed and authenticated before running `tescmd
 |------|----------|---------|------|
 | **Git** | Yes | Version control, repo management | N/A |
 | **GitHub CLI** (`gh`) | Recommended | Auto-creates `*.github.io` domain for key hosting | `gh auth login` |
-| **Tailscale** | Optional | Key hosting via Funnel + Fleet Telemetry streaming | `tailscale login` |
+| **Tailscale** | Recommended | Self-hosted key hosting + Fleet Telemetry streaming — no domain needed | `tailscale login` |
 
-Without the GitHub CLI, `tescmd setup` will try Tailscale Funnel for key hosting (requires Funnel enabled in your tailnet ACL). Without either, you'll need to manually host your public key at the Tesla-required `.well-known` path on your own domain.
+### Self-Hosting with Tailscale (No Domain Required)
 
-For telemetry streaming, you need **Tailscale** with Funnel enabled.
+If you have **Tailscale** installed with Funnel enabled, you don't need a custom domain or GitHub Pages at all. Tailscale Funnel gives you a public HTTPS URL (`<machine>.tailnet.ts.net`) that serves both your public key and (optionally) Fleet Telemetry streaming — all from your local machine with zero infrastructure setup.
+
+```bash
+# Install Tailscale, enable Funnel in your tailnet ACL, then:
+tescmd setup   # wizard auto-detects Tailscale and offers it as the hosting method
+```
+
+This is the fastest path to a working setup: Tailscale handles TLS certificates, NAT traversal, and public DNS automatically. The tradeoff is that your machine needs to be running for Tesla to reach your key and for telemetry streaming to work. For always-on key hosting with offline machines, use GitHub Pages instead.
+
+Without either GitHub CLI or Tailscale, you'll need to manually host your public key at the Tesla-required `.well-known` path on your own domain.
 
 ## Installation
 
@@ -164,6 +177,8 @@ Check which backend is active with `tescmd status` — the output includes a `To
 | `sharing` | `add-driver`, `remove-driver`, `create-invite`, `redeem-invite`, `revoke-invite`, `list-invites` | Vehicle sharing and driver management |
 | `key` | `generate`, `deploy`, `validate`, `show`, `enroll`, `unenroll` | Key management and enrollment |
 | `partner` | `public-key`, `telemetry-error-vins`, `telemetry-errors` | Partner account endpoints (require client credentials) |
+| `openclaw` | `bridge` | Stream filtered telemetry to an OpenClaw Gateway |
+| `mcp` | `serve` | MCP server exposing all commands as agent tools |
 | `cache` | `status`, `clear` | Response cache management |
 | `raw` | `get`, `post` | Arbitrary Fleet API endpoint access |
 
@@ -245,7 +260,7 @@ A naive script that polls `vehicle_data` every 5 minutes generates **4-5 billabl
 
 | | Without tescmd | With tescmd |
 |---|---|---|
-| Vehicle asleep, check battery | 408 error (billable) + wake (billable) + poll (billable) + data (billable) = **4+ requests** | Cache miss → prompt user → user wakes via Tesla app (free) → retry → data (billable) = **1 request** |
+| Vehicle asleep, check battery | 408 error (billable) + wake (billable) + poll (billable) + data (billable) = **4+ requests** | Data attempt → 408 (billable) → prompt user → user wakes via Tesla app (free) → retry → data (billable) = **2 requests** |
 | Check battery again 30s later | Another 4+ requests | **0 requests** (cache hit) |
 | 10 checks in 1 minute | **40+ billable requests** | **1 billable request** + 9 cache hits |
 
@@ -300,8 +315,7 @@ Configure via environment variables:
 Tesla's Fleet Telemetry lets your vehicle push real-time data directly to your server — no polling, no per-request charges. tescmd handles all the setup:
 
 ```bash
-# Install telemetry dependencies
-pip install tescmd[telemetry]
+# Telemetry, OpenClaw, and MCP dependencies are included by default
 
 # Stream real-time data (Rich dashboard in TTY, JSONL when piped)
 tescmd vehicle telemetry stream

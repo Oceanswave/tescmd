@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - Unreleased
+
+### Added
+
+- **OpenClaw Bridge** — `tescmd openclaw bridge [VIN]` streams Fleet Telemetry to an OpenClaw Gateway with configurable delta+throttle filtering per field; supports `--dry-run` for JSONL output without a gateway connection
+- **MCP Server** — `tescmd mcp serve` exposes all tescmd commands as MCP tools for Claude Desktop/Code and other agent frameworks; supports stdio and streamable-http transports
+- **Agent skill** — `skills/tescmd/SKILL.md` teaches AI agents how to use every tescmd command group with examples, parameter types, and common patterns
+- **Reusable telemetry session** — extracted shared telemetry lifecycle (server → tunnel → partner registration → fleet config → cleanup) into `telemetry/setup.py` for use by both the stream command and the OpenClaw bridge
+- **Dual-gate telemetry filter** — `openclaw/filters.py` combines delta threshold (value change) and throttle interval (minimum time between emissions) to reduce noise in telemetry streams; includes haversine distance for location fields
+- **OpenClaw event emitter** — maps telemetry fields to OpenClaw `req:agent` event payloads (location, battery, temperature, speed, charge state transitions, security changes)
+- **Gateway WebSocket client** — implements the OpenClaw operator protocol (challenge → connect → hello-ok handshake) with exponential backoff reconnection
+- **Bridge configuration** — `BridgeConfig` pydantic model with per-field filter settings, loadable from JSON file or CLI flags
+- **Standard dependencies** — `websockets>=14.0` and `mcp>=1.0` now included in default install
+
+### Changed
+
+- Refactored `_cmd_telemetry_stream` in `cli/vehicle.py` to use the shared `telemetry_session()` context manager (no behavioral change)
+
 ## [0.2.0] - 2026-01-31
 
 ### Added
@@ -18,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tailscale Funnel integration** — automatic Funnel start/stop with cert retrieval for Fleet Telemetry HTTPS requirement
 - **JSONL output** — piped mode emits one JSON line per telemetry frame for scripting and log ingestion
 - **TunnelError hierarchy** — `TunnelError` parent with `TailscaleError` subtype; actionable install/setup guidance
-- **Optional dependency group** — `pip install tescmd[telemetry]` adds `websockets>=14.0`
+- **websockets dependency** — `websockets>=14.0` now included in default install
 - **Tailscale key hosting** — `tescmd key deploy --method tailscale` hosts the public key via Tailscale Funnel at `https://<machine>.tailnet.ts.net/.well-known/appspecific/com.tesla.3p.public-key.pem`; auto-detected as second priority after GitHub Pages
 - **Key hosting priority chain** — setup wizard and `key deploy` auto-detect the best hosting method: GitHub Pages → Tailscale Funnel → manual; `--method` flag overrides auto-detection
 - **`TESLA_HOSTING_METHOD` setting** — persists the chosen key hosting method (`github`, `tailscale`) across sessions

@@ -6,6 +6,7 @@ import dataclasses
 import logging
 
 import click
+from dotenv import load_dotenv
 
 from tescmd._internal.async_utils import run_async
 from tescmd.api.errors import (
@@ -61,6 +62,13 @@ class AppContext:
             self._formatter = OutputFormatter(force_format=force, units=units)
         return self._formatter
 
+
+# ---------------------------------------------------------------------------
+# Load .env into os.environ before Click resolves any envvar= options.
+# This ensures TESLA_VIN, TESCMD_MCP_CLIENT_ID, etc. from .env files
+# are visible to Click's envvar resolution.
+# ---------------------------------------------------------------------------
+load_dotenv(override=False)
 
 # ---------------------------------------------------------------------------
 # Root Click group
@@ -160,8 +168,10 @@ def _register_commands() -> None:
     from tescmd.cli.climate import climate_group
     from tescmd.cli.energy import energy_group
     from tescmd.cli.key import key_group
+    from tescmd.cli.mcp_cmd import mcp_group
     from tescmd.cli.media import media_group
     from tescmd.cli.nav import nav_group
+    from tescmd.cli.openclaw import openclaw_group
     from tescmd.cli.partner import partner_group
     from tescmd.cli.raw import raw_group
     from tescmd.cli.security import security_group
@@ -180,8 +190,10 @@ def _register_commands() -> None:
     cli.add_command(climate_group)
     cli.add_command(energy_group)
     cli.add_command(key_group)
+    cli.add_command(mcp_group)
     cli.add_command(media_group)
     cli.add_command(nav_group)
+    cli.add_command(openclaw_group)
     cli.add_command(partner_group)
     cli.add_command(raw_group)
     cli.add_command(security_group)
@@ -642,4 +654,4 @@ def _handle_tunnel_error(
         " [cyan]https://login.tailscale.com/admin/acls[/cyan]"
     )
     formatter.rich.info("")
-    formatter.rich.info("Install telemetry deps: [cyan]pip install tescmd[telemetry][/cyan]")
+    formatter.rich.info("Telemetry deps are included with tescmd.")

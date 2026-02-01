@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import click
 
 from tescmd._internal.async_utils import run_async
-from tescmd.api.errors import TunnelError, VehicleAsleepError
+from tescmd.api.errors import VehicleAsleepError
 from tescmd.cli._client import (
     TTL_DEFAULT,
     TTL_FAST,
@@ -28,10 +28,7 @@ from tescmd.cli._options import global_options
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
-
     from tescmd.cli.main import AppContext
-    from tescmd.output.formatter import OutputFormatter
 
 
 # ---------------------------------------------------------------------------
@@ -820,34 +817,9 @@ def telemetry_stream_cmd(
     configures the vehicle to push telemetry, and displays it in an
     interactive dashboard (TTY) or JSONL stream (piped).
 
-    Requires: pip install tescmd[telemetry] and Tailscale (with Funnel enabled).
+    Requires Tailscale with Funnel enabled.
     """
     run_async(_cmd_telemetry_stream(app_ctx, vin_positional, port, fields, interval))
-
-
-async def _noop_stop() -> None:
-    """No-op tunnel cleanup (used when tunnel wasn't started yet)."""
-
-
-async def _setup_tunnel(
-    *,
-    port: int,
-    formatter: OutputFormatter,
-) -> tuple[str, str, str, Callable[[], Awaitable[None]]]:
-    """Start Tailscale Funnel and return ``(url, hostname, ca_pem, stop_fn)``."""
-    from tescmd.telemetry.tailscale import TailscaleManager
-
-    ts = TailscaleManager()
-    await ts.check_available()
-    await ts.check_running()
-
-    url = await ts.start_funnel(port)
-    if formatter.format != "json":
-        formatter.rich.info(f"Tailscale Funnel active: {url}")
-
-    hostname = await ts.get_hostname()
-    ca_pem = await ts.get_cert_pem()
-    return url, hostname, ca_pem, ts.stop_funnel
 
 
 async def _cmd_telemetry_stream(
@@ -857,9 +829,8 @@ async def _cmd_telemetry_stream(
     fields_spec: str,
     interval_override: int | None,
 ) -> None:
-    from tescmd.telemetry.decoder import TelemetryDecoder
     from tescmd.telemetry.fields import resolve_fields
-    from tescmd.telemetry.server import TelemetryServer
+    from tescmd.telemetry.setup import telemetry_session
 
     formatter = app_ctx.formatter
     vin = require_vin(vin_positional, app_ctx.vin)
@@ -868,18 +839,15 @@ async def _cmd_telemetry_stream(
     if port is None:
         port = random.randint(49152, 65535)
 
-    # Resolve fields
     field_config = resolve_fields(fields_spec, interval_override)
-
-    # Build API client
-    client, api = get_vehicle_api(app_ctx)
-    decoder = TelemetryDecoder()
 
     # Output callback
     if formatter.format == "json":
         import json as json_mod
 
-        async def on_frame(frame: TelemetryDecoder | object) -> None:
+        dashboard = None
+
+        async def on_frame(frame: object) -> None:
             from tescmd.telemetry.decoder import TelemetryFrame
 
             assert isinstance(frame, TelemetryFrame)
@@ -893,258 +861,25 @@ async def _cmd_telemetry_stream(
             )
             print(line, flush=True)
 
-        dashboard = None
     else:
         from tescmd.telemetry.dashboard import TelemetryDashboard
 
         dashboard = TelemetryDashboard(formatter.console, formatter.rich._units)
 
-        async def on_frame(frame: TelemetryDecoder | object) -> None:
+        async def on_frame(frame: object) -> None:
             from tescmd.telemetry.decoder import TelemetryFrame
 
             assert isinstance(frame, TelemetryFrame)
             assert dashboard is not None
             dashboard.update(frame)
 
-    # Load settings and public key before server creation — the key must be
-    # served at /.well-known/ because Tesla fetches it during partner registration.
-    from pathlib import Path
-
-    from tescmd.crypto.keys import load_public_key_pem
-    from tescmd.models.config import AppSettings
-
-    _settings = AppSettings()
-    key_dir = Path(_settings.config_dir).expanduser() / "keys"
-    public_key_pem = load_public_key_pem(key_dir)
-
-    # Server + Tunnel + Config with guaranteed cleanup
-    server = TelemetryServer(
-        port=port, decoder=decoder, on_frame=on_frame, public_key_pem=public_key_pem
-    )
-    tunnel_url: str | None = None
-    config_created = False
-
-    # Cleanup callbacks — set by tunnel provider
-    stop_tunnel: Callable[[], Awaitable[None]] = _noop_stop
-    original_partner_domain: str | None = None
-
-    try:
-        await server.start()
-
-        if formatter.format != "json":
-            formatter.rich.info(f"WebSocket server listening on port {port}")
-
-        tunnel_url, hostname, ca_pem, stop_tunnel = await _setup_tunnel(
-            port=port,
-            formatter=formatter,
-        )
-
-        # --- Re-register partner domain if tunnel hostname differs ---
-        registered_domain = (_settings.domain or "").lower().rstrip(".")
-        tunnel_host = hostname.lower().rstrip(".")
-
-        if tunnel_host != registered_domain:
-            from tescmd.api.errors import AuthError
-            from tescmd.auth.oauth import register_partner_account
-
-            if not _settings.client_id or not _settings.client_secret:
-                raise TunnelError(
-                    "Client credentials required for partner domain "
-                    "re-registration. Ensure TESLA_CLIENT_ID and "
-                    "TESLA_CLIENT_SECRET are set."
-                )
-
-            reg_client_id = _settings.client_id
-            reg_client_secret = _settings.client_secret
-            region = app_ctx.region or _settings.region
-            if formatter.format != "json":
-                formatter.rich.info(f"Re-registering partner domain: {hostname}")
-
-            async def _try_register() -> None:
-                await register_partner_account(
-                    client_id=reg_client_id,
-                    client_secret=reg_client_secret,
-                    domain=hostname,
-                    region=region,
-                )
-
-            # Try registration with auto-retry for transient tunnel errors.
-            # 412 = Allowed Origin URL missing in Developer Portal.
-            # 424 = Tesla failed to reach the tunnel (key fetch failed) —
-            #        typically a propagation delay after tunnel start.
-            #        Tunnel propagation delays can cause transient failures,
-            #        so we retry patiently (12 x 5s = 60s).
-            max_retries = 12
-            for attempt in range(max_retries):
-                try:
-                    await _try_register()
-                    if attempt > 0 and formatter.format != "json":
-                        formatter.rich.info(
-                            "[green]Tunnel is reachable — registration succeeded.[/green]"
-                        )
-                    break
-                except AuthError as exc:
-                    status = getattr(exc, "status_code", None)
-
-                    # 424 = key download failed — likely tunnel propagation delay
-                    if status == 424 and attempt < max_retries - 1:
-                        if formatter.format != "json":
-                            formatter.rich.info(
-                                f"[yellow]Waiting for tunnel to become reachable "
-                                f"(HTTP 424)... "
-                                f"({attempt + 1}/{max_retries})[/yellow]"
-                            )
-                        await asyncio.sleep(5)
-                        continue
-
-                    if status not in (412, 424):
-                        raise TunnelError(
-                            f"Partner re-registration failed for {hostname}: {exc}"
-                        ) from exc
-
-                    # 412 or exhausted 424 retries — need user intervention
-                    if formatter.format == "json":
-                        if status == 412:
-                            raise TunnelError(
-                                f"Add https://{hostname} as an Allowed Origin "
-                                f"URL in your Tesla Developer Portal app, "
-                                f"then try again."
-                            ) from exc
-                        raise TunnelError(
-                            f"Tesla could not fetch the public key from "
-                            f"https://{hostname}. Verify the tunnel is "
-                            f"accessible and try again."
-                        ) from exc
-
-                    formatter.rich.info("")
-                    if status == 412:
-                        formatter.rich.info(
-                            "[yellow]Tesla requires the tunnel domain as "
-                            "an Allowed Origin URL.[/yellow]"
-                        )
-                    else:
-                        formatter.rich.info(
-                            "[yellow]Tesla could not reach the tunnel to "
-                            "verify the public key (HTTP 424).[/yellow]"
-                        )
-                    formatter.rich.info("")
-                    formatter.rich.info("  1. Open your Tesla Developer app:")
-                    formatter.rich.info("     [cyan]https://developer.tesla.com[/cyan]")
-                    formatter.rich.info("  2. Add this as an Allowed Origin URL:")
-                    formatter.rich.info(f"     [cyan]https://{hostname}[/cyan]")
-                    formatter.rich.info("  3. Save the changes")
-                    formatter.rich.info("")
-
-                    # Wait for user to fix, then retry
-                    while True:
-                        formatter.rich.info(
-                            "Press [bold]Enter[/bold] when done (or Ctrl+C to cancel)..."
-                        )
-                        await asyncio.get_event_loop().run_in_executor(None, input)
-                        try:
-                            await _try_register()
-                            formatter.rich.info("[green]Registration succeeded![/green]")
-                            break
-                        except AuthError as retry_exc:
-                            retry_status = getattr(retry_exc, "status_code", None)
-                            if retry_status in (412, 424):
-                                formatter.rich.info(
-                                    f"[yellow]Tesla returned HTTP "
-                                    f"{retry_status}. There is a propagation "
-                                    f"delay on Tesla's end after adding an "
-                                    f"Allowed Origin URL — this can take up "
-                                    f"to 5 minutes.[/yellow]"
-                                )
-                                formatter.rich.info(
-                                    "Press [bold]Enter[/bold] to retry, or "
-                                    "wait and try again (Ctrl+C to cancel)..."
-                                )
-                                continue
-                            raise TunnelError(
-                                f"Partner re-registration failed: {retry_exc}"
-                            ) from retry_exc
-                    break  # registration succeeded in the inner loop
-
-            original_partner_domain = _settings.domain
-
-        # --- Common path: configure fleet telemetry ---
-        inner_config: dict[str, object] = {
-            "hostname": hostname,
-            "port": 443,  # Tailscale Funnel terminates TLS on 443
-            "ca": ca_pem,
-            "fields": field_config,
-            "alert_types": ["service"],
-        }
-
-        # Sign the config with the fleet key and use the JWS endpoint
-        # (Tesla requires the Vehicle Command HTTP Proxy or JWS signing).
-        from tescmd.api.errors import MissingScopesError
-        from tescmd.crypto.keys import load_private_key
-        from tescmd.crypto.schnorr import sign_fleet_telemetry_config
-
-        private_key = load_private_key(key_dir)
-        jws_token = sign_fleet_telemetry_config(private_key, inner_config)
-
-        try:
-            await api.fleet_telemetry_config_create_jws(vins=[vin], token=jws_token)
-        except MissingScopesError:
-            # Token lacks required scopes (e.g. vehicle_location was added
-            # after the token was issued, or the partner domain changed).
-            # A full re-login is needed — refresh alone doesn't update scopes.
-            if formatter.format == "json":
-                raise TunnelError(
-                    "Your OAuth token is missing required scopes for "
-                    "telemetry streaming. Run:\n"
-                    "  1. tescmd auth register   (restore partner domain)\n"
-                    "  2. tescmd auth login       (obtain token with updated scopes)\n"
-                    "Then retry the stream command."
-                ) from None
-
-            from tescmd.auth.oauth import login_flow
-            from tescmd.auth.token_store import TokenStore
-            from tescmd.models.auth import DEFAULT_SCOPES
-
-            formatter.rich.info("")
-            formatter.rich.info(
-                "[yellow]Token is missing required scopes — re-authenticating...[/yellow]"
-            )
-            formatter.rich.info("Opening your browser to sign in to Tesla...")
-            formatter.rich.info(
-                "When prompted, click [cyan]Select All[/cyan] and then"
-                " [cyan]Allow[/cyan] to grant tescmd access."
-            )
-
-            login_port = 8085
-            login_redirect = f"http://localhost:{login_port}/callback"
-            login_store = TokenStore(
-                profile=app_ctx.profile,
-                token_file=_settings.token_file,
-                config_dir=_settings.config_dir,
-            )
-            token_data = await login_flow(
-                client_id=_settings.client_id or "",
-                client_secret=_settings.client_secret,
-                redirect_uri=login_redirect,
-                scopes=DEFAULT_SCOPES,
-                port=login_port,
-                token_store=login_store,
-                region=app_ctx.region or _settings.region,
-            )
-            client.update_token(token_data.access_token)
-            formatter.rich.info("[green]Login successful — retrying config...[/green]")
-            await api.fleet_telemetry_config_create_jws(vins=[vin], token=jws_token)
-
-        config_created = True
-
-        if formatter.format != "json":
-            formatter.rich.info(f"Fleet telemetry configured for VIN {vin}")
-            formatter.rich.info("")
-
-        # Run dashboard or wait for interrupt
+    async with telemetry_session(
+        app_ctx, vin, port, field_config, on_frame, interactive=True
+    ) as session:
         if dashboard is not None:
             from rich.live import Live
 
-            dashboard.set_tunnel_url(tunnel_url)
+            dashboard.set_tunnel_url(session.tunnel_url)
             with Live(
                 dashboard,
                 console=formatter.console,
@@ -1154,62 +889,6 @@ async def _cmd_telemetry_stream(
                 await _wait_for_interrupt()
         else:
             await _wait_for_interrupt()
-
-    finally:
-        # Cleanup in reverse order — each tolerates failure.
-        # Show progress so the user knows what's happening on 'q'/Ctrl+C.
-        is_rich = formatter.format != "json"
-
-        if config_created:
-            if is_rich:
-                formatter.rich.info("[dim]Removing fleet telemetry config...[/dim]")
-            try:
-                await api.fleet_telemetry_config_delete(vin)
-            except Exception:
-                if is_rich:
-                    formatter.rich.info(
-                        "[yellow]Warning: failed to remove telemetry config."
-                        " It may expire or can be removed manually.[/yellow]"
-                    )
-
-        if original_partner_domain is not None:
-            if is_rich:
-                formatter.rich.info(
-                    f"[dim]Restoring partner domain to {original_partner_domain}...[/dim]"
-                )
-            try:
-                from tescmd.auth.oauth import register_partner_account
-
-                assert _settings.client_id is not None
-                assert _settings.client_secret is not None
-                await register_partner_account(
-                    client_id=_settings.client_id,
-                    client_secret=_settings.client_secret,
-                    domain=original_partner_domain,
-                    region=app_ctx.region or _settings.region,
-                )
-            except Exception:
-                msg = (
-                    f"Failed to restore partner domain to {original_partner_domain}. "
-                    "Run 'tescmd auth register' to fix this manually."
-                )
-                logger.warning(msg)
-                if is_rich:
-                    formatter.rich.info(f"[yellow]Warning: {msg}[/yellow]")
-
-        if is_rich:
-            formatter.rich.info("[dim]Stopping tunnel...[/dim]")
-        with contextlib.suppress(Exception):
-            await stop_tunnel()
-
-        if is_rich:
-            formatter.rich.info("[dim]Stopping server...[/dim]")
-        with contextlib.suppress(Exception):
-            await server.stop()
-
-        await client.close()
-        if is_rich:
-            formatter.rich.info("[green]Stream stopped.[/green]")
 
 
 async def _wait_for_interrupt() -> None:

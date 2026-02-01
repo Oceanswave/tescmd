@@ -141,6 +141,7 @@ _VA_ADD_CHARGE_SCHEDULE = 97
 _VA_REMOVE_CHARGE_SCHEDULE = 98
 _VA_ADD_PRECONDITION_SCHEDULE = 99
 _VA_REMOVE_PRECONDITION_SCHEDULE = 100
+_VA_BOOMBOX = 64  # VehicleControlRemoteBoomboxAction
 _VA_BATCH_REMOVE_PRECONDITION = 107
 _VA_BATCH_REMOVE_CHARGE = 108
 
@@ -458,6 +459,14 @@ def _erase_user_data(_body: dict[str, Any]) -> bytes:
     return _void_vehicle_action(_VA_ERASE_USER_DATA)
 
 
+def _remote_boombox(body: dict[str, Any]) -> bytes:
+    """VehicleControlRemoteBoomboxAction: action (field 1, uint32)."""
+    # CLI sends {"sound": id}, protobuf field is "action"
+    action = body.get("sound", body.get("action", 0))
+    inner = _encode_varint_field(1, int(action))
+    return _wrap_vehicle_action(_VA_BOOMBOX, inner)
+
+
 def _scheduled_charging(body: dict[str, Any]) -> bytes:
     """ScheduledChargingAction."""
     inner = b""
@@ -576,7 +585,7 @@ _BUILDERS: dict[str, _PayloadBuilder] = {
     "set_pin_to_drive": _set_pin_to_drive,
     "guest_mode": _guest_mode,
     "erase_user_data": _erase_user_data,
-    "remote_boombox": lambda _: _void_vehicle_action(_VA_HONK_HORN),  # Maps to honk
+    "remote_boombox": _remote_boombox,
     # Media
     "media_toggle_playback": lambda _: _void_vehicle_action(_VA_MEDIA_PLAY),
     "media_next_track": lambda _: _void_vehicle_action(_VA_MEDIA_NEXT_TRACK),

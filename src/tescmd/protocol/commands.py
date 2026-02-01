@@ -100,7 +100,7 @@ _INFOTAINMENT_COMMANDS: dict[str, CommandSpec] = {
     "set_pin_to_drive": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "guest_mode": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "erase_user_data": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
-    "remote_boombox": CommandSpec(Domain.DOMAIN_INFOTAINMENT, requires_signing=False),
+    "remote_boombox": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     # Media
     "media_toggle_playback": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "media_next_track": CommandSpec(Domain.DOMAIN_INFOTAINMENT),

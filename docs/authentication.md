@@ -2,6 +2,8 @@
 
 tescmd uses Tesla's OAuth2 flow with PKCE for user authentication, and EC key pairs for vehicle command authorization. This document covers the full lifecycle.
 
+> **Recommended:** Run `tescmd setup` instead of configuring auth manually. The setup wizard handles app creation, key generation, deployment, registration, and OAuth login in a single guided flow. This document covers the underlying mechanisms for users who want to understand or customize the auth process.
+
 ## Overview
 
 There are two separate auth concerns:
@@ -9,7 +11,11 @@ There are two separate auth concerns:
 1. **OAuth2 tokens** — identify the user to Tesla's Fleet API (required for all API calls, both commands and data queries)
 2. **EC key pairs** — authorize signed commands to the vehicle (required for vehicle commands; not needed for read-only data queries)
 
-Most users only need OAuth2. Key enrollment is required for command signing on newer vehicles using the vehicle command protocol.
+tescmd supports two tiers:
+- **Read-only** — requires only OAuth2 tokens; covers vehicle data, energy products, user info
+- **Full control** — additionally requires EC key enrollment; enables vehicle commands and Fleet Telemetry streaming
+
+Most users only need OAuth2 for read-only access. Key enrollment is required for command signing on newer vehicles using the vehicle command protocol.
 
 ## OAuth2 PKCE Flow
 
@@ -31,8 +37,8 @@ tescmd auth login
 This runs an interactive OAuth2 PKCE flow:
 
 ```
-Step 1: tescmd generates a PKCE code_verifier (random 128-byte string)
-        and derives a code_challenge (SHA-256 hash, base64url-encoded)
+Step 1: tescmd generates a PKCE code_verifier (128-character base64url string
+        derived from 96 random bytes) and a code_challenge (SHA-256 hash, base64url-encoded)
 
 Step 2: tescmd starts a local HTTP server on localhost:8085
 
@@ -41,7 +47,7 @@ Step 3: tescmd opens the system browser to Tesla's authorization endpoint:
         ?client_id=<CLIENT_ID>
         &redirect_uri=http://localhost:8085/callback
         &response_type=code
-        &scope=openid vehicle_device_data vehicle_cmds vehicle_charging_cmds energy_device_data energy_cmds user_data offline_access
+        &scope=openid vehicle_device_data vehicle_cmds vehicle_charging_cmds vehicle_location energy_device_data energy_cmds user_data offline_access
         &code_challenge=<CHALLENGE>
         &code_challenge_method=S256
         &state=<RANDOM>
@@ -57,7 +63,7 @@ Step 6: tescmd exchanges the code for tokens:
         {
           "grant_type": "authorization_code",
           "client_id": "<CLIENT_ID>",
-          "client_secret": "<CLIENT_SECRET>",
+          "client_secret": "<CLIENT_SECRET>",  // optional — omitted if not set
           "code": "<AUTH_CODE>",
           "code_verifier": "<VERIFIER>",
           "redirect_uri": "http://localhost:8085/callback"
@@ -75,9 +81,10 @@ tescmd requests these OAuth2 scopes:
 | Scope | Purpose |
 |---|---|
 | `openid` | User identity |
-| `vehicle_device_data` | Read vehicle state (location, battery, climate, etc.) |
+| `vehicle_device_data` | Read vehicle state (battery, climate, doors, etc.) |
 | `vehicle_cmds` | Send commands (lock, unlock, climate, etc.) |
 | `vehicle_charging_cmds` | Charging commands (start, stop, schedule) |
+| `vehicle_location` | Vehicle GPS location |
 | `energy_device_data` | Energy product data (Powerwall, Solar) |
 | `energy_cmds` | Energy product commands (backup reserve, operation mode) |
 | `user_data` | User account info (profile, orders, features) |
@@ -138,9 +145,46 @@ Keyring entries (per profile):
   password: <refresh_token_value>
 
   service: tescmd
-  username: <profile_name>/token_meta
+  username: <profile_name>/metadata
   password: <json: {expires_at, scopes, region}>
 ```
+
+### File-Based Fallback
+
+On headless systems where no keyring daemon is available (Docker, CI, SSH sessions), tescmd automatically falls back to file-based storage at `~/.config/tescmd/tokens.json` with restricted permissions (`0600` on Unix, owner-only ACL on Windows). A one-time warning is emitted when the fallback activates.
+
+You can force file-based storage by setting `TESLA_TOKEN_FILE`:
+
+```bash
+export TESLA_TOKEN_FILE=~/.config/tescmd/tokens.json
+```
+
+Relevant environment variables:
+
+| Variable | Description |
+|---|---|
+| `TESLA_TOKEN_FILE` | Force file-based token storage at this path (skips keyring) |
+| `TESLA_CONFIG_DIR` | Config directory for fallback token file (default: `~/.config/tescmd`) |
+
+### Importing and Exporting Tokens
+
+To transfer tokens between machines (e.g., from a desktop to a Docker container):
+
+```bash
+# Export from source machine
+tescmd auth export > tokens.json
+
+# Import on target machine
+tescmd auth import < tokens.json
+```
+
+You can also register your app from the CLI:
+
+```bash
+tescmd auth register
+```
+
+This calls the Fleet API partner registration endpoint (`POST /api/1/partner_accounts`) using a client-credentials grant. It is equivalent to the registration step in `tescmd setup`.
 
 ## EC Key Pairs
 
@@ -260,4 +304,4 @@ Profiles are independent — different Tesla accounts, different regions, differ
 - **Private keys file-permission protected** — `chmod 600` on generation
 - **PKCE** — prevents authorization code interception
 - **State parameter** — prevents CSRF in OAuth flow
-- **Local callback server** — binds to localhost only, ephemeral port option available
+- **Local callback server** — binds to `localhost:8085` only (not accessible from other machines)

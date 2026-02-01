@@ -410,4 +410,23 @@ done
 
 Telemetry streaming costs only 2 API requests (create config + delete config) regardless of how long the stream runs or how much data flows. Compared to polling `vehicle_data` every 5 seconds (~17,280 requests/day), streaming reduces API costs by over 99%.
 
-**Requirements:** `pip install tescmd[telemetry]` and Tailscale with Funnel enabled on the host machine.
+**Requirements:** Tailscale with Funnel enabled on the host machine.
+
+## OpenClaw Bridge
+
+The OpenClaw bridge streams filtered telemetry to an OpenClaw Gateway with dual-gate filtering (delta + throttle). See [openclaw.md](openclaw.md) for full documentation.
+
+```bash
+tescmd openclaw bridge
+tescmd openclaw bridge --gateway ws://gw.example.com:18789 --token SECRET
+tescmd openclaw bridge --dry-run
+```
+
+## MCP Server
+
+The MCP server exposes all tescmd commands as MCP tools for AI agents. See [mcp.md](mcp.md) for full documentation.
+
+```bash
+tescmd mcp serve
+tescmd mcp serve --transport stdio  # for Claude Desktop / Claude Code config
+```
