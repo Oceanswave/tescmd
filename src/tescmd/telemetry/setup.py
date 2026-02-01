@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 class TelemetrySession:
     """Active telemetry session state exposed to callers."""
 
-    server: TelemetryServer
+    server: TelemetryServer | None
     tunnel_url: str
     hostname: str
     vin: str
@@ -125,21 +125,29 @@ async def _register_partner_domain(
             status = getattr(exc, "status_code", None)
 
             # 424 = key download failed — likely tunnel propagation delay
-            if status == 424 and attempt < max_retries - 1:
+            # 429 = rate limit / "Other update in progress" — transient
+            if status in (424, 429) and attempt < max_retries - 1:
+                reason = "tunnel propagation" if status == 424 else "rate limit"
                 if formatter.format != "json":
                     formatter.rich.info(
-                        f"[yellow]Waiting for tunnel to become reachable "
-                        f"(HTTP 424)... "
+                        f"[yellow]Waiting for {reason} "
+                        f"(HTTP {status})... "
                         f"({attempt + 1}/{max_retries})[/yellow]"
                     )
                 await asyncio.sleep(5)
                 continue
 
-            if status not in (412, 424):
+            if status not in (412, 424, 429):
                 raise TunnelError(f"Partner re-registration failed for {hostname}: {exc}") from exc
 
-            # 412 or exhausted 424 retries — need user intervention
+            # 412 or exhausted 424/429 retries — need user intervention
             if not interactive or formatter.format == "json":
+                if status == 429:
+                    raise TunnelError(
+                        f"Partner re-registration rate-limited for "
+                        f"{hostname}. Tesla returned 'Other update in "
+                        f"progress'. Wait a minute and try again."
+                    ) from exc
                 if status == 412:
                     raise TunnelError(
                         f"Add https://{hostname} as an Allowed Origin "
@@ -288,6 +296,7 @@ async def telemetry_session(
     on_frame: Callable[[TelemetryFrame], Awaitable[None]],
     *,
     interactive: bool = True,
+    skip_server: bool = False,
 ) -> AsyncIterator[TelemetrySession]:
     """Shared lifecycle for telemetry consumers.
 
@@ -302,7 +311,8 @@ async def telemetry_session(
     vin:
         Vehicle VIN to stream telemetry from.
     port:
-        Local WebSocket server port.
+        Local port for the Tailscale Funnel target.  When *skip_server*
+        is ``True`` the caller handles the listener on this port.
     field_config:
         Resolved field configuration mapping field IDs to intervals.
     on_frame:
@@ -310,6 +320,10 @@ async def telemetry_session(
     interactive:
         If ``False``, skip interactive prompts (headless bridge mode).
         Errors that would normally prompt user input are raised instead.
+    skip_server:
+        If ``True``, skip starting the built-in ``TelemetryServer``.
+        Use this when the WebSocket handler is mounted on an external
+        ASGI app (e.g. the MCP Starlette app) that shares the same port.
     """
     from tescmd.crypto.keys import load_public_key_pem
     from tescmd.models.config import AppSettings
@@ -328,9 +342,11 @@ async def telemetry_session(
     client, api = get_vehicle_api(app_ctx)
     decoder = TelemetryDecoder()
 
-    server = TelemetryServer(
-        port=port, decoder=decoder, on_frame=on_frame, public_key_pem=public_key_pem
-    )
+    server: TelemetryServer | None = None
+    if not skip_server:
+        server = TelemetryServer(
+            port=port, decoder=decoder, on_frame=on_frame, public_key_pem=public_key_pem
+        )
 
     config_created = False
     stop_tunnel: Callable[[], Awaitable[None]] = _noop_stop
@@ -339,9 +355,10 @@ async def telemetry_session(
     hostname = ""
 
     try:
-        await server.start()
+        if server is not None:
+            await server.start()
 
-        if formatter.format != "json":
+        if not skip_server and formatter.format != "json":
             formatter.rich.info(f"WebSocket server listening on port {port}")
 
         tunnel_url, hostname, ca_pem, stop_tunnel = await _setup_tunnel(
@@ -438,10 +455,11 @@ async def telemetry_session(
         with contextlib.suppress(Exception):
             await stop_tunnel()
 
-        if is_rich:
-            formatter.rich.info("[dim]Stopping server...[/dim]")
-        with contextlib.suppress(Exception):
-            await server.stop()
+        if server is not None:
+            if is_rich:
+                formatter.rich.info("[dim]Stopping server...[/dim]")
+            with contextlib.suppress(Exception):
+                await server.stop()
 
         await client.close()
         if is_rich:

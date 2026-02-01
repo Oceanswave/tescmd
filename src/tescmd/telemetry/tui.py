@@ -15,9 +15,9 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
-from textual.containers import Grid, Vertical, VerticalScroll
+from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Footer, Header, Static
+from textual.widgets import DataTable, Footer, Header, RichLog, Static
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -227,6 +227,44 @@ for _pid, (_title, _fields) in PANEL_FIELDS.items():
         _FIELD_TO_PANEL[_f] = _pid
 
 
+# ---------------------------------------------------------------------------
+# Activity sidebar — logging handler that funnels into an asyncio queue
+# ---------------------------------------------------------------------------
+
+# Logger-name prefix -> (short label, Rich color).
+SOURCE_MAP: dict[str, tuple[str, str]] = {
+    "tescmd.tui.commands": ("CMD", "cyan"),
+    "tescmd.mcp.server": ("MCP", "magenta"),
+    "tescmd.cli.serve": ("HTTP", "blue"),
+    "tescmd.openclaw.gateway": ("CLAW", "green"),
+    "tescmd.openclaw.bridge": ("CLAW", "green"),
+    "tescmd.telemetry.server": ("TELEM", "yellow"),
+    "tescmd.telemetry.cache_sink": ("CACHE", "dim"),
+    "tescmd.api.client": ("API", "blue"),
+    "tescmd.api.signed_command": ("SIGN", "bright_red"),
+    "tescmd.protocol.session": ("PROTO", "bright_blue"),
+}
+
+
+class ActivityLogHandler(logging.Handler):
+    """Logging handler that enqueues messages for the TUI activity sidebar."""
+
+    def __init__(self, queue: asyncio.Queue[tuple[str, str, str]]) -> None:
+        super().__init__()
+        self._queue = queue
+
+    def emit(self, record: logging.LogRecord) -> None:
+        source = "LOG"
+        color = "white"
+        for prefix, (label, clr) in SOURCE_MAP.items():
+            if record.name.startswith(prefix):
+                source = label
+                color = clr
+                break
+        with contextlib.suppress(asyncio.QueueFull):
+            self._queue.put_nowait((source, color, self.format(record)))
+
+
 def _mask_vin(vin: str) -> str:
     """Mask VIN for display — last 4 characters replaced with XXXX."""
     if len(vin) >= 4:
@@ -363,10 +401,21 @@ class TelemetryTUI(App[None]):
     TITLE = "tescmd"
 
     CSS = """
+    #main-area {
+        height: 1fr;
+    }
     #panel-grid {
+        width: 3fr;
         height: 1fr;
         grid-size: 2;
         grid-gutter: 0;
+    }
+    #activity-log {
+        width: 1fr;
+        min-width: 30;
+        height: 1fr;
+        border: solid $accent;
+        padding: 0 1;
     }
     .telemetry-panel {
         height: 1fr;
@@ -382,6 +431,8 @@ class TelemetryTUI(App[None]):
     #security-panel { border: solid #e74c3c; }
     #tires-panel { border: solid #9b59b6; }
     #diagnostics-panel { border: solid #95a5a6; }
+    #media-panel { border: solid #e67e22; }
+    #nav-panel { border: solid #1abc9c; }
     #server-bar {
         height: auto;
         background: $panel;
@@ -476,6 +527,16 @@ class TelemetryTUI(App[None]):
         # serve.py can await this to know when to tear down the MCP server.
         self.shutdown_event: asyncio.Event = asyncio.Event()
 
+        # Activity sidebar.
+        self._activity_queue: asyncio.Queue[tuple[str, str, str]] = asyncio.Queue(maxsize=500)
+        self._activity_handler: ActivityLogHandler | None = None
+        self._last_frame_summary_count: int = 0
+        self._ui_tick: int = 0
+        self._original_propagate: dict[str, bool] = {}
+        self._saved_root_handlers: list[logging.Handler] = []
+        self._activity_file_handler: logging.FileHandler | None = None
+        self._activity_log_path: str = ""
+
         # Debug logger for command attempts — always writes to a file.
         self._cmd_logger = logging.getLogger("tescmd.tui.commands")
         self._cmd_log_handler: logging.FileHandler | None = None
@@ -484,10 +545,14 @@ class TelemetryTUI(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        with Grid(id="panel-grid"):
-            for panel_id in PANEL_FIELDS:
-                with Vertical(id=f"{panel_id}-panel", classes="telemetry-panel"):
-                    yield DataTable(id=f"{panel_id}-table", cursor_type="none", zebra_stripes=True)
+        with Horizontal(id="main-area"):
+            with Grid(id="panel-grid"):
+                for panel_id in PANEL_FIELDS:
+                    with Vertical(id=f"{panel_id}-panel", classes="telemetry-panel"):
+                        yield DataTable(
+                            id=f"{panel_id}-table", cursor_type="none", zebra_stripes=True
+                        )
+            yield RichLog(id="activity-log", wrap=True, markup=True)
         yield Static(id="server-bar")
         yield Static(id="command-status")
         yield Footer()
@@ -502,14 +567,24 @@ class TelemetryTUI(App[None]):
             table.add_column("Field", key="field", width=24)
             table.add_column("Value", key="value", width=24)
 
+        # Activity sidebar title.
+        activity_log = self.query_one("#activity-log", RichLog)
+        activity_log.border_title = "Activity"
+
         # Set up debug command log file.
         self._setup_command_log()
+
+        # Attach activity handler to all monitored loggers.
+        self._setup_activity_handler()
 
         # Periodic UI refresh.
         self.set_interval(1.0, self._update_ui)
 
         # Background worker to drain the frame queue.
         self.run_worker(self._process_queue, exclusive=True, thread=False)  # type: ignore[arg-type]
+
+        # Background worker to drain the activity queue into the RichLog.
+        self.run_worker(self._process_activity_queue, exclusive=False, thread=False)  # type: ignore[arg-type]
 
     def _setup_command_log(self) -> None:
         """Set up a file-based debug logger for command attempts."""
@@ -532,6 +607,118 @@ class TelemetryTUI(App[None]):
         self._cmd_log_handler = handler
         self._cmd_log_path = str(log_file)
         self._cmd_logger.info("TUI started — VIN=%s", self._vin or "(none)")
+
+    # -- Activity sidebar -------------------------------------------------------
+
+    def _setup_activity_handler(self) -> None:
+        """Attach a logging handler to all monitored loggers.
+
+        Disables propagation so records go ONLY to the activity sidebar,
+        not to the console (which would corrupt the Textual TUI).
+        """
+        handler = ActivityLogHandler(self._activity_queue)
+        handler.setLevel(logging.INFO)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        self._activity_handler = handler
+
+        # File handler — mirrors activity to a log file for post-mortem.
+        from pathlib import Path
+
+        if self._log_path:
+            log_dir = Path(self._log_path).parent
+        else:
+            log_dir = Path("~/.config/tescmd").expanduser()
+            log_dir.mkdir(parents=True, exist_ok=True)
+        activity_file = log_dir / "tui-activity.log"
+        file_handler = logging.FileHandler(activity_file, encoding="utf-8")
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s  %(levelname)-5s  [%(name)s]  %(message)s",
+                datefmt="%Y-%m-%dT%H:%M:%S",
+            )
+        )
+        self._activity_file_handler = file_handler
+        self._activity_log_path = str(activity_file)
+
+        # Attach handlers and disable console propagation for monitored loggers.
+        for logger_name in SOURCE_MAP:
+            log = logging.getLogger(logger_name)
+            log.addHandler(handler)
+            log.addHandler(file_handler)
+            log.setLevel(min(log.level or logging.DEBUG, logging.DEBUG))
+            self._original_propagate[logger_name] = log.propagate
+            log.propagate = False
+
+        # Suppress noisy library loggers that would corrupt the terminal.
+        for name in ("uvicorn", "uvicorn.error", "uvicorn.access",
+                     "httpx", "httpcore", "websockets", "mcp"):
+            log = logging.getLogger(name)
+            self._original_propagate[name] = log.propagate
+            log.propagate = False
+
+        # Remove root logger's stream handlers to prevent ANY stray
+        # console output while the TUI owns the terminal.
+        self._saved_root_handlers = logging.root.handlers[:]
+        logging.root.handlers = [
+            h for h in logging.root.handlers
+            if not isinstance(h, logging.StreamHandler)
+            or isinstance(h, logging.FileHandler)
+        ]
+
+    async def _process_activity_queue(self) -> None:
+        """Background worker: drain activity queue into the RichLog widget."""
+        while True:
+            try:
+                source, color, message = await asyncio.wait_for(
+                    self._activity_queue.get(), timeout=0.5
+                )
+            except TimeoutError:
+                continue
+
+            ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
+            rich_log = self.query_one("#activity-log", RichLog)
+            rich_log.write(f"[{color}]{ts} {source}[/{color}] {message}")
+
+    def _maybe_log_frame_summary(self) -> None:
+        """Every 5 UI ticks, log a frame summary if new frames arrived."""
+        self._ui_tick += 1
+        if self._ui_tick % 5 != 0:
+            return
+        current = self._frame_count
+        delta = current - self._last_frame_summary_count
+        if delta > 0:
+            self._last_frame_summary_count = current
+            ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
+            with contextlib.suppress(Exception):
+                rich_log = self.query_one("#activity-log", RichLog)
+                rich_log.write(f"[yellow]{ts} TELEM[/yellow] +{delta} frames ({current} total)")
+
+    def _cleanup_activity_handler(self) -> None:
+        """Remove activity handler and restore console logging."""
+        handler = self._activity_handler
+        if handler is None:
+            return
+        for logger_name in SOURCE_MAP:
+            log = logging.getLogger(logger_name)
+            log.removeHandler(handler)
+            if self._activity_file_handler is not None:
+                log.removeHandler(self._activity_file_handler)
+
+        if self._activity_file_handler is not None:
+            self._activity_file_handler.close()
+            self._activity_file_handler = None
+
+        # Restore propagation settings.
+        for logger_name, propagate in self._original_propagate.items():
+            logging.getLogger(logger_name).propagate = propagate
+        self._original_propagate.clear()
+
+        # Restore root logger handlers.
+        logging.root.handlers = self._saved_root_handlers
+        self._saved_root_handlers = []
+
+        self._activity_handler = None
 
     # -- Frame ingestion (called from fanout) ---------------------------------
 
@@ -590,6 +777,7 @@ class TelemetryTUI(App[None]):
         self._update_header()
         self._update_panels()
         self._update_server_info()
+        self._maybe_log_frame_summary()
 
     def _update_header(self) -> None:
         now = datetime.now(tz=UTC)
@@ -624,14 +812,17 @@ class TelemetryTUI(App[None]):
 
     def _update_server_info(self) -> None:
         parts: list[str] = []
-        if self._mcp_url:
-            parts.append(f"MCP: {self._mcp_url}")
-        if self._telemetry_port is not None:
-            parts.append(f"Telemetry: :{self._telemetry_port}")
-        if self._sink_count:
-            parts.append(f"Sinks: {self._sink_count}")
+        # Tunnel first — it's the public entry point.
         if self._tunnel_url:
             parts.append(f"Tunnel: {self._tunnel_url}")
+        # MCP as relative path (port/path) when tunnel is present.
+        if self._mcp_url:
+            parts.append(f"MCP: {_relative_path(self._mcp_url, self._tunnel_url)}")
+        # Telemetry WS port.
+        if self._telemetry_port is not None:
+            parts.append(f"WS: :{self._telemetry_port}")
+        if self._sink_count:
+            parts.append(f"Sinks: {self._sink_count}")
         if self._cache_stats:
             parts.append(f"Cache: {self._cache_stats}")
         if self._openclaw_status:
@@ -659,34 +850,39 @@ class TelemetryTUI(App[None]):
     def _run_command(self, cli_args: list[str], description: str) -> None:
         """Run a CLI command in a background thread worker."""
         self._show_command_status(f"Sending: {description}...")
-        self._cmd_logger.info("CMD  %s  args=%s", description, cli_args)
+        self._cmd_logger.info("%s  args=%s", description, cli_args)
 
         async def _invoke() -> None:
             from click.testing import CliRunner
 
             from tescmd.cli.main import cli
 
+            # Suppress httpx/httpcore logging during invocation — their INFO
+            # lines write directly to the terminal and corrupt the TUI display.
+            _noisy_loggers = ("httpx", "httpcore")
+            saved_levels = {n: logging.getLogger(n).level for n in _noisy_loggers}
+            for n in _noisy_loggers:
+                logging.getLogger(n).setLevel(logging.WARNING)
+
             runner = CliRunner(mix_stderr=False)
             env = os.environ.copy()
             if self._vin:
                 env["TESLA_VIN"] = self._vin
-            result = runner.invoke(cli, ["--format", "json", "--wake", *cli_args], env=env)
+            try:
+                result = runner.invoke(cli, ["--format", "json", "--wake", *cli_args], env=env)
+            finally:
+                for n in _noisy_loggers:
+                    logging.getLogger(n).setLevel(saved_levels[n])
 
             if result.exit_code == 0:
-                out = (result.output or "").strip()[:200]
-                self._cmd_logger.info("OK   %s  exit=0  out=%s", description, out)
+                self._cmd_logger.info("OK  %s", description)
                 self.call_from_thread(self._show_command_status, f"OK: {description}")
             else:
                 stderr = (result.stderr or "").strip()
                 stdout = (result.output or "").strip()
-                self._cmd_logger.error(
-                    "FAIL %s  exit=%d  stderr=%s  stdout=%s",
-                    description,
-                    result.exit_code,
-                    stderr[:500],
-                    stdout[:500],
-                )
-                err = (stderr or stdout)[:80]
+                exc_msg = str(result.exception) if result.exception else ""
+                err = _extract_error_message(stderr, stdout, exc_msg)
+                self._cmd_logger.error("FAIL  %s — %s", description, err)
                 self.call_from_thread(self._show_command_status, f"FAIL: {description} — {err}")
 
             await asyncio.sleep(5)
@@ -699,6 +895,7 @@ class TelemetryTUI(App[None]):
     async def action_quit(self) -> None:
         """Quit the TUI and signal the serve loop to shut down."""
         self._cmd_logger.info("QUIT user requested shutdown")
+        self._cleanup_activity_handler()
         self._show_command_status("Shutting down...")
         self.shutdown_event.set()
         self.exit()
@@ -717,6 +914,8 @@ class TelemetryTUI(App[None]):
         cmd_log = getattr(self, "_cmd_log_path", "")
         if cmd_log:
             log_paths += f"Command log: {cmd_log}\n"
+        if self._activity_log_path:
+            log_paths += f"Activity log: {self._activity_log_path}\n"
         self.push_screen(
             HelpScreen(log_path=log_paths.rstrip(), server_info="  ".join(server_parts))
         )
@@ -779,6 +978,56 @@ class TelemetryTUI(App[None]):
             "Charge limit: standard",
             "Set charge limit to standard (80%)",
             self.action_cmd_charge_std,
+        )
+        yield SystemCommand(
+            "Charge limit: 50%",
+            "Set charge limit to 50%",
+            lambda: self._run_command(["charge", "limit", "50"], "Charge limit 50%"),
+        )
+        yield SystemCommand(
+            "Charge limit: 60%",
+            "Set charge limit to 60%",
+            lambda: self._run_command(["charge", "limit", "60"], "Charge limit 60%"),
+        )
+        yield SystemCommand(
+            "Charge limit: 70%",
+            "Set charge limit to 70%",
+            lambda: self._run_command(["charge", "limit", "70"], "Charge limit 70%"),
+        )
+        yield SystemCommand(
+            "Charge limit: 80%",
+            "Set charge limit to 80%",
+            lambda: self._run_command(["charge", "limit", "80"], "Charge limit 80%"),
+        )
+        yield SystemCommand(
+            "Charge limit: 90%",
+            "Set charge limit to 90%",
+            lambda: self._run_command(["charge", "limit", "90"], "Charge limit 90%"),
+        )
+        yield SystemCommand(
+            "Charge amps: 8A",
+            "Set charge amps to 8",
+            lambda: self._run_command(["charge", "amps", "8"], "Charge amps 8A"),
+        )
+        yield SystemCommand(
+            "Charge amps: 16A",
+            "Set charge amps to 16",
+            lambda: self._run_command(["charge", "amps", "16"], "Charge amps 16A"),
+        )
+        yield SystemCommand(
+            "Charge amps: 24A",
+            "Set charge amps to 24",
+            lambda: self._run_command(["charge", "amps", "24"], "Charge amps 24A"),
+        )
+        yield SystemCommand(
+            "Charge amps: 32A",
+            "Set charge amps to 32",
+            lambda: self._run_command(["charge", "amps", "32"], "Charge amps 32A"),
+        )
+        yield SystemCommand(
+            "Charge amps: 48A",
+            "Set charge amps to 48",
+            lambda: self._run_command(["charge", "amps", "48"], "Charge amps 48A"),
         )
         yield SystemCommand(
             "Scheduled charging on",
@@ -847,6 +1096,85 @@ class TelemetryTUI(App[None]):
         yield SystemCommand("Defrost on", "Enable max defrost", self.action_cmd_defrost_on)
         yield SystemCommand("Defrost off", "Disable max defrost", self.action_cmd_defrost_off)
         yield SystemCommand(
+            "Rear defrost on",
+            "Enable rear window defrost",
+            lambda: self._run_command(["climate", "set", "--rear-defrost-on"], "Rear defrost on"),
+        )
+        yield SystemCommand(
+            "Rear defrost off",
+            "Disable rear window defrost",
+            lambda: self._run_command(
+                ["climate", "set", "--rear-defrost-off"], "Rear defrost off"
+            ),
+        )
+        yield SystemCommand(
+            "Set cabin temp 68°F / 20°C",
+            "Set driver and passenger temp to 68°F",
+            lambda: self._run_command(
+                ["climate", "set", "--driver-temp", "20", "--passenger-temp", "20"],
+                "Cabin temp 20°C",
+            ),
+        )
+        yield SystemCommand(
+            "Set cabin temp 72°F / 22°C",
+            "Set driver and passenger temp to 72°F",
+            lambda: self._run_command(
+                ["climate", "set", "--driver-temp", "22", "--passenger-temp", "22"],
+                "Cabin temp 22°C",
+            ),
+        )
+        yield SystemCommand(
+            "Set cabin temp 75°F / 24°C",
+            "Set driver and passenger temp to 75°F",
+            lambda: self._run_command(
+                ["climate", "set", "--driver-temp", "24", "--passenger-temp", "24"],
+                "Cabin temp 24°C",
+            ),
+        )
+        yield SystemCommand(
+            "Seat heater: driver high",
+            "Set driver seat heater to high",
+            lambda: self._run_command(
+                ["climate", "seat", "--position", "0", "--level", "3"], "Driver seat heater high"
+            ),
+        )
+        yield SystemCommand(
+            "Seat heater: driver off",
+            "Turn off driver seat heater",
+            lambda: self._run_command(
+                ["climate", "seat", "--position", "0", "--level", "0"], "Driver seat heater off"
+            ),
+        )
+        yield SystemCommand(
+            "Seat heater: passenger high",
+            "Set passenger seat heater to high",
+            lambda: self._run_command(
+                ["climate", "seat", "--position", "1", "--level", "3"],
+                "Passenger seat heater high",
+            ),
+        )
+        yield SystemCommand(
+            "Seat heater: passenger off",
+            "Turn off passenger seat heater",
+            lambda: self._run_command(
+                ["climate", "seat", "--position", "1", "--level", "0"], "Passenger seat heater off"
+            ),
+        )
+        yield SystemCommand(
+            "Auto seat climate: driver on",
+            "Enable driver auto seat climate",
+            lambda: self._run_command(
+                ["climate", "auto-seat", "--position", "1", "--on"], "Auto seat driver on"
+            ),
+        )
+        yield SystemCommand(
+            "Auto seat climate: driver off",
+            "Disable driver auto seat climate",
+            lambda: self._run_command(
+                ["climate", "auto-seat", "--position", "1", "--off"], "Auto seat driver off"
+            ),
+        )
+        yield SystemCommand(
             "Climate keeper: Dog mode",
             "Set climate keeper to Dog mode",
             lambda: self._run_command(["climate", "keeper", "dog"], "Climate keeper: Dog"),
@@ -860,6 +1188,21 @@ class TelemetryTUI(App[None]):
             "Climate keeper: off",
             "Turn off climate keeper mode",
             lambda: self._run_command(["climate", "keeper", "off"], "Climate keeper: off"),
+        )
+        yield SystemCommand(
+            "Cabin overheat temp: low",
+            "Set overheat protection temp to low (90°F/32°C)",
+            lambda: self._run_command(["climate", "cop-temp", "low"], "Overheat temp: low"),
+        )
+        yield SystemCommand(
+            "Cabin overheat temp: medium",
+            "Set overheat protection temp to medium (100°F/38°C)",
+            lambda: self._run_command(["climate", "cop-temp", "medium"], "Overheat temp: medium"),
+        )
+        yield SystemCommand(
+            "Cabin overheat temp: high",
+            "Set overheat protection temp to high (110°F/43°C)",
+            lambda: self._run_command(["climate", "cop-temp", "high"], "Overheat temp: high"),
         )
 
         # --- Trunk & Windows ---
@@ -886,6 +1229,21 @@ class TelemetryTUI(App[None]):
         )
         yield SystemCommand("Volume up", "Increase volume", self.action_cmd_vol_up)
         yield SystemCommand("Volume down", "Decrease volume", self.action_cmd_vol_down)
+        yield SystemCommand(
+            "Volume: mute (0)",
+            "Set volume to 0",
+            lambda: self._run_command(["media", "adjust-volume", "0"], "Volume 0"),
+        )
+        yield SystemCommand(
+            "Volume: 25%",
+            "Set volume to 25%",
+            lambda: self._run_command(["media", "adjust-volume", "2.75"], "Volume 25%"),
+        )
+        yield SystemCommand(
+            "Volume: 50%",
+            "Set volume to 50%",
+            lambda: self._run_command(["media", "adjust-volume", "5.5"], "Volume 50%"),
+        )
 
         # --- Navigation ---
         yield SystemCommand(
@@ -897,6 +1255,11 @@ class TelemetryTUI(App[None]):
             "Trigger HomeLink",
             "Trigger HomeLink (garage door)",
             self.action_cmd_nav_homelink,
+        )
+        yield SystemCommand(
+            "Navigation: get GPS position",
+            "Read current vehicle GPS coordinates",
+            lambda: self._run_command(["nav", "gps"], "GPS position"),
         )
 
         # --- Software ---
@@ -932,6 +1295,23 @@ class TelemetryTUI(App[None]):
             "Accessory power off",
             "Disable accessory power mode",
             self.action_cmd_accessory_power_off,
+        )
+        yield SystemCommand(
+            "Mobile access on",
+            "Enable mobile app access",
+            lambda: self._run_command(["vehicle", "mobile-access", "--on"], "Mobile access on"),
+        )
+        yield SystemCommand(
+            "Mobile access off",
+            "Disable mobile app access",
+            lambda: self._run_command(["vehicle", "mobile-access", "--off"], "Mobile access off"),
+        )
+
+        # --- Sharing ---
+        yield SystemCommand(
+            "List driver invites",
+            "List all sharing invitations",
+            lambda: self._run_command(["sharing", "list-invites"], "List invites"),
         )
 
     # -- Security actions ------------------------------------------------------
@@ -1146,6 +1526,65 @@ class TelemetryTUI(App[None]):
 # ---------------------------------------------------------------------------
 # Value formatting (ported from dashboard.py)
 # ---------------------------------------------------------------------------
+
+
+def _relative_path(url: str, tunnel_url: str) -> str:
+    """Reduce a full URL to a relative port/path when a tunnel is active.
+
+    If the URL shares the same scheme+host as *tunnel_url*, show only the
+    path portion.  Otherwise fall back to ``:port/path`` for localhost URLs,
+    or the full URL as-is.
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if tunnel_url:
+        tunnel_parsed = urlparse(tunnel_url)
+        if parsed.hostname == tunnel_parsed.hostname:
+            return parsed.path or "/"
+    # Localhost — show :port/path.
+    if parsed.hostname in ("127.0.0.1", "localhost", "::1"):
+        return f":{parsed.port}{parsed.path}" if parsed.port else parsed.path or "/"
+    return url
+
+
+def _extract_error_message(stderr: str, stdout: str, exc_msg: str = "") -> str:
+    """Extract a human-readable error from CLI output.
+
+    When the TUI runs commands via CliRunner, exceptions are caught by Click
+    and stored in ``result.exception`` rather than being formatted by
+    ``main()``'s error handler.  The *exc_msg* parameter (from
+    ``str(result.exception)``) is the most reliable error source.
+
+    Falls back to parsing JSON error envelopes from stderr, then the last
+    non-httpx line, then raw stderr/stdout.
+    """
+    import json
+
+    # Best source: the exception message from Click's runner.
+    if exc_msg:
+        return exc_msg[:120]
+
+    # Try each line of stderr for a JSON error envelope.
+    for line in stderr.splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                data = json.loads(line)
+                err = data.get("error", {})
+                msg = err.get("message", "") if isinstance(err, dict) else str(err)
+                if msg:
+                    return msg[:120]
+            except json.JSONDecodeError:
+                continue
+
+    # Fall back: last non-empty line of stderr, filtering out httpx INFO lines.
+    for line in reversed(stderr.splitlines()):
+        line = line.strip()
+        if line and "HTTP Request:" not in line and "HTTP/1.1" not in line:
+            return line[:120]
+
+    return (stderr or stdout)[:80]
 
 
 def _format_value(

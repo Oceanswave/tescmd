@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import random
+from typing import Any
 
 import click
 
@@ -384,10 +385,13 @@ async def _cmd_serve(
                         "[yellow]Dry-run mode — events will be logged as JSONL to stderr.[/yellow]"
                     )
 
-    # -- Tailscale Funnel setup (optional) --
+    # -- Tailscale Funnel setup (optional, MCP-only mode) --
     public_url: str | None = None
     ts = None
-    if tailscale:
+    if tailscale and no_telemetry and not no_mcp:
+        # MCP-only with --tailscale: funnel directly to MCP port.
+        # When telemetry is active the funnel is managed by
+        # telemetry_session (pointing to the combined app port).
         from tescmd.telemetry.tailscale import TailscaleManager
 
         ts = TailscaleManager()
@@ -400,6 +404,19 @@ async def _cmd_serve(
             formatter.rich.info(f"Tailscale Funnel active: {funnel_url}/mcp")
         else:
             print(f'{{"url": "{funnel_url}/mcp"}}', file=sys.stderr)
+
+    # -- Combined mode: pre-determine tunnel hostname for MCP public_url --
+    # When both MCP and telemetry are active, telemetry_session will start
+    # a Tailscale Funnel.  We need the hostname NOW so the MCP app's auth
+    # settings (issuer_url) are correct before the app is built.
+    if not no_telemetry and not no_mcp and public_url is None:
+        from tescmd.telemetry.tailscale import TailscaleManager
+
+        _ts_pre = TailscaleManager()
+        await _ts_pre.check_available()
+        await _ts_pre.check_running()
+        _pre_hostname = await _ts_pre.get_hostname()
+        public_url = f"https://{_pre_hostname}"
 
     # -- Populate TUI with server info --
     if tui is not None:
@@ -423,63 +440,93 @@ async def _cmd_serve(
     if (not no_mcp or not no_telemetry) and formatter.format != "json" and tui is None:
         formatter.rich.info("Press Ctrl+C to stop.")
 
+    combined_task: asyncio.Task[None] | None = None
+    _uvi_server: Any = None  # uvicorn.Server — for graceful shutdown
     try:
         if fanout.has_sinks() and vin is not None and field_config is not None:
             from tescmd.telemetry.setup import telemetry_session
 
             assert telemetry_port is not None
-            async with telemetry_session(
-                app_ctx,
-                vin,
-                telemetry_port,
-                field_config,
-                fanout.on_frame,
-                interactive=interactive,
-            ) as session:
-                if tui is not None:
-                    tui.set_tunnel_url(session.tunnel_url)
 
-                if formatter.format != "json" and tui is None:
-                    formatter.rich.info("Telemetry pipeline active.")
+            # When MCP is co-located, build a combined Starlette app
+            # that serves MCP (HTTP/auth) and telemetry (WebSocket) on
+            # the same port so a single Tailscale Funnel covers both.
+            combined_app = None
+            serve_port = telemetry_port
+            if mcp_server is not None:
+                from pathlib import Path
 
-                if tui is not None:
-                    # Run TUI as the main display + MCP concurrently.
-                    if no_mcp:
+                import uvicorn
+
+                from tescmd.crypto.keys import load_public_key_pem
+                from tescmd.models.config import AppSettings
+
+                _app_settings = AppSettings()
+                _key_dir = Path(_app_settings.config_dir).expanduser() / "keys"
+                _pub_pem = load_public_key_pem(_key_dir)
+
+                combined_app = _build_combined_app(
+                    mcp_server, mcp_port, public_url, fanout.on_frame, _pub_pem
+                )
+                serve_port = mcp_port
+
+                # Start the combined app BEFORE telemetry_session so that
+                # Tesla's domain-verification HEAD requests (during partner
+                # registration inside the session) hit a running server.
+                # Keep a handle on the uvicorn.Server so we can signal a
+                # graceful shutdown (should_exit) instead of cancelling.
+                _uvi_cfg = uvicorn.Config(
+                    combined_app, host="127.0.0.1", port=mcp_port, log_level="warning"
+                )
+                _uvi_server = uvicorn.Server(_uvi_cfg)
+                combined_task = asyncio.create_task(_uvi_server.serve())
+                # Give uvicorn a moment to bind the port.
+                await asyncio.sleep(0.5)
+
+            try:
+                async with telemetry_session(
+                    app_ctx,
+                    vin,
+                    serve_port,
+                    field_config,
+                    fanout.on_frame,
+                    interactive=interactive,
+                    skip_server=(combined_task is not None),
+                ) as session:
+                    if tui is not None:
+                        tui.set_tunnel_url(session.tunnel_url)
+
+                    if formatter.format != "json" and tui is None:
+                        formatter.rich.info("Telemetry pipeline active.")
+
+                    if tui is not None:
                         await tui.run_async()
-                    else:
-                        assert mcp_server is not None
-                        tui_task = asyncio.create_task(tui.run_async())
-                        mcp_task = asyncio.create_task(
-                            mcp_server.run_http(port=mcp_port, public_url=public_url)
-                        )
-                        # Wait for TUI shutdown signal (user pressed q).
-                        await tui.shutdown_event.wait()
-                        # Cancel both tasks to trigger cleanup.
-                        for task in (tui_task, mcp_task):
-                            if not task.done():
-                                task.cancel()
-                                with contextlib.suppress(asyncio.CancelledError):
-                                    await task
-                elif dashboard is not None:
-                    from rich.live import Live
+                    elif dashboard is not None:
+                        from rich.live import Live
 
-                    dashboard.set_tunnel_url(session.tunnel_url)
-                    with Live(
-                        dashboard,
-                        console=formatter.console,
-                        refresh_per_second=4,
-                    ) as live:
-                        dashboard.set_live(live)
-                        if no_mcp:
+                        dashboard.set_tunnel_url(session.tunnel_url)
+                        with Live(
+                            dashboard,
+                            console=formatter.console,
+                            refresh_per_second=4,
+                        ) as live:
+                            dashboard.set_live(live)
                             await _wait_for_interrupt()
-                        else:
-                            assert mcp_server is not None
-                            await mcp_server.run_http(port=mcp_port, public_url=public_url)
-                elif no_mcp:
-                    await _wait_for_interrupt()
-                else:
-                    assert mcp_server is not None
-                    await mcp_server.run_http(port=mcp_port, public_url=public_url)
+                    elif combined_task is not None:
+                        # Block until Ctrl+C; combined app runs as a
+                        # background task and is cancelled on exit.
+                        await _wait_for_interrupt()
+                    else:
+                        await _wait_for_interrupt()
+            finally:
+                # Signal uvicorn to shut down gracefully rather than
+                # cancelling (which causes a CancelledError traceback
+                # inside Starlette's lifespan handler).
+                if _uvi_server is not None:
+                    _uvi_server.should_exit = True
+                if combined_task is not None and not combined_task.done():
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await combined_task
         elif mcp_server is not None:
             await mcp_server.run_http(port=mcp_port, public_url=public_url)
     finally:
@@ -504,6 +551,9 @@ async def _cmd_serve(
             cmd_log = getattr(tui, "_cmd_log_path", "")
             if cmd_log and formatter.format != "json":
                 formatter.rich.info(f"[dim]Command log: {cmd_log}[/dim]")
+            activity_log = getattr(tui, "_activity_log_path", "")
+            if activity_log and formatter.format != "json":
+                formatter.rich.info(f"[dim]Activity log: {activity_log}[/dim]")
         if cache_sink is not None:
             cache_sink.flush()
             if formatter.format != "json":
@@ -511,6 +561,125 @@ async def _cmd_serve(
                     f"[dim]Cache sink: {cache_sink.frame_count} frames, "
                     f"{cache_sink.field_count} field updates[/dim]"
                 )
+
+
+class _LoggingASGI:
+    """Thin ASGI wrapper that logs every HTTP and WebSocket request."""
+
+    def __init__(self, app: Any) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] == "http":
+            method = scope.get("method", "?")
+            path = scope.get("path", "/")
+            status: int | None = None
+
+            async def _logging_send(message: Any) -> None:
+                nonlocal status
+                if message.get("type") == "http.response.start":
+                    status = message.get("status")
+                await send(message)
+
+            logger.info("HTTP %s %s", method, path)
+            await self._app(scope, receive, _logging_send)
+            if status is not None:
+                logger.info("HTTP %s %s → %d", method, path, status)
+        elif scope["type"] == "websocket":
+            logger.info("WS  %s", scope.get("path", "/"))
+            await self._app(scope, receive, send)
+        else:
+            # lifespan, etc.
+            await self._app(scope, receive, send)
+
+
+def _build_combined_app(
+    mcp_server: object,
+    mcp_port: int,
+    public_url: str | None,
+    on_frame: object,
+    public_key_pem: str | None = None,
+) -> Any:
+    """Build an ASGI app combining MCP (HTTP/auth) and telemetry (WebSocket).
+
+    Uses a raw ASGI dispatcher instead of Starlette ``Mount`` so the MCP
+    app receives requests with an **unmodified scope**.  ``Mount`` rewrites
+    ``scope["path"]`` and ``scope["root_path"]``, which breaks the MCP
+    SDK's internal middleware (transport-security validation, session
+    manager lookup, SSE streaming).
+
+    Dispatch order:
+
+    1. ``lifespan`` → forwarded to the MCP app (initialises the session
+       manager's task group).
+    2. ``websocket`` at ``/`` → Tesla Fleet Telemetry binary frames.
+    3. ``http GET/HEAD /.well-known/…/public-key.pem`` → EC public key.
+    4. ``http HEAD *`` → fast 200 (Tesla domain validation).
+    5. Everything else → MCP app (``/authorize``, ``/token``, ``/mcp``, …).
+    """
+    from starlette.responses import Response
+    from starlette.websockets import WebSocket, WebSocketDisconnect
+
+    from tescmd.mcp.server import MCPServer
+    from tescmd.telemetry.decoder import TelemetryDecoder
+
+    assert isinstance(mcp_server, MCPServer)
+    mcp_app = mcp_server.create_http_app(port=mcp_port, public_url=public_url)
+    decoder = TelemetryDecoder()
+    _well_known = "/.well-known/appspecific/com.tesla.3p.public-key.pem"
+
+    async def _app(scope: Any, receive: Any, send: Any) -> None:
+        # 1. Lifespan — forwarded so the MCP session manager starts.
+        if scope["type"] == "lifespan":
+            await mcp_app(scope, receive, send)
+            return
+
+        # 2. Tesla telemetry WebSocket at root path.
+        if scope["type"] == "websocket" and scope.get("path", "/") == "/":
+            websocket = WebSocket(scope, receive, send)
+            await websocket.accept()
+            try:
+                while True:
+                    data = await websocket.receive_bytes()
+                    frame = decoder.decode(data)
+                    await on_frame(frame)  # type: ignore[operator]
+            except WebSocketDisconnect:
+                pass
+            except Exception:
+                logger.debug("WS closed", exc_info=True)
+            return
+
+        if scope["type"] == "http":
+            method = scope.get("method", "")
+            path = scope.get("path", "/")
+
+            # 3. Tesla public-key endpoint.
+            if path == _well_known and method in ("GET", "HEAD"):
+                if public_key_pem:
+                    resp = Response(content=public_key_pem, media_type="application/x-pem-file")
+                else:
+                    resp = Response(status_code=404)
+                await resp(scope, receive, send)
+                return
+
+            # 4. Fast 200 for HEAD — Tesla domain validation.
+            if method == "HEAD":
+                await Response(status_code=200)(scope, receive, send)
+                return
+
+        # 5. Everything else → MCP app (scope passed through unmodified).
+        await mcp_app(scope, receive, send)
+
+    return _LoggingASGI(_app)
+
+
+async def _run_combined_app(app: Any, port: int) -> None:
+    """Run a Starlette ASGI app with uvicorn."""
+    import uvicorn
+
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
+    server = uvicorn.Server(config)
+    await server.serve()
 
 
 async def _wait_for_interrupt() -> None:

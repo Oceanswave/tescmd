@@ -163,6 +163,7 @@ class MCPServer:
         Returns the parsed JSON output or an error dict.
         """
         if name not in self._tools:
+            logger.info("Unknown tool: %s", name)
             return {"error": f"Unknown tool: {name}"}
 
         args_template, _desc, _is_write = self._tools[name]
@@ -180,6 +181,8 @@ class MCPServer:
         if extra_args:
             cli_args.extend(extra_args)
 
+        logger.info("Invoke: %s", name)
+
         import os
 
         from click.testing import CliRunner
@@ -191,7 +194,12 @@ class MCPServer:
 
         output = result.output.strip()
         if result.exit_code != 0:
-            error_output = result.stderr.strip() if result.stderr else output
+            logger.info("Tool %s failed (exit=%d)", name, result.exit_code)
+            # CliRunner catches exceptions in result.exception rather than
+            # routing them through main()'s error handler.  Prefer the
+            # exception message over stderr (which may only contain httpx logs).
+            exc_msg = str(result.exception) if result.exception else ""
+            error_output = exc_msg or (result.stderr.strip() if result.stderr else output)
             return {
                 "error": error_output or f"Command failed with exit code {result.exit_code}",
                 "exit_code": result.exit_code,
@@ -214,8 +222,13 @@ class MCPServer:
 
         await mcp.run_stdio_async()
 
-    async def run_http(self, *, port: int = 8080, public_url: str | None = None) -> None:
-        """Run the MCP server on streamable-http transport."""
+    def create_http_app(self, *, port: int = 8080, public_url: str | None = None) -> Any:
+        """Build and return the MCP Starlette app (without starting uvicorn).
+
+        Returns the ``Starlette`` ASGI application with auth routes and
+        MCP tools registered.  Callers can mount additional routes (e.g.
+        a telemetry WebSocket handler) alongside it before running uvicorn.
+        """
         from urllib.parse import urlparse
 
         from mcp.server.auth.settings import (
@@ -271,7 +284,16 @@ class MCPServer:
         for name, (_args, desc, _is_write) in self._tools.items():
             self._register_fastmcp_tool(mcp, name, desc)
 
-        await mcp.run_streamable_http_async()
+        return mcp.streamable_http_app()
+
+    async def run_http(self, *, port: int = 8080, public_url: str | None = None) -> None:
+        """Run the MCP server on streamable-http transport."""
+        import uvicorn
+
+        app = self.create_http_app(port=port, public_url=public_url)
+        config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
+        server = uvicorn.Server(config)
+        await server.serve()
 
     def _register_fastmcp_tool(
         self,

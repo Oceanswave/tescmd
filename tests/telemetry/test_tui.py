@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import patch
 
 import pytest
-from textual.widgets import DataTable, Static
+from textual.containers import Horizontal
+from textual.widgets import DataTable, RichLog, Static
 
 from tescmd.telemetry.decoder import TelemetryDatum, TelemetryFrame
 from tescmd.telemetry.tui import (
     PANEL_FIELDS,
+    ActivityLogHandler,
     HelpScreen,
     TelemetryTUI,
     _format_value,
@@ -535,3 +539,62 @@ class TestHeaderSubtitle:
             assert "Up:" in sub
             # Should have HH:MM:SS format.
             assert "00:" in sub
+
+
+# ---------------------------------------------------------------------------
+# Activity sidebar
+# ---------------------------------------------------------------------------
+
+
+class TestActivitySidebar:
+    @pytest.mark.asyncio
+    async def test_activity_log_widget_exists(self) -> None:
+        """The activity-log RichLog widget should be present."""
+        app = TelemetryTUI(vin=VIN)
+        async with app.run_test():
+            widget = app.query_one("#activity-log", RichLog)
+            assert widget is not None
+
+    @pytest.mark.asyncio
+    async def test_main_area_container_exists(self) -> None:
+        """The main-area Horizontal container should wrap the grid and sidebar."""
+        app = TelemetryTUI(vin=VIN)
+        async with app.run_test():
+            container = app.query_one("#main-area", Horizontal)
+            assert container is not None
+
+    def test_activity_handler_enqueues(self) -> None:
+        """ActivityLogHandler.emit() should put messages into the queue."""
+        queue: asyncio.Queue[tuple[str, str, str]] = asyncio.Queue(maxsize=10)
+        handler = ActivityLogHandler(queue)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+
+        record = logging.LogRecord(
+            name="tescmd.mcp.server",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="Invoke: vehicle_list",
+            args=(),
+            exc_info=None,
+        )
+        handler.emit(record)
+
+        assert queue.qsize() == 1
+        source, color, message = queue.get_nowait()
+        assert source == "MCP"
+        assert color == "magenta"
+        assert "vehicle_list" in message
+
+    @pytest.mark.asyncio
+    async def test_no_frame_summary_when_no_new_frames(self) -> None:
+        """_maybe_log_frame_summary should be a no-op if no new frames arrived."""
+        app = TelemetryTUI(vin=VIN)
+        async with app.run_test():
+            # Force tick counter to a multiple of 5 so the summary check runs.
+            app._ui_tick = 4
+            app._frame_count = 0
+            app._last_frame_summary_count = 0
+            app._maybe_log_frame_summary()
+            # No message should have been enqueued.
+            assert app._activity_queue.empty()
