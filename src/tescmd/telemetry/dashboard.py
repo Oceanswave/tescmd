@@ -54,6 +54,10 @@ class TelemetryDashboard:
         """Set the tunnel URL for display."""
         self._tunnel_url = url
 
+    def __rich__(self) -> RenderableType:
+        """Allow Rich Live to call render() on every refresh tick."""
+        return self.render()
+
     def render(self) -> RenderableType:
         """Build the full dashboard renderable."""
         from rich.console import Group

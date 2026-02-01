@@ -1141,9 +1141,9 @@ async def _cmd_telemetry_stream(
 
             dashboard.set_tunnel_url(tunnel_url)
             with Live(
-                dashboard.render(),
+                dashboard,
                 console=formatter.console,
-                refresh_per_second=2,
+                refresh_per_second=4,
             ) as live:
                 dashboard.set_live(live)
                 await _wait_for_interrupt()
@@ -1151,15 +1151,30 @@ async def _cmd_telemetry_stream(
             await _wait_for_interrupt()
 
     finally:
-        # Cleanup in reverse order — each tolerates failure
+        # Cleanup in reverse order — each tolerates failure.
+        # Show progress so the user knows what's happening on 'q'/Ctrl+C.
+        is_rich = formatter.format != "json"
+
         if config_created:
-            with contextlib.suppress(Exception):
+            if is_rich:
+                formatter.rich.info("[dim]Removing fleet telemetry config...[/dim]")
+            try:
                 await api.fleet_telemetry_config_delete(vin)
+            except Exception:
+                if is_rich:
+                    formatter.rich.info(
+                        "[yellow]Warning: failed to remove telemetry config."
+                        " It may expire or can be removed manually.[/yellow]"
+                    )
+
         if original_partner_domain is not None:
+            if is_rich:
+                formatter.rich.info(
+                    f"[dim]Restoring partner domain to {original_partner_domain}...[/dim]"
+                )
             try:
                 from tescmd.auth.oauth import register_partner_account
 
-                # Credentials were validated before re-registration succeeded
                 assert _settings.client_id is not None
                 assert _settings.client_secret is not None
                 await register_partner_account(
@@ -1168,18 +1183,28 @@ async def _cmd_telemetry_stream(
                     domain=original_partner_domain,
                     region=app_ctx.region or _settings.region,
                 )
-                logger.info("Restored partner domain to %s", original_partner_domain)
             except Exception:
-                logger.warning(
-                    "Failed to restore partner domain to %s. "
-                    "Run 'tescmd auth register' to fix this manually.",
-                    original_partner_domain,
+                msg = (
+                    f"Failed to restore partner domain to {original_partner_domain}. "
+                    "Run 'tescmd auth register' to fix this manually."
                 )
+                logger.warning(msg)
+                if is_rich:
+                    formatter.rich.info(f"[yellow]Warning: {msg}[/yellow]")
+
+        if is_rich:
+            formatter.rich.info("[dim]Stopping tunnel...[/dim]")
         with contextlib.suppress(Exception):
             await stop_tunnel()
+
+        if is_rich:
+            formatter.rich.info("[dim]Stopping server...[/dim]")
         with contextlib.suppress(Exception):
             await server.stop()
+
         await client.close()
+        if is_rich:
+            formatter.rich.info("[green]Stream stopped.[/green]")
 
 
 async def _wait_for_interrupt() -> None:
