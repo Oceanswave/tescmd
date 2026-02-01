@@ -83,7 +83,10 @@ plugins = ["pydantic.mypy"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-n auto"
+addopts = "-n auto -m 'not e2e'"
+markers = [
+    "e2e: End-to-end smoke tests against the live Tesla Fleet API (requires TESLA_ACCESS_TOKEN)",
+]
 
 [[tool.mypy.overrides]]
 module = "tescmd.protocol.protobuf.*"

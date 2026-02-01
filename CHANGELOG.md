@@ -65,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`command_protocol` setting** — `auto` (default), `signed`, or `unsigned` to control command routing; configurable via `TESLA_COMMAND_PROTOCOL` env var
 - **Enrollment step in setup wizard** — full-tier setup now offers to enroll the key on a vehicle after key generation
 - **Friendly command output** — all vehicle commands now display descriptive success messages (e.g. "Climate control turned on.", "Doors locked.") instead of bare "OK"
-- **E2E test script** — `scripts/e2e_test.py` provides interactive end-to-end command testing against a live vehicle with per-command confirmation, category filtering, and destructive-command skipping
+- **E2E smoke tests** — `tests/cli/test_e2e_smoke.py` provides 179 pytest-based end-to-end tests covering every CLI command against the live Fleet API, with JSON envelope validation and save/restore for write commands (`pytest -m e2e`)
 
 ## [0.1.0]
 
