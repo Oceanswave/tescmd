@@ -60,7 +60,6 @@ __all__ = [
     "CommandResult",
     "DestChargerInfo",
     "DriveState",
-
     "FeatureConfig",
     "GridImportExportConfig",
     "GuiSettings",
