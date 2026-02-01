@@ -373,3 +373,41 @@ Tesla's Fleet API has rate limits. tescmd:
   }
 }
 ```
+
+## Telemetry Streaming for Bots
+
+For bots that need continuous vehicle data, `tescmd vehicle telemetry stream` offers a push-based alternative to polling. When piped or run with `--format json`, it emits one JSON line per telemetry frame:
+
+```bash
+# Stream telemetry as JSONL (one JSON object per line)
+tescmd vehicle telemetry stream --format json
+
+# Stream specific field presets
+tescmd vehicle telemetry stream --fields driving --format json   # speed, location, power
+tescmd vehicle telemetry stream --fields charging --format json  # battery, voltage, current
+tescmd vehicle telemetry stream --fields climate --format json   # temps, HVAC state
+tescmd vehicle telemetry stream --fields all --format json       # all 120+ fields
+
+# Override polling interval
+tescmd vehicle telemetry stream --interval 5 --format json       # every 5 seconds
+```
+
+### Processing Telemetry in a Bot
+
+```bash
+# Log telemetry to a file
+tescmd vehicle telemetry stream --format json >> /var/log/tesla/telemetry.jsonl
+
+# Process in real-time with jq
+tescmd vehicle telemetry stream --format json | while read -r line; do
+  field=$(echo "$line" | jq -r '.field')
+  value=$(echo "$line" | jq -r '.value')
+  echo "[$field] $value"
+done
+```
+
+### Cost Advantage
+
+Telemetry streaming costs only 2 API requests (create config + delete config) regardless of how long the stream runs or how much data flows. Compared to polling `vehicle_data` every 5 seconds (~17,280 requests/day), streaming reduces API costs by over 99%.
+
+**Requirements:** `pip install tescmd[telemetry]` and Tailscale with Funnel enabled on the host machine.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -185,5 +186,11 @@ class TeslaFleetClient:
                 status_code=response.status_code,
             )
 
-        result: dict[str, Any] = response.json()
+        try:
+            result: dict[str, Any] = response.json()
+        except json.JSONDecodeError as exc:
+            raise TeslaAPIError(
+                f"Invalid JSON response: {response.text[:200]}",
+                status_code=response.status_code,
+            ) from exc
         return result

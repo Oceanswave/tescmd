@@ -23,7 +23,7 @@ tescmd is designed to work as a tool that AI agents can invoke directly. Platfor
 - **Tier enforcement** — readonly tier blocks write commands with clear guidance to upgrade
 - **Energy products** — Powerwall live status, site info, backup reserve, operation mode, storm mode, time-of-use settings, charging history, calendar history, grid import/export
 - **User & sharing** — account info, region, orders, feature flags, driver management, vehicle sharing invites
-- **Fleet Telemetry awareness** — setup wizard highlights Fleet Telemetry streaming for up to 97% API cost reduction
+- **Fleet Telemetry streaming** — `tescmd vehicle telemetry stream` starts a real-time dashboard with push-based data from your vehicle via Tailscale Funnel — no polling, 99%+ cost reduction
 - **Universal response caching** — all read commands are cached with tiered TTLs (1h for specs/warranty, 5m for fleet lists, 1m standard, 30s for location-dependent); bots can call tescmd as often as needed — within the TTL window, responses are instant and free
 - **Cost-aware wake** — prompts before sending billable wake API calls; `--wake` flag for scripts that accept the cost
 - **Guided OAuth2 setup** — `tescmd auth login` walks you through browser-based authentication with PKCE
@@ -428,10 +428,13 @@ See [docs/development.md](docs/development.md) for detailed contribution guideli
 
 - [Setup Guide](docs/setup.md) — step-by-step walkthrough of `tescmd setup`
 - [FAQ](docs/faq.md) — common questions about tescmd, costs, hosting, and configuration
+- [Command Reference](docs/commands.md) — detailed usage for every command
 - [API Costs](docs/api-costs.md) — detailed cost breakdown and savings calculations
-- [Bot Integration](docs/bot-integration.md) — JSON schema, exit codes, headless auth for agents
+- [Bot Integration](docs/bot-integration.md) — JSON schema, exit codes, telemetry streaming, headless auth
+- [Architecture](docs/architecture.md) — layered design, module responsibilities, design decisions
 - [Vehicle Command Protocol](docs/vehicle-command-protocol.md) — ECDH sessions and signed commands
-- [Development](docs/development.md) — contribution guidelines
+- [Authentication](docs/authentication.md) — OAuth2 PKCE flow, token storage, scopes
+- [Development](docs/development.md) — contribution guidelines, testing, linting
 
 ## Changelog
 

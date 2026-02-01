@@ -72,7 +72,12 @@ class Session:
         return time.monotonic() - self.created_at > self.ttl
 
     def next_counter(self) -> int:
-        """Return and increment the anti-replay counter."""
+        """Return and increment the anti-replay counter.
+
+        This is safe because all callers run on the same asyncio event
+        loop and ``next_counter`` is synchronous — no ``await`` between
+        the read and the increment means no interleaving is possible.
+        """
         self.counter += 1
         return self.counter
 
@@ -105,8 +110,10 @@ class SessionManager:
         """Return a valid session, performing a handshake if needed."""
         key = (vin, domain)
         session = self._sessions.get(key)
-        if session is not None and not session.is_expired:
-            return session
+        if session is not None:
+            if not session.is_expired:
+                return session
+            del self._sessions[key]
 
         session = await self._handshake(vin, domain)
         self._sessions[key] = session

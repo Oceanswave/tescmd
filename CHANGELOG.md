@@ -5,12 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - Unreleased
+## [0.2.0] - 2026-01-31
 
 ### Added
 
 - **Fleet Telemetry Streaming** — `tescmd vehicle telemetry stream [VIN]` starts a local WebSocket server, exposes it via Tailscale Funnel, configures the vehicle to push real-time telemetry, and displays it in an interactive Rich Live dashboard (TTY) or JSONL stream (piped)
 - **Telemetry dashboard** — Rich Live TUI with field name, value, and last-update columns; unit conversion (°F/°C, mi/km, psi/bar); connection status; frame counter; uptime display
+- **Protobuf telemetry decoder** — official Tesla protobuf definitions (`vehicle_data`, `vehicle_alert`, `vehicle_error`, `vehicle_metric`, `vehicle_connectivity`) for fully typed telemetry message parsing
+- **FlatBuffer telemetry support** — `flatbuf.py` parser for Tesla's FlatBuffer-encoded telemetry payloads alongside protobuf
 - **Field presets** — `--fields` option accepts preset names (`default`, `driving`, `charging`, `climate`, `all`) or comma-separated field names with 120+ registered telemetry fields
 - **Interval override** — `--interval` option overrides the polling interval for all fields
 - **Tailscale Funnel integration** — automatic Funnel start/stop with cert retrieval for Fleet Telemetry HTTPS requirement
@@ -20,9 +22,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tailscale key hosting** — `tescmd key deploy --method tailscale` hosts the public key via Tailscale Funnel at `https://<machine>.tailnet.ts.net/.well-known/appspecific/com.tesla.3p.public-key.pem`; auto-detected as second priority after GitHub Pages
 - **Key hosting priority chain** — setup wizard and `key deploy` auto-detect the best hosting method: GitHub Pages → Tailscale Funnel → manual; `--method` flag overrides auto-detection
 - **`TESLA_HOSTING_METHOD` setting** — persists the chosen key hosting method (`github`, `tailscale`) across sessions
+- **Schnorr signature support** — `crypto/schnorr.py` for Schnorr-based authentication challenges used in telemetry server handshake
+- **`auth import` command** — `tescmd auth import < tokens.json` imports tokens from a JSON file for headless/CI environments
 - **Setup guide** — `docs/setup.md` with step-by-step walkthrough of all 7 setup phases
 - **FAQ** — `docs/faq.md` covering common questions about tescmd, costs, hosting, and configuration
 - **CI/CD workflows** — GitHub Actions for test-on-push (Python 3.11–3.13) and publish-to-PyPI-on-release via trusted publishing
+- **README badges** — PyPI version, Python versions, CI build status, license, and GitHub release badges
+- **E2E smoke tests** — `tests/cli/test_e2e_smoke.py` provides 179 pytest-based end-to-end tests covering every CLI command against the live Fleet API, with JSON envelope validation and save/restore for write commands (`pytest -m e2e`)
+
+### Fixed
+
+- Fixed telemetry dashboard uptime counter not incrementing
+- Improved tunnel start/stop success messages for clarity
 
 ## [0.1.2] - 2025-01-31
 

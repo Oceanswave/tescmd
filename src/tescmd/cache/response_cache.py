@@ -196,10 +196,11 @@ class ResponseCache:
 
     def _write_entry(self, path: Path, data: dict[str, Any], ttl: int) -> None:
         self._cache_dir.mkdir(parents=True, exist_ok=True)
+        now = time.time()
         entry = {
             "data": data,
-            "created_at": time.time(),
-            "expires_at": time.time() + ttl,
+            "created_at": now,
+            "expires_at": now + ttl,
         }
         path.write_text(json.dumps(entry), encoding="utf-8")
 
