@@ -142,9 +142,9 @@ class TestTelemetryMapper:
         results = mapper.map("Odometer", 12345.6)
         assert results == [("vehicle_state.odometer", 12345.6)]
 
-    def test_map_software_version(self) -> None:
+    def test_map_version(self) -> None:
         mapper = TelemetryMapper()
-        results = mapper.map("SoftwareVersion", "2024.26.3.1")
+        results = mapper.map("Version", "2024.26.3.1")
         assert results == [("vehicle_state.car_version", "2024.26.3.1")]
 
     def test_mapped_fields_property(self) -> None:

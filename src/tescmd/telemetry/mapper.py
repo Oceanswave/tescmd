@@ -1,10 +1,12 @@
-"""Shared telemetry field → VehicleData path mapping.
+"""Shared telemetry field -> VehicleData path mapping.
 
-Translates Fleet Telemetry field names (e.g. ``"Soc"``, ``"Location"``)
+Translates Fleet Telemetry proto field names (e.g. ``"Soc"``, ``"Location"``)
 into structured VehicleData paths (e.g. ``"charge_state.usable_battery_level"``).
 Used by :class:`~tescmd.telemetry.cache_sink.CacheSink` for cache warming
 and available for any consumer that needs to map telemetry into the
 VehicleData JSON structure.
+
+Keys match the ``vehicle_data.proto`` Field enum names exactly.
 """
 
 from __future__ import annotations
@@ -91,7 +93,9 @@ class FieldMapping:
 
 
 # ---------------------------------------------------------------------------
-# Master field map: telemetry field name → list of VehicleData path mappings
+# Master field map: proto field name -> list of VehicleData path mappings
+#
+# Keys are vehicle_data.proto Field enum names.
 # ---------------------------------------------------------------------------
 
 TELEMETRY_FIELD_MAP: dict[str, list[FieldMapping]] = {
@@ -102,21 +106,24 @@ TELEMETRY_FIELD_MAP: dict[str, list[FieldMapping]] = {
     "DetailedChargeState": [FieldMapping("charge_state.charge_port_latch", _to_str)],
     "EstBatteryRange": [FieldMapping("charge_state.est_battery_range", _to_float)],
     "IdealBatteryRange": [FieldMapping("charge_state.ideal_battery_range", _to_float)],
-    "RatedBatteryRange": [FieldMapping("charge_state.battery_range", _to_float)],
+    "RatedRange": [FieldMapping("charge_state.battery_range", _to_float)],
     "ChargerVoltage": [FieldMapping("charge_state.charger_voltage", _to_int)],
-    "ChargerActualCurrent": [FieldMapping("charge_state.charger_actual_current", _to_int)],
-    "ChargerPilotCurrent": [FieldMapping("charge_state.charger_pilot_current", _to_int)],
+    "ChargeAmps": [FieldMapping("charge_state.charge_amps", _to_int)],
     "ChargerPhases": [FieldMapping("charge_state.charger_phases", _to_int)],
     "ChargeLimitSoc": [FieldMapping("charge_state.charge_limit_soc", _to_int)],
     "ChargeCurrentRequest": [FieldMapping("charge_state.charge_current_request", _to_int)],
-    "ChargeCurrentRequestMax": [FieldMapping("charge_state.charge_current_request_max", _to_int)],
+    "ChargeCurrentRequestMax": [
+        FieldMapping("charge_state.charge_current_request_max", _to_int),
+    ],
     "ChargePortDoorOpen": [FieldMapping("charge_state.charge_port_door_open", _to_bool)],
     "ChargePortLatch": [FieldMapping("charge_state.charge_port_latch", _to_str)],
     "TimeToFullCharge": [FieldMapping("charge_state.time_to_full_charge", _to_float)],
     "ACChargingPower": [FieldMapping("charge_state.charger_power", _to_float)],
     "ACChargingEnergyIn": [FieldMapping("charge_state.charge_energy_added", _to_float)],
     "FastChargerPresent": [FieldMapping("charge_state.fast_charger_present", _to_bool)],
-    "ScheduledChargingMode": [FieldMapping("charge_state.scheduled_charging_mode", _to_str)],
+    "ScheduledChargingMode": [
+        FieldMapping("charge_state.scheduled_charging_mode", _to_str),
+    ],
     "ScheduledChargingPending": [
         FieldMapping("charge_state.scheduled_charging_pending", _to_bool),
     ],
@@ -129,49 +136,57 @@ TELEMETRY_FIELD_MAP: dict[str, list[FieldMapping]] = {
     "EnergyRemaining": [FieldMapping("charge_state.energy_remaining", _to_float)],
     "PackVoltage": [FieldMapping("charge_state.pack_voltage", _to_float)],
     "PackCurrent": [FieldMapping("charge_state.pack_current", _to_float)],
-    "ChargeAmps": [FieldMapping("charge_state.charge_amps", _to_int)],
     "ChargingCableType": [FieldMapping("charge_state.conn_charge_cable", _to_str)],
     # -- climate_state --
     "InsideTemp": [FieldMapping("climate_state.inside_temp", _to_float)],
     "OutsideTemp": [FieldMapping("climate_state.outside_temp", _to_float)],
-    "DriverTempSetting": [FieldMapping("climate_state.driver_temp_setting", _to_float)],
-    "PassengerTempSetting": [FieldMapping("climate_state.passenger_temp_setting", _to_float)],
-    "IsClimateOn": [FieldMapping("climate_state.is_climate_on", _to_bool)],
-    "FanStatus": [FieldMapping("climate_state.fan_status", _to_int)],
+    "HvacLeftTemperatureRequest": [
+        FieldMapping("climate_state.driver_temp_setting", _to_float),
+    ],
+    "HvacRightTemperatureRequest": [
+        FieldMapping("climate_state.passenger_temp_setting", _to_float),
+    ],
+    "HvacPower": [FieldMapping("climate_state.is_climate_on", _to_bool)],
+    "HvacFanStatus": [FieldMapping("climate_state.fan_status", _to_int)],
     "SeatHeaterLeft": [FieldMapping("climate_state.seat_heater_left", _to_int)],
     "SeatHeaterRight": [FieldMapping("climate_state.seat_heater_right", _to_int)],
     "SeatHeaterRearLeft": [FieldMapping("climate_state.seat_heater_rear_left", _to_int)],
-    "SeatHeaterRearCenter": [FieldMapping("climate_state.seat_heater_rear_center", _to_int)],
+    "SeatHeaterRearCenter": [
+        FieldMapping("climate_state.seat_heater_rear_center", _to_int),
+    ],
     "SeatHeaterRearRight": [FieldMapping("climate_state.seat_heater_rear_right", _to_int)],
-    "SteeringWheelHeater": [FieldMapping("climate_state.steering_wheel_heater", _to_bool)],
+    "HvacSteeringWheelHeatLevel": [
+        FieldMapping("climate_state.steering_wheel_heater", _to_bool),
+    ],
     "DefrostMode": [FieldMapping("climate_state.defrost_mode", _to_int)],
-    "CabinOverheatProtection": [FieldMapping("climate_state.cabin_overheat_protection", _to_str)],
-    "PreconditioningEnabled": [FieldMapping("climate_state.is_preconditioning", _to_bool)],
+    "CabinOverheatProtectionMode": [
+        FieldMapping("climate_state.cabin_overheat_protection", _to_str),
+    ],
+    "PreconditioningEnabled": [
+        FieldMapping("climate_state.is_preconditioning", _to_bool),
+    ],
     # -- drive_state --
     "Location": [
         FieldMapping("drive_state.latitude", _extract_lat),
         FieldMapping("drive_state.longitude", _extract_lon),
     ],
     "VehicleSpeed": [FieldMapping("drive_state.speed", _to_int)],
-    "Heading": [FieldMapping("drive_state.heading", _to_int)],
+    "GpsHeading": [FieldMapping("drive_state.heading", _to_int)],
     "Gear": [FieldMapping("drive_state.shift_state", _gear_str)],
-    "Elevation": [FieldMapping("drive_state.elevation", _to_float)],
     # -- vehicle_state --
     "Locked": [FieldMapping("vehicle_state.locked", _to_bool)],
     "SentryMode": [FieldMapping("vehicle_state.sentry_mode", _to_bool)],
     "Odometer": [FieldMapping("vehicle_state.odometer", _to_float)],
-    "SoftwareVersion": [FieldMapping("vehicle_state.car_version", _to_str)],
-    "ValetMode": [FieldMapping("vehicle_state.valet_mode", _to_bool)],
-    "TrunkOpen": [FieldMapping("vehicle_state.rt", _to_int)],
-    "FrunkOpen": [FieldMapping("vehicle_state.ft", _to_int)],
+    "Version": [FieldMapping("vehicle_state.car_version", _to_str)],
+    "ValetModeEnabled": [FieldMapping("vehicle_state.valet_mode", _to_bool)],
     "TpmsPressureFl": [FieldMapping("vehicle_state.tpms_pressure_fl", _to_float)],
     "TpmsPressureFr": [FieldMapping("vehicle_state.tpms_pressure_fr", _to_float)],
     "TpmsPressureRl": [FieldMapping("vehicle_state.tpms_pressure_rl", _to_float)],
     "TpmsPressureRr": [FieldMapping("vehicle_state.tpms_pressure_rr", _to_float)],
     "CenterDisplay": [FieldMapping("vehicle_state.center_display_state", _to_int)],
-    "HomeLink": [FieldMapping("vehicle_state.homelink_nearby", _to_bool)],
-    "UserPresent": [FieldMapping("vehicle_state.is_user_present", _to_bool)],
-    "RemoteStart": [FieldMapping("vehicle_state.remote_start", _to_bool)],
+    "HomelinkNearby": [FieldMapping("vehicle_state.homelink_nearby", _to_bool)],
+    "DriverSeatOccupied": [FieldMapping("vehicle_state.is_user_present", _to_bool)],
+    "RemoteStartEnabled": [FieldMapping("vehicle_state.remote_start", _to_bool)],
 }
 
 
@@ -208,7 +223,7 @@ class TelemetryMapper:
                 transformed = mapping.transform(value)
             except Exception:
                 logger.debug(
-                    "Transform failed for %s → %s",
+                    "Transform failed for %s -> %s",
                     field_name,
                     mapping.path,
                     exc_info=True,

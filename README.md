@@ -25,9 +25,10 @@ tescmd is designed to work as a tool that AI agents can invoke directly. Platfor
 - **Tier enforcement** — readonly tier blocks write commands with clear guidance to upgrade
 - **Energy products** — Powerwall live status, site info, backup reserve, operation mode, storm mode, time-of-use settings, charging history, calendar history, grid import/export
 - **User & sharing** — account info, region, orders, feature flags, driver management, vehicle sharing invites
-- **Fleet Telemetry streaming** — `tescmd vehicle telemetry stream` starts a real-time dashboard with push-based data from your vehicle via Tailscale Funnel — no polling, 99%+ cost reduction
-- **OpenClaw Bridge** — `tescmd openclaw bridge` streams filtered telemetry to an OpenClaw Gateway with configurable delta+throttle filtering per field
-- **MCP Server** — `tescmd mcp serve` exposes all commands as MCP tools for Claude.ai, Claude Desktop, Claude Code, and other agent frameworks via OAuth 2.1
+- **Live Dashboard** — `tescmd serve` launches a full-screen TUI showing live telemetry data, MCP server info, tunnel URL, sink count, and cache stats — all in a scrollable, interactive terminal UI powered by Textual
+- **Fleet Telemetry streaming** — `tescmd serve` (or `tescmd vehicle telemetry stream`) receives push-based data from your vehicle via Tailscale Funnel — no polling, 99%+ cost reduction. Telemetry sessions produce a wide-format CSV log by default
+- **OpenClaw Bridge** — `tescmd serve --openclaw ws://...` streams filtered telemetry to an OpenClaw Gateway with configurable delta+throttle filtering per field
+- **MCP Server** — `tescmd serve` (or `tescmd mcp serve`) exposes all commands as MCP tools for Claude.ai, Claude Desktop, Claude Code, and other agent frameworks via OAuth 2.1
 - **Universal response caching** — all read commands are cached with tiered TTLs (1h for specs/warranty, 5m for fleet lists, 1m standard, 30s for location-dependent); bots can call tescmd as often as needed — within the TTL window, responses are instant and free
 - **Cost-aware wake** — prompts before sending billable wake API calls; `--wake` flag for scripts that accept the cost
 - **Guided OAuth2 setup** — `tescmd auth login` walks you through browser-based authentication with PKCE
@@ -54,7 +55,8 @@ tescmd charge status               # Check battery and charging state
 tescmd vehicle info                 # Full vehicle data snapshot
 tescmd climate on --wake            # Turn on climate (wakes vehicle if asleep)
 tescmd security lock --wake         # Lock the car
-tescmd vehicle telemetry stream     # Real-time telemetry dashboard
+tescmd serve 5YJ3...               # MCP + telemetry TUI dashboard + CSV log
+tescmd serve --no-mcp              # Telemetry-only TUI dashboard
 ```
 
 Every read command is cached — repeat calls within the TTL window are instant and free.
@@ -315,25 +317,35 @@ Configure via environment variables:
 Tesla's Fleet Telemetry lets your vehicle push real-time data directly to your server — no polling, no per-request charges. tescmd handles all the setup:
 
 ```bash
-# Telemetry, OpenClaw, and MCP dependencies are included by default
+# Full-screen TUI with live telemetry + MCP server
+tescmd serve 5YJ3...
 
-# Stream real-time data (Rich dashboard in TTY, JSONL when piped)
-tescmd vehicle telemetry stream
+# Telemetry-only mode (full-screen TUI, no MCP)
+tescmd serve 5YJ3... --no-mcp
 
 # Select field presets
-tescmd vehicle telemetry stream --fields driving     # Speed, location, power
-tescmd vehicle telemetry stream --fields charging    # Battery, voltage, current
-tescmd vehicle telemetry stream --fields climate     # Temps, HVAC state
-tescmd vehicle telemetry stream --fields all         # Everything (120+ fields)
+tescmd serve 5YJ3... --fields driving     # Speed, location, power
+tescmd serve 5YJ3... --fields charging    # Battery, voltage, current
+tescmd serve 5YJ3... --fields all         # Everything (120+ fields)
 
 # Override polling interval
-tescmd vehicle telemetry stream --interval 5         # Every 5 seconds
+tescmd serve 5YJ3... --interval 5         # Every 5 seconds
 
-# JSONL output for scripting
-tescmd vehicle telemetry stream --format json | jq .
+# JSONL output for scripting (non-TTY / piped)
+tescmd serve 5YJ3... --no-mcp --format json | jq .
+
+# Disable CSV log
+tescmd serve 5YJ3... --no-log
+
+# Legacy Rich Live dashboard
+tescmd serve 5YJ3... --legacy-dashboard
 ```
 
-**Requires Tailscale** with Funnel enabled. The stream command starts a local WebSocket server, exposes it via Tailscale Funnel (handles TLS + NAT traversal), configures Tesla to push data to it, and renders an interactive dashboard with live uptime counter, unit conversion, and connection status. Press `q` to stop — cleanup messages show each step (removing telemetry config, restoring partner domain, stopping tunnel).
+**Requires Tailscale** with Funnel enabled. The serve command starts a local WebSocket server, exposes it via Tailscale Funnel (handles TLS + NAT traversal), configures Tesla to push data to it, and renders a full-screen TUI with live telemetry data, server info (MCP URL, tunnel, sinks), unit conversion, and connection status. Press `q` to quit.
+
+By default, telemetry sessions write a wide-format CSV log to `~/.config/tescmd/logs/` with one row per frame and one column per subscribed field. Disable with `--no-log`.
+
+`tescmd vehicle telemetry stream` is an alias for `tescmd serve --no-mcp`.
 
 ### Telemetry vs Polling Costs
 

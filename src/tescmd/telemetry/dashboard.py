@@ -158,8 +158,8 @@ class TelemetryDashboard:
         temp_fields = {
             "InsideTemp",
             "OutsideTemp",
-            "DriverTempSetting",
-            "PassengerTempSetting",
+            "HvacLeftTemperatureRequest",
+            "HvacRightTemperatureRequest",
             "ModuleTempMax",
             "ModuleTempMin",
         }
@@ -173,7 +173,7 @@ class TelemetryDashboard:
             "Odometer",
             "EstBatteryRange",
             "IdealBatteryRange",
-            "RatedBatteryRange",
+            "RatedRange",
             "MilesToArrival",
         }
         if field_name in distance_fields and isinstance(value, (int, float)):
@@ -182,7 +182,7 @@ class TelemetryDashboard:
             return f"{value:.1f} mi"
 
         # Speed fields (API returns mph)
-        speed_fields = {"VehicleSpeed", "CruiseSetSpeed", "MaxSpeedLimit"}
+        speed_fields = {"VehicleSpeed", "CruiseSetSpeed", "CurrentLimitMph"}
         if field_name in speed_fields and isinstance(value, (int, float)):
             if self._units.distance == DistanceUnit.KM:
                 return f"{value * 1.60934:.0f} km/h"

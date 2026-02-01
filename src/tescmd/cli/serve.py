@@ -53,6 +53,18 @@ logger = logging.getLogger(__name__)
     help="Telemetry-only mode — skip MCP server",
 )
 @click.option(
+    "--no-log",
+    is_flag=True,
+    default=False,
+    help="Disable CSV telemetry log (enabled by default when telemetry active)",
+)
+@click.option(
+    "--legacy-dashboard",
+    is_flag=True,
+    default=False,
+    help="Use the legacy Rich Live dashboard instead of the full-screen TUI",
+)
+@click.option(
     "--openclaw",
     "openclaw_url",
     default=None,
@@ -101,6 +113,8 @@ def serve_cmd(
     interval: int | None,
     no_telemetry: bool,
     no_mcp: bool,
+    no_log: bool,
+    legacy_dashboard: bool,
     openclaw_url: str | None,
     openclaw_token: str | None,
     openclaw_config_path: str | None,
@@ -115,9 +129,13 @@ def serve_cmd(
     agent reads are free while telemetry is active.  Optionally bridges
     to an OpenClaw gateway.
 
+    When telemetry is active on a TTY, a full-screen dashboard shows live
+    data, server info, and operational metadata.  A wide-format CSV log
+    is written by default (disable with --no-log).
+
     \b
     Modes:
-      Default           MCP + telemetry cache warming
+      Default           MCP + telemetry cache warming + TUI dashboard
       --no-telemetry    MCP-only (same as 'tescmd mcp serve')
       --no-mcp          Telemetry-only (dashboard or JSONL)
       --openclaw URL    Also bridge telemetry to OpenClaw
@@ -129,6 +147,7 @@ def serve_cmd(
       tescmd serve 5YJ3... --no-mcp                     # Telemetry dashboard only
       tescmd serve --openclaw ws://gw.example.com:18789 # MCP + cache + OpenClaw
       tescmd serve --transport stdio                    # stdio for Claude Desktop
+      tescmd serve --legacy-dashboard                   # Use Rich Live dashboard
     """
     from tescmd.cli.main import AppContext
 
@@ -174,6 +193,8 @@ def serve_cmd(
             interval_override=interval,
             no_telemetry=no_telemetry,
             no_mcp=no_mcp,
+            no_log=no_log,
+            legacy_dashboard=legacy_dashboard,
             openclaw_url=openclaw_url,
             openclaw_token=openclaw_token,
             openclaw_config_path=openclaw_config_path,
@@ -196,6 +217,8 @@ async def _cmd_serve(
     interval_override: int | None,
     no_telemetry: bool,
     no_mcp: bool,
+    no_log: bool,
+    legacy_dashboard: bool,
     openclaw_url: str | None,
     openclaw_token: str | None,
     openclaw_config_path: str | None,
@@ -204,6 +227,8 @@ async def _cmd_serve(
     client_id: str,
     client_secret: str,
 ) -> None:
+    import asyncio
+    import contextlib
     import json
     import sys
 
@@ -234,8 +259,10 @@ async def _cmd_serve(
     # -- Build telemetry fanout --
     fanout = FrameFanout()
     cache_sink = None
+    csv_sink = None
     gw = None
     dashboard = None
+    tui = None
     vin: str | None = None
     field_config: dict[str, dict[str, int]] | None = None
 
@@ -261,20 +288,43 @@ async def _cmd_serve(
         if formatter.format != "json":
             formatter.rich.info(f"Cache warming enabled for {vin}")
 
-        # Dashboard sink (TTY) or JSONL sink (piped)
+        # CSV log sink — wide-format telemetry log (default on)
+        if not no_log:
+            from tescmd.telemetry.csv_sink import CSVLogSink, create_log_path
+
+            csv_path = create_log_path(vin)
+            csv_sink = CSVLogSink(csv_path, vin=vin)
+            fanout.add_sink(csv_sink.on_frame)
+
+            if formatter.format != "json":
+                formatter.rich.info(f"CSV log: {csv_path}")
+
+        # Display sink: TUI (default) / legacy Rich.Live dashboard / JSONL
         if interactive and formatter.format != "json":
-            from tescmd.telemetry.dashboard import TelemetryDashboard
+            if legacy_dashboard:
+                # Legacy Rich Live dashboard (fallback)
+                from tescmd.telemetry.dashboard import TelemetryDashboard
 
-            dashboard = TelemetryDashboard(formatter.console, formatter.rich._units)
+                dashboard = TelemetryDashboard(formatter.console, formatter.rich._units)
 
-            async def _dashboard_on_frame(frame: object) -> None:
-                from tescmd.telemetry.decoder import TelemetryFrame
+                async def _dashboard_on_frame(frame: object) -> None:
+                    from tescmd.telemetry.decoder import TelemetryFrame
 
-                assert isinstance(frame, TelemetryFrame)
-                assert dashboard is not None
-                dashboard.update(frame)
+                    assert isinstance(frame, TelemetryFrame)
+                    assert dashboard is not None
+                    dashboard.update(frame)
 
-            fanout.add_sink(_dashboard_on_frame)
+                fanout.add_sink(_dashboard_on_frame)
+            else:
+                # Full-screen Textual TUI (new default)
+                from tescmd.telemetry.tui import TelemetryTUI
+
+                tui = TelemetryTUI(
+                    formatter.rich._units,
+                    vin=vin,
+                    telemetry_port=telemetry_port,
+                )
+                fanout.add_sink(tui.push_frame)
         elif no_mcp:
             # JSONL output when in telemetry-only piped mode
             async def _jsonl_sink(frame: object) -> None:
@@ -351,14 +401,26 @@ async def _cmd_serve(
         else:
             print(f'{{"url": "{funnel_url}/mcp"}}', file=sys.stderr)
 
+    # -- Populate TUI with server info --
+    if tui is not None:
+        mcp_url = ""
+        if not no_mcp:
+            mcp_url = f"{public_url}/mcp" if public_url else f"http://127.0.0.1:{mcp_port}/mcp"
+            tui.set_mcp_url(mcp_url)
+        if public_url:
+            tui.set_tunnel_url(public_url)
+        tui.set_sink_count(fanout.sink_count)
+        if csv_sink is not None:
+            tui.set_log_path(csv_sink.log_path)
+
     # -- Start everything --
-    if not no_mcp and formatter.format != "json":
+    if not no_mcp and formatter.format != "json" and tui is None:
         base_url = f"{public_url}/mcp" if public_url else f"http://127.0.0.1:{mcp_port}/mcp"
         formatter.rich.info(
             f"MCP server starting on {base_url} ({tool_count} tools, "
             f"{fanout.sink_count} telemetry sink(s))"
         )
-    if (not no_mcp or not no_telemetry) and formatter.format != "json":
+    if (not no_mcp or not no_telemetry) and formatter.format != "json" and tui is None:
         formatter.rich.info("Press Ctrl+C to stop.")
 
     try:
@@ -374,10 +436,31 @@ async def _cmd_serve(
                 fanout.on_frame,
                 interactive=interactive,
             ) as session:
-                if formatter.format != "json":
+                if tui is not None:
+                    tui.set_tunnel_url(session.tunnel_url)
+
+                if formatter.format != "json" and tui is None:
                     formatter.rich.info("Telemetry pipeline active.")
 
-                if dashboard is not None:
+                if tui is not None:
+                    # Run TUI as the main display + MCP concurrently.
+                    if no_mcp:
+                        await tui.run_async()
+                    else:
+                        assert mcp_server is not None
+                        tui_task = asyncio.create_task(tui.run_async())
+                        mcp_task = asyncio.create_task(
+                            mcp_server.run_http(port=mcp_port, public_url=public_url)
+                        )
+                        # Wait for TUI shutdown signal (user pressed q).
+                        await tui.shutdown_event.wait()
+                        # Cancel both tasks to trigger cleanup.
+                        for task in (tui_task, mcp_task):
+                            if not task.done():
+                                task.cancel()
+                                with contextlib.suppress(asyncio.CancelledError):
+                                    await task
+                elif dashboard is not None:
                     from rich.live import Live
 
                     dashboard.set_tunnel_url(session.tunnel_url)
@@ -406,6 +489,17 @@ async def _cmd_serve(
                 formatter.rich.info("Tailscale Funnel stopped.")
         if gw is not None:
             await gw.close()
+        if csv_sink is not None:
+            csv_sink.close()
+            if formatter.format != "json":
+                formatter.rich.info(
+                    f"[dim]CSV log: {csv_sink.log_path} ({csv_sink.frame_count} frames)[/dim]"
+                )
+            else:
+                print(
+                    f'{{"csv_log": "{csv_sink.log_path}", "frames": {csv_sink.frame_count}}}',
+                    file=sys.stderr,
+                )
         if cache_sink is not None:
             cache_sink.flush()
             if formatter.format != "json":

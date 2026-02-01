@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import random
 from typing import TYPE_CHECKING
 
 import click
@@ -806,140 +805,65 @@ async def _cmd_telemetry_errors(app_ctx: AppContext, vin_positional: str | None)
 
 @telemetry_group.command("stream")
 @click.argument("vin_positional", required=False, default=None, metavar="VIN")
-@click.option("--port", type=int, default=None, help="Local server port (random if omitted)")
+@click.option(
+    "--port",
+    "telemetry_port",
+    type=int,
+    default=None,
+    help="Local server port (random if omitted)",
+)
 @click.option("--fields", default="default", help="Field preset or comma-separated names")
 @click.option("--interval", type=int, default=None, help="Override interval for all fields")
+@click.option("--no-log", is_flag=True, default=False, help="Disable CSV telemetry log")
+@click.option(
+    "--legacy-dashboard",
+    is_flag=True,
+    default=False,
+    help="Use legacy Rich Live dashboard",
+)
 @global_options
 def telemetry_stream_cmd(
     app_ctx: AppContext,
     vin_positional: str | None,
-    port: int | None,
+    telemetry_port: int | None,
     fields: str,
     interval: int | None,
+    no_log: bool,
+    legacy_dashboard: bool,
 ) -> None:
     """Stream real-time telemetry via Tailscale Funnel.
 
-    Starts a local WebSocket server, exposes it via Tailscale Funnel,
-    configures the vehicle to push telemetry, and displays it in an
-    interactive dashboard (TTY) or JSONL stream (piped).
+    Alias for ``tescmd serve --no-mcp``.  Starts a local WebSocket server,
+    exposes it via Tailscale Funnel, configures the vehicle to push
+    telemetry, and displays a full-screen TUI dashboard (TTY) or JSONL
+    stream (piped).  A CSV log is written by default.
 
     Requires Tailscale with Funnel enabled.
     """
-    run_async(_cmd_telemetry_stream(app_ctx, vin_positional, port, fields, interval))
+    from tescmd.cli.serve import _cmd_serve
 
-
-async def _cmd_telemetry_stream(
-    app_ctx: AppContext,
-    vin_positional: str | None,
-    port: int | None,
-    fields_spec: str,
-    interval_override: int | None,
-) -> None:
-    from tescmd.telemetry.fields import resolve_fields
-    from tescmd.telemetry.setup import telemetry_session
-
-    formatter = app_ctx.formatter
-    vin = require_vin(vin_positional, app_ctx.vin)
-
-    # Pick a random high port if none specified
-    if port is None:
-        port = random.randint(49152, 65534)
-
-    field_config = resolve_fields(fields_spec, interval_override)
-
-    # Output callback
-    if formatter.format == "json":
-        import json as json_mod
-
-        dashboard = None
-
-        async def on_frame(frame: object) -> None:
-            from tescmd.telemetry.decoder import TelemetryFrame
-
-            assert isinstance(frame, TelemetryFrame)
-            line = json_mod.dumps(
-                {
-                    "vin": frame.vin,
-                    "timestamp": frame.created_at.isoformat(),
-                    "data": {d.field_name: d.value for d in frame.data},
-                },
-                default=str,
-            )
-            print(line, flush=True)
-
-    else:
-        from tescmd.telemetry.dashboard import TelemetryDashboard
-
-        dashboard = TelemetryDashboard(formatter.console, formatter.rich._units)
-
-        async def on_frame(frame: object) -> None:
-            from tescmd.telemetry.decoder import TelemetryFrame
-
-            assert isinstance(frame, TelemetryFrame)
-            assert dashboard is not None
-            dashboard.update(frame)
-
-    async with telemetry_session(
-        app_ctx, vin, port, field_config, on_frame, interactive=True
-    ) as session:
-        if dashboard is not None:
-            from rich.live import Live
-
-            dashboard.set_tunnel_url(session.tunnel_url)
-            with Live(
-                dashboard,
-                console=formatter.console,
-                refresh_per_second=4,
-            ) as live:
-                dashboard.set_live(live)
-                await _wait_for_interrupt()
-        else:
-            await _wait_for_interrupt()
-
-
-async def _wait_for_interrupt() -> None:
-    """Block until Ctrl+C or 'q' is pressed."""
-    import sys
-
-    if not sys.stdin.isatty():
-        # Non-TTY (piped / JSON mode): just wait for cancellation.
-        try:
-            while True:
-                await asyncio.sleep(1)
-        except asyncio.CancelledError:
-            pass
-        return
-
-    try:
-        import selectors
-        import termios
-        import tty
-    except ImportError:
-        # Non-Unix: fall back to Ctrl+C only.
-        try:
-            while True:
-                await asyncio.sleep(1)
-        except asyncio.CancelledError:
-            pass
-        return
-
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
-    sel = selectors.DefaultSelector()
-    try:
-        tty.setcbreak(fd)  # Chars available immediately; Ctrl+C still sends SIGINT
-        sel.register(sys.stdin, selectors.EVENT_READ)
-        while True:
-            await asyncio.sleep(0.1)
-            for _key, _ in sel.select(timeout=0):
-                ch = sys.stdin.read(1)
-                if ch in ("q", "Q"):
-                    return
-    except asyncio.CancelledError:
-        pass
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        sel.close()
+    run_async(
+        _cmd_serve(
+            app_ctx,
+            vin_positional=vin_positional,
+            transport="streamable-http",
+            mcp_port=8080,
+            telemetry_port=telemetry_port,
+            fields_spec=fields,
+            interval_override=interval,
+            no_telemetry=False,
+            no_mcp=True,
+            no_log=no_log,
+            legacy_dashboard=legacy_dashboard,
+            openclaw_url=None,
+            openclaw_token=None,
+            openclaw_config_path=None,
+            dry_run=False,
+            tailscale=False,
+            client_id="",
+            client_secret="",
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
