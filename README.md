@@ -1,8 +1,10 @@
 # tescmd
 
-<!-- [![PyPI](https://img.shields.io/pypi/v/tescmd)](https://pypi.org/project/tescmd/) -->
-<!-- [![Python](https://img.shields.io/pypi/pyversions/tescmd)](https://pypi.org/project/tescmd/) -->
+[![PyPI](https://img.shields.io/pypi/v/tescmd)](https://pypi.org/project/tescmd/)
+[![Python](https://img.shields.io/pypi/pyversions/tescmd)](https://pypi.org/project/tescmd/)
+[![Build](https://img.shields.io/github/actions/workflow/status/oceanswave/tescmd/test.yml?branch=main&label=build)](https://github.com/oceanswave/tescmd/actions/workflows/test.yml)
 [![License](https://img.shields.io/github/license/oceanswave/tescmd)](LICENSE)
+[![GitHub Release](https://img.shields.io/github/v/release/oceanswave/tescmd)](https://github.com/oceanswave/tescmd/releases)
 
 A Python CLI for querying and controlling Tesla vehicles via the Fleet API — built for both human operators and AI agents.
 
