@@ -7,12 +7,13 @@ import asyncio
 from tescmd.telemetry.decoder import TelemetryDecoder, TelemetryFrame
 from tescmd.telemetry.server import TelemetryServer
 
-# We reuse test payload helpers from test_decoder
+# We reuse test payload helpers from test_decoder + Flatbuffers builder
 from tests.telemetry.test_decoder import (
     _encode_datum,
     _encode_int_value,
     _encode_payload,
 )
+from tests.telemetry.test_flatbuf import build_flatbuf_envelope
 
 
 class TestTelemetryServer:
@@ -22,14 +23,13 @@ class TestTelemetryServer:
         async def on_frame(frame: TelemetryFrame) -> None:
             frames.append(frame)
 
-        server = TelemetryServer(port=0, decoder=TelemetryDecoder(), on_frame=on_frame)
-        # Port 0 = OS picks a free port — but websockets may not support it.
-        # Use a high random port instead.
-        server._port = 59871
+        server = TelemetryServer(port=59870, decoder=TelemetryDecoder(), on_frame=on_frame)
         await server.start()
-        assert server._server is not None
+        assert server._mux_server is not None
+        assert server._ws_server is not None
         await server.stop()
-        assert server._server is None
+        assert server._mux_server is None
+        assert server._ws_server is None
 
     async def test_receive_frame(self) -> None:
         import websockets.asyncio.client as ws_client
@@ -39,18 +39,21 @@ class TestTelemetryServer:
         async def on_frame(frame: TelemetryFrame) -> None:
             frames.append(frame)
 
-        port = 59872
+        port = 59880
         server = TelemetryServer(port=port, decoder=TelemetryDecoder(), on_frame=on_frame)
         await server.start()
 
         try:
-            datum = _encode_datum(8, _encode_int_value(72))
-            payload = _encode_payload([datum], vin="TEST_VIN")
+            from tescmd.telemetry.protos import vehicle_data_pb2 as pb
+
+            datum = _encode_datum(pb.BatteryLevel, _encode_int_value(72))
+            pb_payload = _encode_payload([datum], vin="TEST_VIN")
+            envelope = build_flatbuf_envelope(pb_payload, device_id=b"TEST_VIN")
 
             async with ws_client.connect(f"ws://127.0.0.1:{port}") as ws:
-                await ws.send(payload)
+                await ws.send(envelope)
                 # Give server time to process
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.2)
 
             assert len(frames) == 1
             assert frames[0].vin == "TEST_VIN"
@@ -68,7 +71,7 @@ class TestTelemetryServer:
         async def on_frame(frame: TelemetryFrame) -> None:
             frames.append(frame)
 
-        port = 59873
+        port = 59890
         server = TelemetryServer(port=port, decoder=TelemetryDecoder(), on_frame=on_frame)
         await server.start()
 
@@ -76,13 +79,15 @@ class TestTelemetryServer:
             async with ws_client.connect(f"ws://127.0.0.1:{port}") as ws:
                 # Send invalid protobuf
                 await ws.send(b"\xff\xff\xff")
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.2)
 
                 # Send valid frame after
-                datum = _encode_datum(3, _encode_int_value(85))
-                payload = _encode_payload([datum])
-                await ws.send(payload)
-                await asyncio.sleep(0.1)
+                from tescmd.telemetry.protos import vehicle_data_pb2 as pb
+
+                datum = _encode_datum(pb.Soc, _encode_int_value(85))
+                pb_payload = _encode_payload([datum])
+                await ws.send(build_flatbuf_envelope(pb_payload))
+                await asyncio.sleep(0.2)
 
             # The valid frame should still be processed
             assert len(frames) >= 1
@@ -98,7 +103,7 @@ class TestTelemetryServer:
         async def on_frame(frame: TelemetryFrame) -> None:
             frames.append(frame)
 
-        port = 59874
+        port = 59900
         server = TelemetryServer(port=port, decoder=TelemetryDecoder(), on_frame=on_frame)
         await server.start()
 
@@ -118,3 +123,97 @@ class TestTelemetryServer:
         server = TelemetryServer(port=0, decoder=TelemetryDecoder(), on_frame=noop)
         assert server.connection_count == 0
         assert server.frame_count == 0
+
+    async def test_head_request_returns_200(self) -> None:
+        """HEAD requests (Tesla origin validation) get HTTP 200."""
+        import httpx
+
+        port = 59910
+        server = TelemetryServer(port=port, decoder=TelemetryDecoder(), on_frame=_noop)
+        await server.start()
+
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.head(f"http://127.0.0.1:{port}/")
+                assert resp.status_code == 200
+        finally:
+            await server.stop()
+
+    async def test_get_request_returns_200(self) -> None:
+        """Plain GET requests (health check) get HTTP 200."""
+        import httpx
+
+        port = 59920
+        server = TelemetryServer(port=port, decoder=TelemetryDecoder(), on_frame=_noop)
+        await server.start()
+
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(f"http://127.0.0.1:{port}/")
+                assert resp.status_code == 200
+                assert b"tescmd" in resp.content
+        finally:
+            await server.stop()
+
+    async def test_get_well_known_serves_public_key(self) -> None:
+        """GET /.well-known/...public-key.pem serves the EC key when configured."""
+        import httpx
+
+        pem = "-----BEGIN PUBLIC KEY-----\nMFkwEwYH...test...\n-----END PUBLIC KEY-----\n"
+        port = 59930
+        server = TelemetryServer(
+            port=port, decoder=TelemetryDecoder(), on_frame=_noop, public_key_pem=pem
+        )
+        await server.start()
+
+        try:
+            path = "/.well-known/appspecific/com.tesla.3p.public-key.pem"
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(f"http://127.0.0.1:{port}{path}")
+                assert resp.status_code == 200
+                assert resp.text == pem
+                assert resp.headers["content-type"] == "application/x-pem-file"
+        finally:
+            await server.stop()
+
+    async def test_head_well_known_returns_key_length(self) -> None:
+        """HEAD /.well-known/...public-key.pem returns correct Content-Length."""
+        import httpx
+
+        pem = "-----BEGIN PUBLIC KEY-----\nMFkwEwYH...test...\n-----END PUBLIC KEY-----\n"
+        port = 59940
+        server = TelemetryServer(
+            port=port, decoder=TelemetryDecoder(), on_frame=_noop, public_key_pem=pem
+        )
+        await server.start()
+
+        try:
+            path = "/.well-known/appspecific/com.tesla.3p.public-key.pem"
+            async with httpx.AsyncClient() as client:
+                resp = await client.head(f"http://127.0.0.1:{port}{path}")
+                assert resp.status_code == 200
+                assert int(resp.headers["content-length"]) == len(pem.encode())
+                assert resp.headers["content-type"] == "application/x-pem-file"
+        finally:
+            await server.stop()
+
+    async def test_get_well_known_without_key_returns_generic(self) -> None:
+        """GET /.well-known/ without a configured key returns generic 200."""
+        import httpx
+
+        port = 59950
+        server = TelemetryServer(port=port, decoder=TelemetryDecoder(), on_frame=_noop)
+        await server.start()
+
+        try:
+            path = "/.well-known/appspecific/com.tesla.3p.public-key.pem"
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(f"http://127.0.0.1:{port}{path}")
+                assert resp.status_code == 200
+                assert b"tescmd" in resp.content
+        finally:
+            await server.stop()
+
+
+async def _noop(frame: TelemetryFrame) -> None:
+    pass

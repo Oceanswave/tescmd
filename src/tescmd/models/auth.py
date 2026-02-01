@@ -17,6 +17,7 @@ VEHICLE_SCOPES: list[str] = [
     "vehicle_device_data",
     "vehicle_cmds",
     "vehicle_charging_cmds",
+    "vehicle_location",
 ]
 
 ENERGY_SCOPES: list[str] = [
@@ -97,6 +98,24 @@ def decode_jwt_scopes(token: str) -> list[str] | None:
     if isinstance(scp, list):
         return [str(s) for s in scp]
     return None
+
+
+def decode_jwt_payload(token: str) -> dict[str, Any] | None:
+    """Decode the full JWT payload without verifying the signature.
+
+    Returns the payload dict, or ``None`` if the token isn't a valid JWT.
+    """
+    parts = token.split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        payload_b64 = parts[1] + "=" * (-len(parts[1]) % 4)
+        payload_bytes = base64.urlsafe_b64decode(payload_b64)
+        payload: dict[str, Any] = json.loads(payload_bytes)
+    except (ValueError, json.JSONDecodeError):
+        logger.debug("Failed to decode JWT payload")
+        return None
+    return payload
 
 
 class AuthConfig(BaseModel):

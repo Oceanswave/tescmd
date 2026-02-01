@@ -1,4 +1,4 @@
-"""EC key management for Tesla Fleet API command signing."""
+"""EC key management and signing for Tesla Fleet API."""
 
 from tescmd.crypto.keys import (
     generate_ec_key_pair,
@@ -8,6 +8,7 @@ from tescmd.crypto.keys import (
     load_private_key,
     load_public_key_pem,
 )
+from tescmd.crypto.schnorr import sign_fleet_telemetry_config
 
 __all__ = [
     "generate_ec_key_pair",
@@ -16,4 +17,5 @@ __all__ = [
     "has_key_pair",
     "load_private_key",
     "load_public_key_pem",
+    "sign_fleet_telemetry_config",
 ]

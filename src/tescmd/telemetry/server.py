@@ -1,11 +1,19 @@
 """Async WebSocket server for receiving Fleet Telemetry pushes.
 
-Listens on ``0.0.0.0`` so Tailscale Funnel (which terminates TLS)
-can proxy to the local plain-WebSocket port.
+Listens on all interfaces so Tailscale Funnel (which terminates TLS) can
+proxy to the local plain-WebSocket port.
+
+A lightweight TCP mux sits in front of the WebSocket server to handle
+plain HTTP requests (HEAD, GET) that the ``websockets`` library rejects.
+This is required because Tesla's Developer Portal sends HEAD requests to
+validate Allowed Origin URLs, and browsers send GET requests for health
+checks.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -18,25 +26,52 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_HTTP_200 = (
+    b"HTTP/1.1 200 OK\r\n"
+    b"Content-Type: text/plain\r\n"
+    b"Content-Length: 24\r\n"
+    b"\r\n"
+    b"tescmd telemetry server\n"
+)
+
+_HTTP_200_HEAD = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n"
+
+_WELL_KNOWN_PATH = "/.well-known/appspecific/com.tesla.3p.public-key.pem"
+
 
 class TelemetryServer:
-    """Async WebSocket server that receives telemetry from vehicles."""
+    """Async WebSocket server that receives telemetry from vehicles.
+
+    Internally runs two servers:
+
+    * A **TCP mux** on ``0.0.0.0:{port}`` (the public-facing port that
+      the tunnel proxy connects to).  It inspects the first HTTP request
+      line and either responds directly (HEAD / plain GET) or forwards
+      the connection to the internal WebSocket server.
+    * A **websockets** server on ``127.0.0.1:{port+1}`` that handles
+      actual WebSocket upgrade connections from vehicles.
+    """
 
     def __init__(
         self,
         port: int,
         decoder: TelemetryDecoder,
         on_frame: Callable[[TelemetryFrame], Awaitable[None]],
+        *,
+        public_key_pem: str | None = None,
     ) -> None:
         self._port = port
+        self._ws_port = port + 1
         self._decoder = decoder
         self._on_frame = on_frame
-        self._server: ws_server.Server | None = None
+        self._public_key_pem = public_key_pem
+        self._ws_server: ws_server.Server | None = None
+        self._mux_server: asyncio.Server | None = None
         self._connection_count = 0
         self._frame_count = 0
 
     async def start(self) -> None:
-        """Start the WebSocket server on ``0.0.0.0:{port}``."""
+        """Start the mux + WebSocket servers."""
         try:
             import websockets.asyncio.server as ws_server_mod
         except ImportError as exc:
@@ -47,26 +82,168 @@ class TelemetryServer:
                 "Install with: pip install tescmd[telemetry]"
             ) from exc
 
-        self._server = await ws_server_mod.serve(
-            self._handler,
-            host="0.0.0.0",
+        # Internal WS server — only reachable from localhost
+        self._ws_server = await ws_server_mod.serve(
+            self._ws_handler,
+            host="127.0.0.1",
+            port=self._ws_port,
+        )
+
+        # Public-facing TCP mux — bind to all interfaces (IPv4 + IPv6).
+        self._mux_server = await asyncio.start_server(
+            self._mux_handler,
+            host=None,
             port=self._port,
         )
-        logger.info("Telemetry WebSocket server listening on 0.0.0.0:%d", self._port)
+
+        logger.info(
+            "Telemetry server listening on 0.0.0.0:%d (ws internal :%d)",
+            self._port,
+            self._ws_port,
+        )
 
     async def stop(self) -> None:
-        """Gracefully shut down the server."""
-        if self._server is not None:
-            self._server.close()
-            await self._server.wait_closed()
-            self._server = None
-            logger.info("Telemetry WebSocket server stopped")
+        """Gracefully shut down both servers."""
+        if self._mux_server is not None:
+            self._mux_server.close()
+            await self._mux_server.wait_closed()
+            self._mux_server = None
 
-    async def _handler(self, websocket: Any) -> None:
+        if self._ws_server is not None:
+            self._ws_server.close()
+            await self._ws_server.wait_closed()
+            self._ws_server = None
+
+        logger.info("Telemetry server stopped")
+
+    # ------------------------------------------------------------------
+    # TCP mux — inspects first request line, routes accordingly
+    # ------------------------------------------------------------------
+
+    async def _mux_handler(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        """Route an incoming TCP connection.
+
+        * **HEAD** — immediate HTTP 200 (Tesla origin validation).
+        * **GET without Upgrade** — immediate HTTP 200 (health check).
+        * **GET with Upgrade: websocket** — forward to internal WS server.
+        """
+        try:
+            first_line = await asyncio.wait_for(reader.readline(), timeout=10)
+        except (TimeoutError, ConnectionError):
+            writer.close()
+            return
+
+        if not first_line:
+            writer.close()
+            return
+
+        parts = first_line.decode("latin-1").strip().split(" ", 2)
+        method = parts[0].upper() if parts else ""
+        path = parts[1] if len(parts) > 1 else "/"
+
+        if method == "HEAD":
+            if path == _WELL_KNOWN_PATH and self._public_key_pem is not None:
+                pem_bytes = self._public_key_pem.encode()
+                writer.write(
+                    f"HTTP/1.1 200 OK\r\n"
+                    f"Content-Type: application/x-pem-file\r\n"
+                    f"Content-Length: {len(pem_bytes)}\r\n"
+                    f"\r\n".encode()
+                )
+            else:
+                writer.write(_HTTP_200_HEAD)
+            await writer.drain()
+            writer.close()
+            return
+
+        if method != "GET":
+            writer.write(_HTTP_200)
+            await writer.drain()
+            writer.close()
+            return
+
+        # Read remaining headers to check for WebSocket upgrade
+        raw_headers: list[bytes] = []
+        is_upgrade = False
+        try:
+            while True:
+                line = await asyncio.wait_for(reader.readline(), timeout=5)
+                raw_headers.append(line)
+                if line in (b"\r\n", b"\n", b""):
+                    break
+                if line.lower().startswith(b"upgrade:") and b"websocket" in line.lower():
+                    is_upgrade = True
+        except (TimeoutError, ConnectionError):
+            writer.close()
+            return
+
+        if not is_upgrade:
+            if path == _WELL_KNOWN_PATH and self._public_key_pem is not None:
+                pem_bytes = self._public_key_pem.encode()
+                writer.write(
+                    f"HTTP/1.1 200 OK\r\n"
+                    f"Content-Type: application/x-pem-file\r\n"
+                    f"Content-Length: {len(pem_bytes)}\r\n"
+                    f"\r\n".encode()
+                    + pem_bytes
+                )
+            else:
+                writer.write(_HTTP_200)
+            await writer.drain()
+            writer.close()
+            return
+
+        # WebSocket upgrade — forward entire connection to internal WS server
+        try:
+            ws_reader, ws_writer = await asyncio.open_connection("127.0.0.1", self._ws_port)
+        except ConnectionError:
+            writer.close()
+            return
+
+        # Replay the already-read request line + headers
+        ws_writer.write(first_line)
+        for hdr in raw_headers:
+            ws_writer.write(hdr)
+        await ws_writer.drain()
+
+        # Bidirectional pipe until either side closes
+        await asyncio.gather(
+            self._pipe(reader, ws_writer),
+            self._pipe(ws_reader, writer),
+        )
+
+    @staticmethod
+    async def _pipe(
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        """Copy bytes from *reader* to *writer* until EOF."""
+        try:
+            while True:
+                data = await reader.read(65536)
+                if not data:
+                    break
+                writer.write(data)
+                await writer.drain()
+        except (ConnectionError, asyncio.CancelledError):
+            pass
+        finally:
+            with contextlib.suppress(Exception):
+                writer.close()
+
+    # ------------------------------------------------------------------
+    # WebSocket handler
+    # ------------------------------------------------------------------
+
+    async def _ws_handler(self, websocket: Any) -> None:
         """Handle a single vehicle WebSocket connection.
 
         Receives binary frames, decodes via :class:`TelemetryDecoder`,
-        and dispatches to the ``on_frame`` callback. Malformed frames
+        and dispatches to the ``on_frame`` callback.  Malformed frames
         are logged and skipped — never crash the server.
         """
         self._connection_count += 1

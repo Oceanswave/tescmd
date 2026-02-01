@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Interval override** — `--interval` option overrides the polling interval for all fields
 - **Tailscale Funnel integration** — automatic Funnel start/stop with cert retrieval for Fleet Telemetry HTTPS requirement
 - **JSONL output** — piped mode emits one JSON line per telemetry frame for scripting and log ingestion
-- **TailscaleError** — new error type with actionable install/setup guidance
+- **TunnelError hierarchy** — `TunnelError` parent with `TailscaleError` subtype; actionable install/setup guidance
 - **Optional dependency group** — `pip install tescmd[telemetry]` adds `websockets>=14.0`
 - **Tailscale key hosting** — `tescmd key deploy --method tailscale` hosts the public key via Tailscale Funnel at `https://<machine>.tailnet.ts.net/.well-known/appspecific/com.tesla.3p.public-key.pem`; auto-detected as second priority after GitHub Pages
 - **Key hosting priority chain** — setup wizard and `key deploy` auto-detect the best hosting method: GitHub Pages → Tailscale Funnel → manual; `--method` flag overrides auto-detection

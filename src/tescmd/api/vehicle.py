@@ -132,8 +132,26 @@ class VehicleAPI:
         return result
 
     async def fleet_telemetry_config_create(self, *, config: dict[str, Any]) -> dict[str, Any]:
-        """Create or update fleet telemetry server configuration."""
+        """Create or update fleet telemetry server configuration.
+
+        .. deprecated::
+            Tesla now requires the Vehicle Command HTTP Proxy for this
+            endpoint.  Use :meth:`fleet_telemetry_config_create_jws` instead.
+        """
         data = await self._client.post("/api/1/vehicles/fleet_telemetry_config", json=config)
+        result: dict[str, Any] = data.get("response", {})
+        return result
+
+    async def fleet_telemetry_config_create_jws(
+        self, *, vins: list[str], token: str
+    ) -> dict[str, Any]:
+        """Create fleet telemetry config via the JWS-signed endpoint.
+
+        *token* is a compact JWS signed with the Tesla.SS256 algorithm
+        (Schnorr/P-256).  See :func:`tescmd.crypto.schnorr.sign_fleet_telemetry_config`.
+        """
+        payload = {"vins": vins, "token": token}
+        data = await self._client.post("/api/1/vehicles/fleet_telemetry_config_jws", json=payload)
         result: dict[str, Any] = data.get("response", {})
         return result
 

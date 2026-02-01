@@ -247,6 +247,7 @@ class TailscaleManager:
                 "--key-file",
                 str(key_path),
                 hostname,
+                timeout=60,  # cert provisioning involves ACME/Let's Encrypt
             )
             if returncode != 0:
                 msg = stderr.strip() or stdout.strip()
@@ -262,14 +263,18 @@ class TailscaleManager:
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def _run(*args: str) -> tuple[int, str, str]:
+    async def _run(*args: str, timeout: int | None = None) -> tuple[int, str, str]:
         """Run a subprocess with timeout.
 
         Returns ``(returncode, stdout, stderr)``.
 
         Uses ``asyncio.create_subprocess_exec`` which passes arguments
         directly to the OS without shell interpretation (no injection risk).
+
+        *timeout* overrides the default ``_SUBPROCESS_TIMEOUT`` when a
+        command is known to be slow (e.g. certificate provisioning).
         """
+        effective_timeout = timeout if timeout is not None else _SUBPROCESS_TIMEOUT
         logger.debug("Running: %s", " ".join(args))
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -278,13 +283,13 @@ class TailscaleManager:
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                proc.communicate(), timeout=_SUBPROCESS_TIMEOUT
+                proc.communicate(), timeout=effective_timeout
             )
         except FileNotFoundError as exc:
             raise TailscaleError(f"Command not found: {args[0]}") from exc
         except TimeoutError as exc:
             raise TailscaleError(
-                f"Command timed out after {_SUBPROCESS_TIMEOUT}s: {' '.join(args)}"
+                f"Command timed out after {effective_timeout}s: {' '.join(args)}"
             ) from exc
 
         assert proc.returncode is not None

@@ -46,24 +46,28 @@ Tesla requires every Fleet API app to have a registered domain where the public 
 https://<your-domain>/.well-known/appspecific/com.tesla.3p.public-key.pem
 ```
 
-The setup wizard detects available hosting methods and offers them in priority order:
+The setup wizard detects available hosting methods and offers them in priority order.
 
-### Method 1: GitHub Pages (recommended)
+> **Important: domain choice affects telemetry streaming.** If you plan to use `tescmd vehicle telemetry stream`, note that key hosting and telemetry streaming are separate concerns. Key hosting uses your registered domain (GitHub Pages or Tailscale), while telemetry streaming requires **Tailscale Funnel** to expose your local WebSocket server.
+
+### Method 1: GitHub Pages (recommended for key hosting only)
 
 **Requires:** `gh` CLI installed and authenticated (`gh auth login`)
 
 - **Always-on** -- survives machine reboots and shutdowns
 - **Free** -- GitHub Pages is free for public repos
 - **Automatic** -- the wizard creates the repo, deploys the key, and waits for it to go live
+- **No telemetry streaming** -- GitHub Pages cannot serve as a Fleet Telemetry server; choose Tailscale if you need streaming
 
 The wizard creates `<username>.github.io` if it doesn't exist, commits the public key, and configures Jekyll to serve `.well-known` paths.
 
-### Method 2: Tailscale Funnel
+### Method 2: Tailscale Funnel (recommended for telemetry streaming)
 
 **Requires:** Tailscale installed, running, authenticated, and Funnel enabled in your tailnet ACL policy
 
 - **Machine-dependent** -- if your machine is off or Tailscale stops, Tesla cannot fetch the key
 - **Domain is machine-specific** -- your domain is `<machine>.tailnet.ts.net`, so changing machines means re-registering
+- **Enables telemetry streaming** -- the same Tailscale hostname serves both your public key and the telemetry WebSocket server, satisfying Tesla's domain-matching requirement
 - **Good for development** -- fast setup, no GitHub account needed
 
 The wizard runs `tailscale serve` to host the key directory and `tailscale funnel` to make it publicly accessible.
@@ -83,6 +87,8 @@ You need a Tesla Developer app to get OAuth credentials.
 1. Go to [developer.tesla.com](https://developer.tesla.com)
 2. Create a new application
 3. Set the **Allowed Origin URL** to `https://<your-domain>` (the domain from Phase 2)
+   - For telemetry streaming, add your Tailscale hostname as an additional origin:
+     `https://<your-machine>.tailnet.ts.net`
 4. Set the **Redirect URI** to `http://localhost:8085/callback`
 5. Copy the **Client ID** and **Client Secret**
 

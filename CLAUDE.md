@@ -61,7 +61,7 @@ src/tescmd/
 │   ├── partner.py         # PartnerAPI (public key, fleet telemetry errors — requires partner token)
 │   ├── sharing.py         # SharingAPI (driver and invite management)
 │   ├── user.py            # UserAPI (account info, region, orders, features)
-│   └── errors.py          # API error types (incl. TierError, SessionError, KeyNotEnrolledError, TailscaleError)
+│   └── errors.py          # API error types (incl. TierError, SessionError, KeyNotEnrolledError, TunnelError, TailscaleError)
 ├── cache/                 # Response caching
 │   ├── __init__.py        # Re-exports ResponseCache, generic_cache_key
 │   ├── response_cache.py  # ResponseCache (file-based JSON with TTL, generic cache)
@@ -294,11 +294,12 @@ The `[R] Retry` option allows users to wake the vehicle for free via the Tesla m
 
 ## Testing
 
-- **pytest** + **pytest-asyncio** + **pytest-httpx**
+- **pytest** + **pytest-asyncio** + **pytest-httpx** + **pytest-xdist**
+- Tests run in parallel by default (`addopts = "-n auto"` in `pyproject.toml`). Always use `pytest` (not `pytest -n 1`) unless debugging a specific isolation issue.
 - Test files mirror source: `tests/cli/test_auth.py`, `tests/api/test_client.py`, etc.
 - Use `pytest-httpx` to mock HTTP responses (no live API calls in tests)
 - Async tests use `@pytest.mark.asyncio`
-- Current count: ~910 tests
+- Current count: ~1118 tests
 
 ## Linting & Formatting
 
@@ -326,7 +327,7 @@ The `[R] Retry` option allows users to wake the vehicle for free via the Tesla m
 16. **Key enrollment** — `tescmd key enroll <VIN>` sends the public key to the vehicle via the unsigned `add_key_request` endpoint, then guides the user through Tesla app approval with an interactive prompt or `--wait` auto-polling.
 17. **Cross-platform token storage** — `TokenStore` uses a `_TokenBackend` protocol with two implementations: `_KeyringBackend` (OS keyring) and `_FileBackend` (JSON file with atomic writes and restricted permissions). Backend selection: explicit `TESLA_TOKEN_FILE` → file; keyring probe success → keyring; probe failure → file fallback at `{config_dir}/tokens.json` with one-time warning.
 18. **Cross-platform file permissions** — `_internal/permissions.py` provides `secure_file()` which uses `chmod 0600` on Unix and `icacls` on Windows. Used by both token storage and key generation. Failures are silently ignored (Docker volumes, network mounts, etc.).
-19. **Fleet Telemetry streaming** — `tescmd vehicle telemetry stream [VIN]` starts a local WebSocket server, exposes it via Tailscale Funnel (TLS-terminating reverse proxy), configures the vehicle's fleet telemetry config to push to it, and displays data in a Rich Live dashboard (TTY) or JSONL stream (piped). The `telemetry/` package has five modules: `TailscaleManager` (subprocess-based — Funnel has no Python API), `TelemetryServer` (websockets async server on `0.0.0.0`), `TelemetryDecoder` (reuses `protocol/protobuf/messages._decode_field` for wire-format parsing), `fields.py` (120+ field name registry with presets), and `TelemetryDashboard` (Rich Live TUI with unit conversion via `DisplayUnits`). Port is randomly selected from ephemeral range (49152–65535). Cleanup is guaranteed via try/finally (telemetry config delete → funnel stop → server stop). Optional dependency: `pip install tescmd[telemetry]` adds `websockets>=14.0`.
+19. **Fleet Telemetry streaming** — `tescmd vehicle telemetry stream [VIN]` starts a local WebSocket server, exposes it via Tailscale Funnel, configures the vehicle's fleet telemetry config to push to it, and displays data in a Rich Live dashboard (TTY) or JSONL stream (piped). Tesla requires the telemetry config hostname to match the partner-registered domain — the stream command automatically re-registers the partner domain to match the tunnel hostname, then restores the original domain on exit (try/finally). The `telemetry/` package has five modules: `TailscaleManager` (subprocess-based — Funnel has no Python API), `TelemetryServer` (websockets async server), `TelemetryDecoder` (reuses `protocol/protobuf/messages._decode_field` for wire-format parsing), `fields.py` (120+ field name registry with presets), and `TelemetryDashboard` (Rich Live TUI with unit conversion via `DisplayUnits`). Port is randomly selected from ephemeral range (49152–65535). Cleanup is guaranteed via try/finally (partner domain restore → telemetry config delete → funnel stop → server stop). Optional dependency: `pip install tescmd[telemetry]` adds `websockets>=14.0`.
 20. **Key hosting priority chain** — `tescmd setup` and `tescmd key deploy` auto-detect the best hosting method for the public key: GitHub Pages (always-on, free) → Tailscale Funnel (requires machine running) → manual. The `--method` flag on `key deploy` overrides auto-detection. `TESLA_HOSTING_METHOD` persists the choice. Tailscale key hosting uses path-based `tailscale serve --bg --set-path /.well-known/ <dir>` + `tailscale funnel --bg 443`. Note: Tailscale key hosting may conflict with telemetry streaming's funnel usage — run `tescmd key deploy --method tailscale` to re-enable after streaming.
 
 ## Environment Variables
@@ -370,7 +371,6 @@ All variables can also be set in a `.env` file in the working directory or `$TES
 | `--no-cache` / `--fresh` | Global | Bypass response cache for this invocation |
 | `--wake` | Global | Auto-wake vehicle without confirmation (billable) |
 | `--units {us,metric}` | Global | Display units preset (us: °F/mi/psi, metric: °C/km/bar) |
-
 All global flags can be specified at the root level (`tescmd --wake charge status`) or after the subcommand (`tescmd charge status --wake`).
 
 ## API Coverage Validation

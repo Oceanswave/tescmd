@@ -82,6 +82,8 @@ The following tools should be installed and authenticated before running `tescmd
 
 Without the GitHub CLI, `tescmd setup` will try Tailscale Funnel for key hosting (requires Funnel enabled in your tailnet ACL). Without either, you'll need to manually host your public key at the Tesla-required `.well-known` path on your own domain.
 
+For telemetry streaming, you need **Tailscale** with Funnel enabled.
+
 ## Installation
 
 ### From PyPI

@@ -76,5 +76,9 @@ class KeyNotEnrolledError(TeslaAPIError):
     """Vehicle rejected the command — key not enrolled."""
 
 
-class TailscaleError(ConfigError):
+class TunnelError(ConfigError):
+    """Tunnel provider not available or setup failed."""
+
+
+class TailscaleError(TunnelError):
     """Tailscale not installed, not running, or Funnel setup failed."""
