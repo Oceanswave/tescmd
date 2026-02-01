@@ -271,6 +271,68 @@ tescmd vehicle accessory-power --on
 tescmd vehicle accessory-power --off
 ```
 
+### `vehicle telemetry config [VIN]`
+
+Show the current Fleet Telemetry configuration for a vehicle.
+
+```bash
+tescmd vehicle telemetry config
+```
+
+### `vehicle telemetry create [VIN]`
+
+Create a Fleet Telemetry configuration for a vehicle.
+
+```bash
+tescmd vehicle telemetry create --hostname myserver.example.com
+```
+
+### `vehicle telemetry delete [VIN]`
+
+Delete the Fleet Telemetry configuration for a vehicle.
+
+```bash
+tescmd vehicle telemetry delete
+```
+
+### `vehicle telemetry errors [VIN]`
+
+Show Fleet Telemetry error log for a vehicle.
+
+```bash
+tescmd vehicle telemetry errors
+```
+
+### `vehicle telemetry stream [VIN]`
+
+Start a local WebSocket server, expose it via Tailscale Funnel, configure the vehicle to push real-time telemetry, and display an interactive dashboard.
+
+```bash
+# Rich Live dashboard (default in TTY)
+tescmd vehicle telemetry stream
+
+# Select a field preset
+tescmd vehicle telemetry stream --fields driving     # Speed, location, power
+tescmd vehicle telemetry stream --fields charging    # Battery, voltage, current
+tescmd vehicle telemetry stream --fields climate     # Temps, HVAC state
+tescmd vehicle telemetry stream --fields all         # All 120+ fields
+
+# Override polling interval for all fields
+tescmd vehicle telemetry stream --interval 5
+
+# JSONL output for scripting/agents
+tescmd vehicle telemetry stream --format json
+```
+
+**Options:**
+- `--fields PRESET` — Field preset name (`default`, `driving`, `charging`, `climate`, `all`) or comma-separated field names
+- `--interval SECONDS` — Override polling interval for all fields
+- `--format json` — Emit one JSON line per telemetry frame instead of Rich dashboard
+
+**Requires:** `pip install tescmd[telemetry]` and Tailscale with Funnel enabled.
+
+Press `q` to stop. Cleanup is automatic (removes telemetry config, restores partner domain, stops tunnel).
+
 ---
 
 ## `key` — Key Management
@@ -312,12 +374,16 @@ ACTION REQUIRED: Add virtual key in the Tesla app
 
 ### `key deploy`
 
-Deploy the public key to GitHub Pages (at the `.well-known` path Tesla requires).
+Deploy the public key to a hosting service (at the `.well-known` path Tesla requires). Auto-detects the best method: GitHub Pages → Tailscale Funnel → manual.
 
 ```bash
-tescmd key deploy
-tescmd key deploy --repo user/user.github.io  # explicit repo
+tescmd key deploy                              # auto-detect best method
+tescmd key deploy --method github              # force GitHub Pages
+tescmd key deploy --method tailscale           # force Tailscale Funnel
+tescmd key deploy --repo user/user.github.io   # explicit GitHub repo
 ```
+
+The `--method` flag overrides auto-detection. The choice is persisted in `TESLA_HOSTING_METHOD`.
 
 ### `key validate`
 

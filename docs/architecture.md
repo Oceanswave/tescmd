@@ -31,9 +31,15 @@ tescmd follows a layered architecture with strict separation of concerns. Each l
 │  auth/oauth.py ─ auth/token_store.py             │
 │    (OAuth2 PKCE, token refresh, keyring)         │
 ├─────────────────────────────────────────────────┤
+│              Telemetry Layer                      │
+│  telemetry/server.py ─ telemetry/decoder.py      │
+│  telemetry/dashboard.py ─ telemetry/fields.py    │
+│  telemetry/tailscale.py ─ telemetry/flatbuf.py   │
+│  (WebSocket server, protobuf decode, Rich TUI)   │
+├─────────────────────────────────────────────────┤
 │               Infrastructure                     │
 │  output/ ─ crypto/ ─ models/ ─ _internal/        │
-│  cache/ ─ (formatting, keys, schemas, helpers)   │
+│  cache/ ─ deploy/ ─ (formatting, keys, schemas)  │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -115,7 +121,7 @@ CLI modules do **not** construct HTTP requests or handle auth tokens directly.
 
 **Currently implemented command groups:**
 - `auth` — login (`--reconsent`), logout, status, refresh, register, export, import
-- `vehicle` — list, info, data, location, wake, alerts, release-notes, service, drivers
+- `vehicle` — list, info, data, location, wake, alerts, release-notes, service, drivers, telemetry (config, create, delete, errors, stream)
 - `charge` — status, start, stop, limit, amps, schedule, departure, precondition
 - `climate` — status, on, off, set, seat, keeper, cop-temp, auto-seat, auto-wheel, wheel-level
 - `security` — status, lock, unlock, sentry, valet, remote-start, flash, honk, speed-limit, pin management
@@ -140,7 +146,7 @@ CLI modules do **not** construct HTTP requests or handle auth tokens directly.
 - **`energy.py`** (`EnergyAPI`) — Energy product endpoints (Powerwall, solar).
 - **`sharing.py`** (`SharingAPI`) — Driver and invite management.
 - **`user.py`** (`UserAPI`) — Account info, region, orders, features.
-- **`errors.py`** — Typed exceptions: `AuthError`, `MissingScopesError`, `VehicleAsleepError`, `SessionError`, `KeyNotEnrolledError`, `TierError`, `RateLimitError`, etc.
+- **`errors.py`** — Typed exceptions: `AuthError`, `MissingScopesError`, `VehicleAsleepError`, `SessionError`, `KeyNotEnrolledError`, `TierError`, `RateLimitError`, `TunnelError`, `TailscaleError`, etc.
 
 API classes use **composition**: they receive a `TeslaFleetClient` instance, not extend it.
 
@@ -188,6 +194,7 @@ See [vehicle-command-protocol.md](vehicle-command-protocol.md) for the full prot
 
 - **`keys.py`** — EC P-256 key generation, PEM export/import, public key extraction.
 - **`ecdh.py`** — ECDH key exchange (`derive_session_key`) and uncompressed public key extraction.
+- **`schnorr.py`** — Schnorr signature implementation for telemetry server authentication handshake.
 
 ### `output/` — Output Formatting
 
@@ -195,10 +202,27 @@ See [vehicle-command-protocol.md](vehicle-command-protocol.md) for the full prot
 - **`rich_output.py`** — Rich-based rendering: tables for vehicle data, charge status, climate status, vehicle config, GUI settings. Includes `DisplayUnits` for configurable unit conversion (°F/°C, mi/km, PSI/bar).
 - **`json_output.py`** — JSON serialization with consistent structure for machine parsing.
 
+### `telemetry/` — Fleet Telemetry Streaming
+
+- **`server.py`** (`TelemetryServer`) — Async WebSocket server that receives telemetry push from Tesla. Handles TLS via Tailscale Funnel certs, Schnorr-based authentication handshake, and frame dispatch.
+- **`decoder.py`** (`TelemetryDecoder`) — Decodes protobuf-encoded telemetry payloads using official Tesla proto definitions (`vehicle_data`, `vehicle_alert`, `vehicle_error`, `vehicle_metric`, `vehicle_connectivity`). Returns typed `TelemetryFrame` dataclasses.
+- **`flatbuf.py`** — FlatBuffer parser for Tesla's alternative telemetry encoding format.
+- **`fields.py`** — Field name registry (120+ fields) with preset configs (`default`, `driving`, `charging`, `climate`, `all`). Maps field names to protobuf field numbers.
+- **`dashboard.py`** (`TelemetryDashboard`) — Rich Live TUI with field name, value, and last-update columns. Supports unit conversion via `DisplayUnits`, connection status, frame counter, and uptime display.
+- **`tailscale.py`** (`TailscaleManager`) — Subprocess-based Tailscale management: check installation, start/stop Funnel, retrieve TLS certs, serve files at specific paths.
+
+**Optional dependency:** `pip install tescmd[telemetry]` adds `websockets>=14.0`.
+
+### `deploy/` — Key Deployment
+
+- **`github_pages.py`** — Deploys the public key to a GitHub Pages repo at the `.well-known` path.
+- **`tailscale_serve.py`** — Hosts the public key via Tailscale Funnel at `https://<machine>.tailnet.ts.net/.well-known/appspecific/com.tesla.3p.public-key.pem`.
+
 ### `_internal/` — Shared Utilities
 
 - **`vin.py`** — Smart VIN resolution: checks positional arg, `--vin` flag, active profile, then falls back to interactive vehicle picker.
 - **`async_utils.py`** — `run_async()` helper for running async code from sync Click entry points.
+- **`permissions.py`** — Cross-platform file permissions: `secure_file()` uses `chmod 0600` on Unix and `icacls` on Windows.
 
 ## Design Decisions
 

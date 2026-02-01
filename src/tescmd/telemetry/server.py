@@ -67,6 +67,7 @@ class TelemetryServer:
         self._public_key_pem = public_key_pem
         self._ws_server: ws_server.Server | None = None
         self._mux_server: asyncio.Server | None = None
+        self._active_ws: set[Any] = set()
         self._connection_count = 0
         self._frame_count = 0
 
@@ -103,7 +104,13 @@ class TelemetryServer:
         )
 
     async def stop(self) -> None:
-        """Gracefully shut down both servers."""
+        """Gracefully shut down both servers and active connections."""
+        # Close active WebSocket connections first
+        for ws in list(self._active_ws):
+            with contextlib.suppress(Exception):
+                await ws.close()
+        self._active_ws.clear()
+
         if self._mux_server is not None:
             self._mux_server.close()
             await self._mux_server.wait_closed()
@@ -247,6 +254,7 @@ class TelemetryServer:
         are logged and skipped — never crash the server.
         """
         self._connection_count += 1
+        self._active_ws.add(websocket)
         remote = getattr(websocket, "remote_address", ("unknown", 0))
         logger.info("Vehicle connected: %s (total: %d)", remote, self._connection_count)
 
@@ -270,6 +278,7 @@ class TelemetryServer:
         except Exception:
             logger.debug("Connection closed: %s", remote, exc_info=True)
         finally:
+            self._active_ws.discard(websocket)
             self._connection_count -= 1
             logger.info("Vehicle disconnected: %s (remaining: %d)", remote, self._connection_count)
 

@@ -9,15 +9,6 @@ from pydantic import BaseModel, ConfigDict
 _EXTRA_ALLOW = ConfigDict(extra="allow")
 
 
-class EnergySite(BaseModel):
-    model_config = _EXTRA_ALLOW
-
-    energy_site_id: int
-    resource_type: str | None = None
-    site_name: str | None = None
-    gateway_id: str | None = None
-
-
 class LiveStatus(BaseModel):
     model_config = _EXTRA_ALLOW
 

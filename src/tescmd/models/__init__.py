@@ -19,7 +19,6 @@ from tescmd.models.command import CommandResponse, CommandResult
 from tescmd.models.config import AppSettings, Profile
 from tescmd.models.energy import (
     CalendarHistory,
-    EnergySite,
     GridImportExportConfig,
     LiveStatus,
     SiteInfo,
@@ -61,7 +60,6 @@ __all__ = [
     "CommandResult",
     "DestChargerInfo",
     "DriveState",
-    "EnergySite",
     "FeatureConfig",
     "GridImportExportConfig",
     "GuiSettings",

@@ -13,6 +13,15 @@ def derive_session_key(
 ) -> bytes:
     """Derive a 16-byte session key via ECDH + SHA-1 truncation.
 
+    .. note::
+
+        SHA-1 is required by Tesla's Vehicle Command Protocol — the
+        vehicle firmware expects ``SHA1(shared_secret)[:16]``.  SHA-1's
+        known collision weaknesses do not affect this usage (only
+        preimage resistance matters for key derivation, and SHA-1
+        remains preimage-resistant).  See ``vehicle-command`` Go SDK
+        reference implementation.
+
     Parameters
     ----------
     private_key:
