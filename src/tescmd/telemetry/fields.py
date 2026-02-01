@@ -294,7 +294,13 @@ _NON_STREAMABLE_FIELDS: frozenset[str] = frozenset(
     {name for name in FIELD_NAMES.values() if name.startswith("Semitruck")}
     | {
         "LifetimeEnergyGainedRegen",  # returns "unsupported_field" on many vehicles
-        # These require minimum_delta config instead of interval_seconds:
+    }
+)
+
+# Fields that require minimum_delta instead of interval_seconds.
+# Tesla's API rejects these if minimum_delta is not explicitly set >= 1.
+_DELTA_FIELDS: frozenset[str] = frozenset(
+    {
         "MilesSinceReset",
         "SelfDrivingMilesSinceReset",
     }
@@ -368,7 +374,7 @@ PRESETS: dict[str, dict[str, dict[str, int]]] = {
         "PreconditioningEnabled": {"interval_seconds": 30},
     },
     "all": {
-        name: {"interval_seconds": 30}
+        name: ({"minimum_delta": 1} if name in _DELTA_FIELDS else {"interval_seconds": 30})
         for name in FIELD_NAMES.values()
         if name not in _NON_STREAMABLE_FIELDS
     },

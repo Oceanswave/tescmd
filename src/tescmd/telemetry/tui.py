@@ -13,14 +13,17 @@ import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
 from textual.containers import Grid, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Static
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from pathlib import Path
+
+    from textual.screen import Screen
 
     from tescmd.output.rich_output import DisplayUnits
     from tescmd.telemetry.decoder import TelemetryFrame
@@ -51,10 +54,16 @@ PANEL_FIELDS: dict[str, tuple[str, list[str]]] = {
             "ChargerVoltage",
             "ChargeAmps",
             "ChargePortDoorOpen",
+            "ChargePortLatch",
             "FastChargerPresent",
+            "FastChargerType",
+            "ChargingCableType",
             "BatteryHeaterOn",
             "EnergyRemaining",
             "ChargeCurrentRequest",
+            "ChargeCurrentRequestMax",
+            "ChargeRateMilePerHour",
+            "EstimatedHoursToChargeTermination",
         ],
     ),
     "climate": (
@@ -66,14 +75,28 @@ PANEL_FIELDS: dict[str, tuple[str, list[str]]] = {
             "HvacRightTemperatureRequest",
             "HvacPower",
             "HvacFanStatus",
+            "HvacFanSpeed",
+            "HvacACEnabled",
+            "HvacAutoMode",
             "DefrostMode",
+            "DefrostForPreconditioning",
             "SeatHeaterLeft",
             "SeatHeaterRight",
             "SeatHeaterRearLeft",
             "SeatHeaterRearCenter",
             "SeatHeaterRearRight",
             "HvacSteeringWheelHeatLevel",
+            "HvacSteeringWheelHeatAuto",
+            "AutoSeatClimateLeft",
+            "AutoSeatClimateRight",
+            "ClimateSeatCoolingFrontLeft",
+            "ClimateSeatCoolingFrontRight",
+            "SeatVentEnabled",
+            "RearDisplayHvacEnabled",
+            "RearDefrostEnabled",
+            "ClimateKeeperMode",
             "CabinOverheatProtectionMode",
+            "CabinOverheatProtectionTemperatureLimit",
             "PreconditioningEnabled",
         ],
     ),
@@ -86,13 +109,35 @@ PANEL_FIELDS: dict[str, tuple[str, list[str]]] = {
             "GpsHeading",
             "Odometer",
             "CruiseSetSpeed",
-            "MilesToArrival",
-            "MinutesToArrival",
+            "CruiseFollowDistance",
             "CurrentLimitMph",
+            "SpeedLimitMode",
+            "SpeedLimitWarning",
             "LateralAcceleration",
             "LongitudinalAcceleration",
             "PedalPosition",
             "BrakePedalPos",
+            "LaneDepartureAvoidance",
+            "ForwardCollisionWarning",
+        ],
+    ),
+    "nav": (
+        "Navigation",
+        [
+            "MilesToArrival",
+            "MinutesToArrival",
+            "RouteTrafficMinutesDelay",
+            "DestinationName",
+            "DestinationLocation",
+            "OriginLocation",
+            "RouteLine",
+            "RouteLastUpdated",
+            "ExpectedEnergyPercentAtTripArrival",
+            "HomelinkNearby",
+            "HomelinkDeviceCount",
+            "LocatedAtHome",
+            "LocatedAtWork",
+            "LocatedAtFavorite",
         ],
     ),
     "security": (
@@ -107,12 +152,29 @@ PANEL_FIELDS: dict[str, tuple[str, list[str]]] = {
             "RdWindow",
             "RpWindow",
             "DriverSeatOccupied",
+            "DriverSeatBelt",
+            "PassengerSeatBelt",
             "CenterDisplay",
-            "Version",
             "RemoteStartEnabled",
             "GuestModeEnabled",
-            "SpeedLimitMode",
+            "GuestModeMobileAccessState",
             "PinToDriveEnabled",
+        ],
+    ),
+    "media": (
+        "Media",
+        [
+            "MediaPlaybackStatus",
+            "MediaPlaybackSource",
+            "MediaNowPlayingTitle",
+            "MediaNowPlayingArtist",
+            "MediaNowPlayingAlbum",
+            "MediaNowPlayingStation",
+            "MediaNowPlayingDuration",
+            "MediaNowPlayingElapsed",
+            "MediaAudioVolume",
+            "MediaAudioVolumeMax",
+            "MediaAudioVolumeIncrement",
         ],
     ),
     "tires": (
@@ -122,18 +184,38 @@ PANEL_FIELDS: dict[str, tuple[str, list[str]]] = {
             "TpmsPressureFr",
             "TpmsPressureRl",
             "TpmsPressureRr",
+            "TpmsLastSeenPressureTimeFl",
+            "TpmsLastSeenPressureTimeFr",
+            "TpmsLastSeenPressureTimeRl",
+            "TpmsLastSeenPressureTimeRr",
+            "TpmsHardWarnings",
+            "TpmsSoftWarnings",
         ],
     ),
     "diagnostics": (
-        "Diagnostics",
+        "Diagnostics & Vehicle",
         [
             "ModuleTempMax",
             "ModuleTempMin",
             "BrickVoltageMax",
             "BrickVoltageMin",
+            "NumBrickVoltageMax",
+            "NumBrickVoltageMin",
+            "NumModuleTempMax",
+            "NumModuleTempMin",
             "BMSState",
             "DriveRail",
             "NotEnoughPowerToHeat",
+            "DCDCEnable",
+            "IsolationResistance",
+            "Hvil",
+            "Version",
+            "SoftwareUpdateVersion",
+            "SoftwareUpdateDownloadPercentComplete",
+            "SoftwareUpdateInstallationPercentComplete",
+            "CarType",
+            "WheelType",
+            "ServiceMode",
         ],
     ),
 }
@@ -637,6 +719,219 @@ class TelemetryTUI(App[None]):
             log_paths += f"Command log: {cmd_log}\n"
         self.push_screen(
             HelpScreen(log_path=log_paths.rstrip(), server_info="  ".join(server_parts))
+        )
+
+    # -- Command palette (Ctrl+P) -----------------------------------------------
+
+    def get_system_commands(self, screen: Screen[Any]) -> Iterable[SystemCommand]:
+        """Populate the command palette with all vehicle commands."""
+        yield from super().get_system_commands(screen)
+
+        # --- Security ---
+        yield SystemCommand("Lock doors", "Lock all doors", self.action_cmd_lock)
+        yield SystemCommand("Unlock doors", "Unlock all doors", self.action_cmd_unlock)
+        yield SystemCommand("Honk horn", "Honk the horn", self.action_cmd_honk)
+        yield SystemCommand("Flash lights", "Flash headlights", self.action_cmd_flash)
+        yield SystemCommand("Sentry mode on", "Enable sentry mode", self.action_cmd_sentry_on)
+        yield SystemCommand("Sentry mode off", "Disable sentry mode", self.action_cmd_sentry_off)
+        yield SystemCommand("Remote start", "Enable keyless driving", self.action_cmd_remote_start)
+        yield SystemCommand("Valet mode on", "Enable valet mode", self.action_cmd_valet_on)
+        yield SystemCommand("Valet mode off", "Disable valet mode", self.action_cmd_valet_off)
+        yield SystemCommand("Valet PIN reset", "Reset valet mode PIN", self.action_cmd_valet_reset)
+        yield SystemCommand(
+            "Auto-secure", "Auto-lock and close windows", self.action_cmd_auto_secure
+        )
+        yield SystemCommand(
+            "PIN to Drive on", "Enable PIN to Drive", self.action_cmd_pin_to_drive_on
+        )
+        yield SystemCommand(
+            "PIN to Drive off", "Disable PIN to Drive", self.action_cmd_pin_to_drive_off
+        )
+        yield SystemCommand("Guest mode on", "Enable guest mode", self.action_cmd_guest_on)
+        yield SystemCommand("Guest mode off", "Disable guest mode", self.action_cmd_guest_off)
+        yield SystemCommand(
+            "Boombox", "Play boombox sound", self.action_cmd_boombox, discover=False
+        )
+        yield SystemCommand(
+            "Speed limit clear (admin)",
+            "Admin clear speed limit",
+            self.action_cmd_speed_clear_admin,
+            discover=False,
+        )
+
+        # --- Charging ---
+        yield SystemCommand(
+            "Start charging", "Begin charging session", self.action_cmd_charge_start
+        )
+        yield SystemCommand("Stop charging", "Stop charging session", self.action_cmd_charge_stop)
+        yield SystemCommand(
+            "Open charge port", "Open the charge port door", self.action_cmd_port_open
+        )
+        yield SystemCommand(
+            "Close charge port", "Close the charge port door", self.action_cmd_port_close
+        )
+        yield SystemCommand(
+            "Charge limit: max range",
+            "Set charge limit to 100%",
+            self.action_cmd_charge_max,
+        )
+        yield SystemCommand(
+            "Charge limit: standard",
+            "Set charge limit to standard (80%)",
+            self.action_cmd_charge_std,
+        )
+        yield SystemCommand(
+            "Scheduled charging on",
+            "Enable scheduled charging",
+            self.action_cmd_charge_schedule_on,
+        )
+        yield SystemCommand(
+            "Scheduled charging off",
+            "Disable scheduled charging",
+            self.action_cmd_charge_schedule_off,
+        )
+
+        # --- Climate ---
+        yield SystemCommand("Climate on", "Turn on climate control", self.action_cmd_climate_on)
+        yield SystemCommand("Climate off", "Turn off climate control", self.action_cmd_climate_off)
+        yield SystemCommand(
+            "Steering wheel heater on",
+            "Enable steering wheel heater",
+            self.action_cmd_wheel_heater_on,
+        )
+        yield SystemCommand(
+            "Steering wheel heater off",
+            "Disable steering wheel heater",
+            self.action_cmd_wheel_heater_off,
+        )
+        yield SystemCommand(
+            "Preconditioning on",
+            "Enable battery preconditioning",
+            self.action_cmd_precondition_on,
+        )
+        yield SystemCommand(
+            "Preconditioning off",
+            "Disable battery preconditioning",
+            self.action_cmd_precondition_off,
+        )
+        yield SystemCommand(
+            "Cabin overheat protection on",
+            "Enable cabin overheat protection",
+            self.action_cmd_overheat_on,
+        )
+        yield SystemCommand(
+            "Cabin overheat protection off",
+            "Disable cabin overheat protection",
+            self.action_cmd_overheat_off,
+        )
+        yield SystemCommand(
+            "Bioweapon defense on",
+            "Enable bioweapon defense mode",
+            self.action_cmd_bioweapon_on,
+        )
+        yield SystemCommand(
+            "Bioweapon defense off",
+            "Disable bioweapon defense mode",
+            self.action_cmd_bioweapon_off,
+        )
+        yield SystemCommand(
+            "Auto steering wheel heater on",
+            "Enable auto steering wheel heater",
+            self.action_cmd_auto_wheel_on,
+        )
+        yield SystemCommand(
+            "Auto steering wheel heater off",
+            "Disable auto steering wheel heater",
+            self.action_cmd_auto_wheel_off,
+        )
+        yield SystemCommand("Defrost on", "Enable max defrost", self.action_cmd_defrost_on)
+        yield SystemCommand("Defrost off", "Disable max defrost", self.action_cmd_defrost_off)
+        yield SystemCommand(
+            "Climate keeper: Dog mode",
+            "Set climate keeper to Dog mode",
+            lambda: self._run_command(["climate", "keeper", "dog"], "Climate keeper: Dog"),
+        )
+        yield SystemCommand(
+            "Climate keeper: Camp mode",
+            "Set climate keeper to Camp mode",
+            lambda: self._run_command(["climate", "keeper", "camp"], "Climate keeper: Camp"),
+        )
+        yield SystemCommand(
+            "Climate keeper: off",
+            "Turn off climate keeper mode",
+            lambda: self._run_command(["climate", "keeper", "off"], "Climate keeper: off"),
+        )
+
+        # --- Trunk & Windows ---
+        yield SystemCommand("Open trunk", "Open/close rear trunk", self.action_cmd_trunk)
+        yield SystemCommand("Close trunk", "Close rear trunk", self.action_cmd_trunk_close)
+        yield SystemCommand("Open frunk", "Open front trunk", self.action_cmd_frunk)
+        yield SystemCommand("Vent windows", "Vent all windows", self.action_cmd_window_vent)
+        yield SystemCommand("Close windows", "Close all windows", self.action_cmd_window_close)
+        yield SystemCommand("Vent sunroof", "Vent the sunroof", self.action_cmd_sunroof_vent)
+        yield SystemCommand("Close sunroof", "Close the sunroof", self.action_cmd_sunroof_close)
+        yield SystemCommand("Open tonneau", "Open the tonneau cover", self.action_cmd_tonneau_open)
+        yield SystemCommand(
+            "Close tonneau", "Close the tonneau cover", self.action_cmd_tonneau_close
+        )
+        yield SystemCommand("Stop tonneau", "Stop tonneau movement", self.action_cmd_tonneau_stop)
+
+        # --- Media ---
+        yield SystemCommand("Play / Pause", "Toggle media playback", self.action_cmd_play_pause)
+        yield SystemCommand("Next track", "Skip to next track", self.action_cmd_next_track)
+        yield SystemCommand("Previous track", "Go to previous track", self.action_cmd_prev_track)
+        yield SystemCommand("Next favorite", "Skip to next favorite", self.action_cmd_next_fav)
+        yield SystemCommand(
+            "Previous favorite", "Go to previous favorite", self.action_cmd_prev_fav
+        )
+        yield SystemCommand("Volume up", "Increase volume", self.action_cmd_vol_up)
+        yield SystemCommand("Volume down", "Decrease volume", self.action_cmd_vol_down)
+
+        # --- Navigation ---
+        yield SystemCommand(
+            "Navigate to Supercharger",
+            "Navigate to nearest Supercharger",
+            self.action_cmd_nav_supercharger,
+        )
+        yield SystemCommand(
+            "Trigger HomeLink",
+            "Trigger HomeLink (garage door)",
+            self.action_cmd_nav_homelink,
+        )
+
+        # --- Software ---
+        yield SystemCommand(
+            "Cancel software update",
+            "Cancel a pending software update",
+            self.action_cmd_software_cancel,
+        )
+        yield SystemCommand(
+            "Schedule software update now",
+            "Schedule software update to install in 60s",
+            lambda: self._run_command(["software", "schedule", "60"], "Schedule software update"),
+        )
+
+        # --- Vehicle ---
+        yield SystemCommand("Wake vehicle", "Wake the vehicle from sleep", self.action_cmd_wake)
+        yield SystemCommand(
+            "Low power mode on",
+            "Enable low power consumption mode",
+            self.action_cmd_low_power_on,
+        )
+        yield SystemCommand(
+            "Low power mode off",
+            "Disable low power consumption mode",
+            self.action_cmd_low_power_off,
+        )
+        yield SystemCommand(
+            "Accessory power on",
+            "Enable accessory power mode",
+            self.action_cmd_accessory_power_on,
+        )
+        yield SystemCommand(
+            "Accessory power off",
+            "Disable accessory power mode",
+            self.action_cmd_accessory_power_off,
         )
 
     # -- Security actions ------------------------------------------------------

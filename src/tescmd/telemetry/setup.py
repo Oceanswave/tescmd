@@ -388,6 +388,10 @@ async def telemetry_session(
 
     finally:
         # Cleanup in reverse order — each tolerates failure.
+        # Suppress noisy library loggers so shutdown messages stay clean.
+        for _logger_name in ("httpx", "httpcore", "websockets", "mcp"):
+            logging.getLogger(_logger_name).setLevel(logging.WARNING)
+
         is_rich = formatter.format != "json"
 
         if config_created:
