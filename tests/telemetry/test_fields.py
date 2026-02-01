@@ -60,6 +60,18 @@ class TestPresets:
         for name in fields:
             assert not name.startswith("Semitruck"), f"Semi-truck field in all preset: {name}"
 
+    def test_all_preset_delta_fields_have_both_keys(self) -> None:
+        """Delta fields must have both interval_seconds and minimum_delta."""
+        from tescmd.telemetry.fields import _DELTA_FIELDS
+
+        fields = resolve_fields("all")
+        for name in _DELTA_FIELDS:
+            assert name in fields, f"Delta field {name} missing from all preset"
+            config = fields[name]
+            assert "interval_seconds" in config, f"{name} missing interval_seconds"
+            assert "minimum_delta" in config, f"{name} missing minimum_delta"
+            assert config["minimum_delta"] >= 1, f"{name} minimum_delta must be >= 1"
+
     def test_presets_use_valid_field_names(self) -> None:
         """Every field name in every preset must exist in FIELD_NAMES."""
         from tescmd.telemetry.fields import PRESETS

@@ -500,6 +500,10 @@ async def _cmd_serve(
                     f'{{"csv_log": "{csv_sink.log_path}", "frames": {csv_sink.frame_count}}}',
                     file=sys.stderr,
                 )
+        if tui is not None:
+            cmd_log = getattr(tui, "_cmd_log_path", "")
+            if cmd_log and formatter.format != "json":
+                formatter.rich.info(f"[dim]Command log: {cmd_log}[/dim]")
         if cache_sink is not None:
             cache_sink.flush()
             if formatter.format != "json":

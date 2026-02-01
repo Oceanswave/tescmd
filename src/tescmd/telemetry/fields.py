@@ -374,7 +374,11 @@ PRESETS: dict[str, dict[str, dict[str, int]]] = {
         "PreconditioningEnabled": {"interval_seconds": 30},
     },
     "all": {
-        name: ({"minimum_delta": 1} if name in _DELTA_FIELDS else {"interval_seconds": 30})
+        name: (
+            {"interval_seconds": 30, "minimum_delta": 1}
+            if name in _DELTA_FIELDS
+            else {"interval_seconds": 30}
+        )
         for name in FIELD_NAMES.values()
         if name not in _NON_STREAMABLE_FIELDS
     },
