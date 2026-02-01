@@ -43,8 +43,14 @@ class TelemetryDashboard:
             self._state[datum.field_name] = datum.value
             self._timestamps[datum.field_name] = frame.created_at
 
+        # Trigger an immediate refresh so data appears without waiting for the
+        # next auto-refresh tick.  We do NOT call live.update(self.render())
+        # because that would replace the Live renderable with a static snapshot,
+        # breaking the uptime counter between frames.  The Live object already
+        # holds a reference to `self` (via __rich__), so refresh() re-renders
+        # the dashboard with the freshly updated state.
         if self._live is not None:
-            self._live.update(self.render())
+            self._live.refresh()
 
     def set_live(self, live: Live) -> None:
         """Attach a Rich Live instance for auto-refresh."""

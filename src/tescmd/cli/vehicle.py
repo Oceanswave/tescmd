@@ -978,6 +978,10 @@ async def _cmd_telemetry_stream(
             for attempt in range(max_retries):
                 try:
                     await _try_register()
+                    if attempt > 0 and formatter.format != "json":
+                        formatter.rich.info(
+                            "[green]Tunnel is reachable — registration succeeded.[/green]"
+                        )
                     break
                 except AuthError as exc:
                     status = getattr(exc, "status_code", None)
@@ -1039,6 +1043,7 @@ async def _cmd_telemetry_stream(
                         await asyncio.get_event_loop().run_in_executor(None, input)
                         try:
                             await _try_register()
+                            formatter.rich.info("[green]Registration succeeded![/green]")
                             break
                         except AuthError as retry_exc:
                             retry_status = getattr(retry_exc, "status_code", None)
