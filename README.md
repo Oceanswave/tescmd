@@ -36,39 +36,22 @@ tescmd is designed to work as a tool that AI agents can invoke directly. Platfor
 
 ```bash
 pip install tescmd
-
-# First-time setup (interactive wizard)
 tescmd setup
-
-# Authenticate (opens browser)
-tescmd auth login
-
-# List your vehicles
-tescmd vehicle list
-
-# Get full vehicle data snapshot
-tescmd vehicle info
-
-# Check charge status (uses cache — second call is instant)
-tescmd charge status
-
-# Start charging (auto-invalidates cache)
-tescmd charge start --wake
-
-# Climate control
-tescmd climate on --wake
-tescmd climate set 72
-
-# Lock the car
-tescmd security lock --wake
-
-# Enroll your key on a vehicle (required for signed commands)
-tescmd key enroll 5YJ3E1EA1NF000000
-
-# Cache management
-tescmd cache status
-tescmd cache clear
 ```
+
+That's it. The interactive setup wizard walks you through everything: creating a Tesla Developer app, generating an EC key pair, hosting the public key (via GitHub Pages or Tailscale Funnel), registering with the Fleet API, authenticating via OAuth2, and enrolling your key on a vehicle. Each step checks prerequisites and offers remediation if something is missing.
+
+After setup completes, you can start using commands:
+
+```bash
+tescmd charge status               # Check battery and charging state
+tescmd vehicle info                 # Full vehicle data snapshot
+tescmd climate on --wake            # Turn on climate (wakes vehicle if asleep)
+tescmd security lock --wake         # Lock the car
+tescmd vehicle telemetry stream     # Real-time telemetry dashboard
+```
+
+Every read command is cached — repeat calls within the TTL window are instant and free.
 
 ## Prerequisites
 
@@ -165,7 +148,7 @@ Check which backend is active with `tescmd status` — the output includes a `To
 |---|---|---|
 | `setup` | *(interactive wizard)* | First-run configuration: client ID, secret, region, domain, key enrollment |
 | `auth` | `login`, `logout`, `status`, `refresh`, `register`, `export`, `import` | OAuth2 authentication lifecycle |
-| `vehicle` | `list`, `get`, `info`, `data`, `location`, `wake`, `rename`, `mobile-access`, `nearby-chargers`, `alerts`, `release-notes`, `service`, `drivers`, `calendar`, `subscriptions`, `upgrades`, `options`, `specs`, `warranty`, `fleet-status`, `low-power`, `accessory-power`, `telemetry {config,create,delete,errors}` | Vehicle discovery, state queries, fleet telemetry, power management |
+| `vehicle` | `list`, `get`, `info`, `data`, `location`, `wake`, `rename`, `mobile-access`, `nearby-chargers`, `alerts`, `release-notes`, `service`, `drivers`, `calendar`, `subscriptions`, `upgrades`, `options`, `specs`, `warranty`, `fleet-status`, `low-power`, `accessory-power`, `telemetry {config,create,delete,errors,stream}` | Vehicle discovery, state queries, fleet telemetry streaming, power management |
 | `charge` | `status`, `start`, `stop`, `limit`, `limit-max`, `limit-std`, `amps`, `port-open`, `port-close`, `schedule`, `departure`, `precondition-add`, `precondition-remove`, `add-schedule`, `remove-schedule`, `clear-schedules`, `clear-preconditions`, `managed-amps`, `managed-location`, `managed-schedule` | Charge queries, control, scheduling, and fleet management |
 | `billing` | `history`, `sessions`, `invoice` | Supercharger billing history and invoices |
 | `climate` | `status`, `on`, `off`, `set`, `precondition`, `seat`, `seat-cool`, `wheel-heater`, `overheat`, `bioweapon`, `keeper`, `cop-temp`, `auto-seat`, `auto-wheel`, `wheel-level` | Climate, seat, and steering wheel control |
@@ -309,6 +292,41 @@ Configure via environment variables:
 | `TESLA_CACHE_ENABLED` | `true` | Enable/disable the cache |
 | `TESLA_CACHE_TTL` | `60` | Time-to-live in seconds |
 | `TESLA_CACHE_DIR` | `~/.cache/tescmd` | Cache directory path |
+
+## Fleet Telemetry Streaming
+
+Tesla's Fleet Telemetry lets your vehicle push real-time data directly to your server — no polling, no per-request charges. tescmd handles all the setup:
+
+```bash
+# Install telemetry dependencies
+pip install tescmd[telemetry]
+
+# Stream real-time data (Rich dashboard in TTY, JSONL when piped)
+tescmd vehicle telemetry stream
+
+# Select field presets
+tescmd vehicle telemetry stream --fields driving     # Speed, location, power
+tescmd vehicle telemetry stream --fields charging    # Battery, voltage, current
+tescmd vehicle telemetry stream --fields climate     # Temps, HVAC state
+tescmd vehicle telemetry stream --fields all         # Everything (120+ fields)
+
+# Override polling interval
+tescmd vehicle telemetry stream --interval 5         # Every 5 seconds
+
+# JSONL output for scripting
+tescmd vehicle telemetry stream --format json | jq .
+```
+
+**Requires Tailscale** with Funnel enabled. The stream command starts a local WebSocket server, exposes it via Tailscale Funnel (handles TLS + NAT traversal), configures Tesla to push data to it, and renders an interactive dashboard with live uptime counter, unit conversion, and connection status. Press `q` to stop — cleanup messages show each step (removing telemetry config, restoring partner domain, stopping tunnel).
+
+### Telemetry vs Polling Costs
+
+| Approach | 1 vehicle, 5-second interval, 24 hours | Monthly cost estimate |
+|---|---|---|
+| **Polling `vehicle_data`** | ~17,280 requests × $0.001 = **$17/day** | **$500+/month** |
+| **Fleet Telemetry streaming** | 1 config create + 1 config delete = **2 requests** | **< $0.01/month** |
+
+Fleet Telemetry streaming is a flat-cost alternative: you pay only for the initial config setup and teardown, regardless of how much data flows. The tradeoff is that you need Tailscale running on a machine to receive the push.
 
 ## Key Enrollment & Vehicle Command Protocol
 
