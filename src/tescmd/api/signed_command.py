@@ -250,8 +250,7 @@ class SignedCommandAPI:
 
             # All other faults — raise with descriptive message.
             raise SessionError(
-                f"Vehicle rejected command '{command}' for {vin}: {desc} "
-                f"(fault: {fault.name})"
+                f"Vehicle rejected command '{command}' for {vin}: {desc} (fault: {fault.name})"
             )
 
         logger.debug("Signed command '%s' succeeded for %s", command, vin)

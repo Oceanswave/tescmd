@@ -81,9 +81,7 @@ def test_share_payload_empty_body() -> None:
 
 def test_gps_payload_lat_lon() -> None:
     """GPS request encodes lat/lon as doubles."""
-    payload = build_command_payload(
-        "navigation_gps_request", {"lat": 37.7749, "lon": -122.4194}
-    )
+    payload = build_command_payload("navigation_gps_request", {"lat": 37.7749, "lon": -122.4194})
     assert payload is not None
     # Verify the doubles are present in the binary output
     lat_bytes = struct.pack("<d", 37.7749)
@@ -94,9 +92,7 @@ def test_gps_payload_lat_lon() -> None:
 
 def test_gps_payload_with_order() -> None:
     """GPS request with order includes the enum field."""
-    without_order = build_command_payload(
-        "navigation_gps_request", {"lat": 37.0, "lon": -122.0}
-    )
+    without_order = build_command_payload("navigation_gps_request", {"lat": 37.0, "lon": -122.0})
     with_order = build_command_payload(
         "navigation_gps_request", {"lat": 37.0, "lon": -122.0, "order": 1}
     )

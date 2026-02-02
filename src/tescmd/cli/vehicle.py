@@ -182,9 +182,7 @@ async def _cmd_location(app_ctx: AppContext, vin_positional: str | None) -> None
     vin = require_vin(vin_positional, app_ctx.vin)
     client, api = get_vehicle_api(app_ctx)
     try:
-        vdata = await cached_vehicle_data(
-            app_ctx, api, vin, endpoints=["location_data"]
-        )
+        vdata = await cached_vehicle_data(app_ctx, api, vin, endpoints=["location_data"])
     finally:
         await client.close()
 

@@ -121,9 +121,7 @@ _INFOTAINMENT_COMMANDS: dict[str, CommandSpec] = {
     "cancel_software_update": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     # Vehicle name / calendar
     "set_vehicle_name": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
-    "upcoming_calendar_entries": CommandSpec(
-        Domain.DOMAIN_INFOTAINMENT, requires_signing=False
-    ),
+    "upcoming_calendar_entries": CommandSpec(Domain.DOMAIN_INFOTAINMENT, requires_signing=False),
     # Windows / sunroof
     "window_control": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "sun_roof_control": CommandSpec(Domain.DOMAIN_INFOTAINMENT),

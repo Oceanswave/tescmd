@@ -450,8 +450,13 @@ class RichOutput:
 
         # Show any additional location fields from the API (extra="allow")
         _known = {
-            "latitude", "longitude", "heading", "timestamp",
-            "shift_state", "speed", "power",
+            "latitude",
+            "longitude",
+            "heading",
+            "timestamp",
+            "shift_state",
+            "speed",
+            "power",
         }
         for key, value in sorted(ds.model_extra.items()):
             if key not in _known and value is not None:

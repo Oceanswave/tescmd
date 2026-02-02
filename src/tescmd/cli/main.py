@@ -588,8 +588,7 @@ def _handle_session_error(
     formatter.rich.info("  2. Use [cyan]--verbose[/cyan] to see fault codes and signing details")
     formatter.rich.info("  3. If repeated failures, re-enroll:")
     formatter.rich.info(
-        "     [cyan]tescmd key generate --force && tescmd key deploy"
-        " && tescmd key enroll[/cyan]"
+        "     [cyan]tescmd key generate --force && tescmd key deploy && tescmd key enroll[/cyan]"
     )
 
 
