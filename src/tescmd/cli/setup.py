@@ -441,10 +441,10 @@ def _deploy_key_github(
     from tescmd.crypto.keys import load_public_key_pem
     from tescmd.deploy.github_pages import (
         deploy_public_key,
+        fetch_key_pem,
         get_key_url,
         is_gh_authenticated,
         is_gh_available,
-        validate_key_url,
         wait_for_pages_deployment,
     )
 
@@ -461,14 +461,33 @@ def _deploy_key_github(
         info("")
         return
 
-    # Check if key is already deployed
-    if validate_key_url(domain):
-        info(f"Public key: [green]already accessible[/green] at {get_key_url(domain)}")
+    # Compare remote key to local key
+    pem = load_public_key_pem(key_dir)
+    remote_pem = fetch_key_pem(domain)
+
+    if remote_pem is not None and remote_pem == pem.strip():
+        info(f"Public key: [green]matches GitHub[/green] at {get_key_url(domain)}")
         info("")
         return
 
-    info("Deploying public key to GitHub Pages...")
-    pem = load_public_key_pem(key_dir)
+    if remote_pem is not None:
+        # Remote key exists but differs — confirm before overwriting
+        info("[yellow]The public key on GitHub differs from your local key.[/yellow]")
+        info(f"  Remote: {get_key_url(domain)}")
+        info("  This can happen after regenerating your key pair.")
+        info("")
+        try:
+            answer = input("Update GitHub with the local key? [y/N] ").strip()
+        except (EOFError, KeyboardInterrupt):
+            answer = "n"
+        if answer.lower() != "y":
+            info("[dim]Skipped — GitHub key left unchanged.[/dim]")
+            info("")
+            return
+        info("Updating public key on GitHub Pages...")
+    else:
+        info("Deploying public key to GitHub Pages...")
+
     deploy_public_key(pem, github_repo)
 
     info("[green]Key committed and pushed.[/green]")

@@ -223,12 +223,23 @@ def get_key_url(domain: str) -> str:
 
 def validate_key_url(domain: str) -> bool:
     """Return True if the public key is accessible at the expected URL."""
+    return fetch_key_pem(domain) is not None
+
+
+def fetch_key_pem(domain: str) -> str | None:
+    """Fetch the public key PEM from the hosted ``.well-known`` URL.
+
+    Returns the PEM string (stripped), or ``None`` if the key is not
+    accessible or does not look like a PEM public key.
+    """
     url = get_key_url(domain)
     try:
         resp = httpx.get(url, follow_redirects=True, timeout=10)
-        return resp.status_code == 200 and "BEGIN PUBLIC KEY" in resp.text
+        if resp.status_code == 200 and "BEGIN PUBLIC KEY" in resp.text:
+            return resp.text.strip()
     except httpx.HTTPError:
-        return False
+        pass
+    return None
 
 
 def wait_for_pages_deployment(
