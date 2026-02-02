@@ -28,6 +28,9 @@ class NodeCapabilities(BaseModel):
         "speed.get",
         "charge_state.get",
         "security.get",
+        # Trigger reads
+        "trigger.list",
+        "trigger.poll",
     ]
     writes: list[str] = [
         "door.lock",
@@ -44,6 +47,16 @@ class NodeCapabilities(BaseModel):
         "honk_horn",
         "sentry.on",
         "sentry.off",
+        # Trigger writes
+        "trigger.create",
+        "trigger.delete",
+        # Convenience trigger aliases
+        "cabin_temp.trigger",
+        "outside_temp.trigger",
+        "battery.trigger",
+        "location.trigger",
+        # Meta-dispatch
+        "system.run",
     ]
 
     @property
@@ -78,12 +91,12 @@ class FieldFilter(BaseModel):
     """Per-field filter configuration for the dual-gate filter."""
 
     enabled: bool = True
-    granularity: float = 0.0
+    granularity: float = Field(default=0.0, ge=0)
     """Delta threshold — units depend on field type (meters, percent, degrees, etc.).
 
     A value of ``0`` means any change triggers emission.
     """
-    throttle_seconds: float = 1.0
+    throttle_seconds: float = Field(default=1.0, ge=0)
     """Minimum seconds between emissions for this field."""
 
 

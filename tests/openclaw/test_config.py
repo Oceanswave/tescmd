@@ -161,8 +161,8 @@ class TestBridgeConfigCapabilities:
     def test_default_capabilities(self) -> None:
         cfg = BridgeConfig()
         assert isinstance(cfg.capabilities, NodeCapabilities)
-        assert len(cfg.capabilities.reads) == 6
-        assert len(cfg.capabilities.writes) == 14
+        assert len(cfg.capabilities.reads) == 8
+        assert len(cfg.capabilities.writes) == 21
 
     def test_custom_capabilities_from_json(self, tmp_path: Path) -> None:
         config_file = tmp_path / "bridge.json"

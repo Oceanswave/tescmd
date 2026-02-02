@@ -238,6 +238,7 @@ async def _cmd_serve(
 
     assert isinstance(app_ctx, AppContext)
     formatter = app_ctx.formatter
+    is_rich = formatter.format != "json"
 
     is_tty = sys.stdin.isatty() and transport != "stdio"
     interactive = is_tty
@@ -262,8 +263,10 @@ async def _cmd_serve(
     cache_sink = None
     csv_sink = None
     gw = None
+    oc_bridge = None
     dashboard = None
     tui = None
+    trigger_manager = None
     vin: str | None = None
     field_config: dict[str, dict[str, int]] | None = None
 
@@ -274,6 +277,10 @@ async def _cmd_serve(
         from tescmd.telemetry.mapper import TelemetryMapper
 
         vin = require_vin(vin_positional, app_ctx.vin)
+
+        from tescmd.triggers.manager import TriggerManager
+
+        trigger_manager = TriggerManager(vin=vin)
 
         if telemetry_port is None:
             telemetry_port = random.randint(49152, 65534)
@@ -286,7 +293,7 @@ async def _cmd_serve(
         cache_sink = CacheSink(cache, mapper, vin)
         fanout.add_sink(cache_sink.on_frame)
 
-        if formatter.format != "json":
+        if is_rich:
             formatter.rich.info(f"Cache warming enabled for {vin}")
 
         # CSV log sink — wide-format telemetry log (default on)
@@ -297,11 +304,11 @@ async def _cmd_serve(
             csv_sink = CSVLogSink(csv_path, vin=vin)
             fanout.add_sink(csv_sink.on_frame)
 
-            if formatter.format != "json":
+            if is_rich:
                 formatter.rich.info(f"CSV log: {csv_path}")
 
         # Display sink: TUI (default) / legacy Rich.Live dashboard / JSONL
-        if interactive and formatter.format != "json":
+        if interactive and is_rich:
             if legacy_dashboard:
                 # Legacy Rich Live dashboard (fallback)
                 from tescmd.telemetry.dashboard import TelemetryDashboard
@@ -348,13 +355,8 @@ async def _cmd_serve(
         if openclaw_url:
             from pathlib import Path
 
-            from tescmd.openclaw.bridge import TelemetryBridge
+            from tescmd.openclaw.bridge import build_openclaw_pipeline
             from tescmd.openclaw.config import BridgeConfig
-            from tescmd.openclaw.dispatcher import CommandDispatcher
-            from tescmd.openclaw.emitter import EventEmitter
-            from tescmd.openclaw.filters import DualGateFilter
-            from tescmd.openclaw.gateway import GatewayClient
-            from tescmd.openclaw.telemetry_store import TelemetryStore
 
             if openclaw_config_path:
                 config = BridgeConfig.load(Path(openclaw_config_path))
@@ -364,42 +366,60 @@ async def _cmd_serve(
                 gateway_url=openclaw_url,
                 gateway_token=openclaw_token,
             )
-            oc_telemetry_store = TelemetryStore()
-            oc_dispatcher = CommandDispatcher(
-                vin=vin, app_ctx=app_ctx, telemetry_store=oc_telemetry_store
+            oc_pipeline = build_openclaw_pipeline(
+                config, vin, app_ctx, trigger_manager=trigger_manager, dry_run=dry_run
             )
-            filt = DualGateFilter(config.telemetry)
-            emitter = EventEmitter(client_id=config.client_id)
-            from tescmd import __version__ as _tescmd_version
+            gw = oc_pipeline.gateway
+            oc_bridge = oc_pipeline.bridge
 
-            gw = GatewayClient(
-                config.gateway_url,
-                token=config.gateway_token,
-                client_id=config.client_id,
-                client_version=config.client_version,
-                display_name=f"tescmd-{_tescmd_version}-{vin}",
-                capabilities=config.capabilities,
-                on_request=oc_dispatcher.dispatch,
-            )
-            bridge = TelemetryBridge(
-                gw, filt, emitter, dry_run=dry_run, telemetry_store=oc_telemetry_store
-            )
+            # Push trigger notifications to gateway
+            if trigger_manager is not None:
+                push_cb = oc_bridge.make_trigger_push_callback()
+                if push_cb is not None:
+                    trigger_manager.add_on_fire(push_cb)
 
             if not dry_run:
-                if formatter.format != "json":
+                if is_rich:
                     formatter.rich.info(f"Connecting to OpenClaw Gateway: {config.gateway_url}")
                 await gw.connect_with_backoff(max_attempts=5)
-                if formatter.format != "json":
+                if is_rich:
                     formatter.rich.info("[green]Connected to OpenClaw gateway.[/green]")
             else:
-                if formatter.format != "json":
+                if is_rich:
                     formatter.rich.info(
                         "[yellow]Dry-run mode — events will be logged as JSONL to stderr.[/yellow]"
                     )
 
             # Register sink AFTER gateway is connected (or dry-run confirmed)
             # so early telemetry frames aren't silently dropped.
-            fanout.add_sink(bridge.on_frame)
+            fanout.add_sink(oc_bridge.on_frame)
+
+        # Lightweight trigger sink — evaluates triggers when there is no
+        # OpenClaw bridge (which handles evaluation itself).
+        if trigger_manager is not None and not openclaw_url:
+            from tescmd.openclaw.telemetry_store import TelemetryStore as _TStore
+
+            _trigger_store = _TStore()
+
+            async def _trigger_sink(frame: object) -> None:
+                from tescmd.telemetry.decoder import TelemetryFrame
+
+                assert isinstance(frame, TelemetryFrame)
+                assert trigger_manager is not None
+                for datum in frame.data:
+                    prev_snap = _trigger_store.get(datum.field_name)
+                    prev_value = prev_snap.value if prev_snap is not None else None
+                    _trigger_store.update(datum.field_name, datum.value, frame.created_at)
+                    await trigger_manager.evaluate(
+                        datum.field_name, datum.value, prev_value, frame.created_at
+                    )
+
+            fanout.add_sink(_trigger_sink)
+
+    # -- Register MCP trigger tools (when both MCP and telemetry are active) --
+    if mcp_server is not None and trigger_manager is not None:
+        _register_trigger_tools(mcp_server, trigger_manager)
+        tool_count = len(mcp_server.list_tools())
 
     # -- Tailscale Funnel setup (optional, MCP-only mode) --
     public_url: str | None = None
@@ -416,7 +436,7 @@ async def _cmd_serve(
         funnel_url = await ts.start_funnel(mcp_port)
         public_url = funnel_url
 
-        if formatter.format != "json":
+        if is_rich:
             formatter.rich.info(f"Tailscale Funnel active: {funnel_url}/mcp")
         else:
             print(f'{{"url": "{funnel_url}/mcp"}}', file=sys.stderr)
@@ -447,13 +467,13 @@ async def _cmd_serve(
             tui.set_log_path(csv_sink.log_path)
 
     # -- Start everything --
-    if not no_mcp and formatter.format != "json" and tui is None:
+    if not no_mcp and is_rich and tui is None:
         base_url = f"{public_url}/mcp" if public_url else f"http://127.0.0.1:{mcp_port}/mcp"
         formatter.rich.info(
             f"MCP server starting on {base_url} ({tool_count} tools, "
             f"{fanout.sink_count} telemetry sink(s))"
         )
-    if (not no_mcp or not no_telemetry) and formatter.format != "json" and tui is None:
+    if (not no_mcp or not no_telemetry) and is_rich and tui is None:
         formatter.rich.info("Press Ctrl+C to stop.")
 
     combined_task: asyncio.Task[None] | None = None
@@ -512,7 +532,7 @@ async def _cmd_serve(
                     if tui is not None:
                         tui.set_tunnel_url(session.tunnel_url)
 
-                    if formatter.format != "json" and tui is None:
+                    if is_rich and tui is None:
                         formatter.rich.info("Telemetry pipeline active.")
 
                     if tui is not None:
@@ -528,10 +548,6 @@ async def _cmd_serve(
                         ) as live:
                             dashboard.set_live(live)
                             await _wait_for_interrupt()
-                    elif combined_task is not None:
-                        # Block until Ctrl+C; combined app runs as a
-                        # background task and is cancelled on exit.
-                        await _wait_for_interrupt()
                     else:
                         await _wait_for_interrupt()
             finally:
@@ -548,13 +564,15 @@ async def _cmd_serve(
     finally:
         if ts is not None:
             await ts.stop_funnel()
-            if formatter.format != "json":
+            if is_rich:
                 formatter.rich.info("Tailscale Funnel stopped.")
+        if oc_bridge is not None:
+            await oc_bridge.send_disconnecting()
         if gw is not None:
             await gw.close()
         if csv_sink is not None:
             csv_sink.close()
-            if formatter.format != "json":
+            if is_rich:
                 formatter.rich.info(
                     f"[dim]CSV log: {csv_sink.log_path} ({csv_sink.frame_count} frames)[/dim]"
                 )
@@ -565,18 +583,99 @@ async def _cmd_serve(
                 )
         if tui is not None:
             cmd_log = getattr(tui, "_cmd_log_path", "")
-            if cmd_log and formatter.format != "json":
+            if cmd_log and is_rich:
                 formatter.rich.info(f"[dim]Command log: {cmd_log}[/dim]")
             activity_log = getattr(tui, "_activity_log_path", "")
-            if activity_log and formatter.format != "json":
+            if activity_log and is_rich:
                 formatter.rich.info(f"[dim]Activity log: {activity_log}[/dim]")
         if cache_sink is not None:
             cache_sink.flush()
-            if formatter.format != "json":
+            if is_rich:
                 formatter.rich.info(
                     f"[dim]Cache sink: {cache_sink.frame_count} frames, "
                     f"{cache_sink.field_count} field updates[/dim]"
                 )
+
+
+def _register_trigger_tools(mcp_server: Any, trigger_manager: Any) -> None:
+    """Register trigger CRUD tools on the MCP server."""
+    from tescmd.triggers.models import TriggerCondition, TriggerDefinition, TriggerOperator
+
+    def _handle_create(params: dict[str, Any]) -> dict[str, Any]:
+        condition = TriggerCondition(
+            field=params["field"],
+            operator=TriggerOperator(params["operator"]),
+            value=params.get("value"),
+        )
+        trigger = TriggerDefinition(
+            condition=condition,
+            once=params.get("once", False),
+            cooldown_seconds=params.get("cooldown_seconds", 60.0),
+        )
+        created = trigger_manager.create(trigger)
+        return created.model_dump(mode="json")
+
+    def _handle_delete(params: dict[str, Any]) -> dict[str, Any]:
+        deleted = trigger_manager.delete(params["id"])
+        return {"deleted": deleted, "id": params["id"]}
+
+    def _handle_list(params: dict[str, Any]) -> dict[str, Any]:
+        triggers = trigger_manager.list_all()
+        return {"triggers": [t.model_dump(mode="json") for t in triggers]}
+
+    def _handle_poll(params: dict[str, Any]) -> dict[str, Any]:
+        notifications = trigger_manager.drain_pending()
+        return {"notifications": [n.model_dump(mode="json") for n in notifications]}
+
+    mcp_server.register_custom_tool(
+        "trigger_create",
+        _handle_create,
+        "Create a telemetry trigger condition",
+        {
+            "type": "object",
+            "properties": {
+                "field": {"type": "string", "description": "Telemetry field name"},
+                "operator": {
+                    "type": "string",
+                    "description": "Operator: lt, gt, lte, gte, eq, neq, changed, enter, leave",
+                },
+                "value": {"description": "Threshold value (optional for 'changed')"},
+                "once": {
+                    "type": "boolean",
+                    "description": "Fire once then auto-delete (default: false)",
+                },
+                "cooldown_seconds": {
+                    "type": "number",
+                    "description": "Cooldown between firings (default: 60)",
+                },
+            },
+            "required": ["field", "operator"],
+        },
+        is_write=True,
+    )
+    mcp_server.register_custom_tool(
+        "trigger_delete",
+        _handle_delete,
+        "Delete a telemetry trigger by ID",
+        {
+            "type": "object",
+            "properties": {"id": {"type": "string", "description": "Trigger ID"}},
+            "required": ["id"],
+        },
+        is_write=True,
+    )
+    mcp_server.register_custom_tool(
+        "trigger_list",
+        _handle_list,
+        "List all active telemetry triggers",
+        {"type": "object", "properties": {}},
+    )
+    mcp_server.register_custom_tool(
+        "trigger_poll",
+        _handle_poll,
+        "Poll for fired trigger notifications",
+        {"type": "object", "properties": {}},
+    )
 
 
 class _LoggingASGI:
@@ -657,8 +756,15 @@ def _build_combined_app(
             try:
                 while True:
                     data = await websocket.receive_bytes()
-                    frame = decoder.decode(data)
-                    await on_frame(frame)  # type: ignore[operator]
+                    try:
+                        frame = decoder.decode(data)
+                        await on_frame(frame)  # type: ignore[operator]
+                    except Exception:
+                        logger.warning(
+                            "Failed to decode/process telemetry frame (%d bytes) — skipping",
+                            len(data),
+                            exc_info=True,
+                        )
             except WebSocketDisconnect:
                 pass
             except Exception:
@@ -687,15 +793,6 @@ def _build_combined_app(
         await mcp_app(scope, receive, send)
 
     return _LoggingASGI(_app)
-
-
-async def _run_combined_app(app: Any, port: int) -> None:
-    """Run a Starlette ASGI app with uvicorn."""
-    import uvicorn
-
-    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
-    server = uvicorn.Server(config)
-    await server.serve()
 
 
 async def _wait_for_interrupt() -> None:

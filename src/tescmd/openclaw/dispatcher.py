@@ -13,13 +13,35 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from tescmd.api.errors import VehicleAsleepError
-from tescmd.cli._client import get_command_api, get_vehicle_api, invalidate_cache_for_vin
+from tescmd.cli._client import (
+    check_command_guards,
+    get_command_api,
+    get_vehicle_api,
+    invalidate_cache_for_vin,
+)
+from tescmd.triggers.models import TriggerCondition, TriggerDefinition, TriggerOperator
 
 if TYPE_CHECKING:
     from tescmd.cli.main import AppContext
     from tescmd.openclaw.telemetry_store import TelemetryStore
+    from tescmd.triggers.manager import TriggerManager
 
 logger = logging.getLogger(__name__)
+
+# API snake_case → OpenClaw dot notation aliases for system.run
+_METHOD_ALIASES: dict[str, str] = {
+    "door_lock": "door.lock",
+    "door_unlock": "door.unlock",
+    "auto_conditioning_start": "climate.on",
+    "auto_conditioning_stop": "climate.off",
+    "set_temps": "climate.set_temp",
+    "charge_start": "charge.start",
+    "charge_stop": "charge.stop",
+    "set_charge_limit": "charge.set_limit",
+    "actuate_trunk": "trunk.open",
+    "flash_lights": "flash_lights",
+    "honk_horn": "honk_horn",
+}
 
 
 class CommandDispatcher:
@@ -41,10 +63,12 @@ class CommandDispatcher:
         vin: str,
         app_ctx: AppContext,
         telemetry_store: TelemetryStore | None = None,
+        trigger_manager: TriggerManager | None = None,
     ) -> None:
         self._vin = vin
         self._app_ctx = app_ctx
         self._store = telemetry_store
+        self._trigger_manager = trigger_manager
         self._vehicle_data_cache: dict[str, Any] | None = None
         self._fetch_task: asyncio.Task[None] | None = None
         self._handlers: dict[str, Any] = {
@@ -70,6 +94,17 @@ class CommandDispatcher:
             "honk_horn": self._handle_honk_horn,
             "sentry.on": self._handle_sentry_on,
             "sentry.off": self._handle_sentry_off,
+            "system.run": self._handle_system_run,
+            # Trigger commands
+            "trigger.create": self._handle_trigger_create,
+            "trigger.delete": self._handle_trigger_delete,
+            "trigger.list": self._handle_trigger_list,
+            "trigger.poll": self._handle_trigger_poll,
+            # Convenience trigger aliases
+            "cabin_temp.trigger": self._handle_cabin_temp_trigger,
+            "outside_temp.trigger": self._handle_outside_temp_trigger,
+            "battery.trigger": self._handle_battery_trigger,
+            "location.trigger": self._handle_location_trigger,
         }
 
     async def dispatch(self, msg: dict[str, Any]) -> dict[str, Any] | None:
@@ -261,6 +296,7 @@ class CommandDispatcher:
     async def _execute_command(self, method_name: str, body: dict[str, Any] | None = None) -> str:
         """Execute a vehicle command and return the reason string."""
         client, _vehicle_api, cmd_api = get_command_api(self._app_ctx)
+        check_command_guards(cmd_api, method_name)
         try:
             method = getattr(cmd_api, method_name)
 
@@ -276,67 +312,162 @@ class CommandDispatcher:
 
     # -- Write handlers ------------------------------------------------------
 
-    async def _handle_door_lock(self, params: dict[str, Any]) -> dict[str, Any]:
-        reason = await self._execute_command("door_lock")
+    async def _simple_command(
+        self, method_name: str, body: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Execute a command and return ``{result: True, reason: ...}``."""
+        reason = await self._execute_command(method_name, body)
         return {"result": True, "reason": reason}
+
+    async def _handle_door_lock(self, params: dict[str, Any]) -> dict[str, Any]:
+        return await self._simple_command("door_lock")
 
     async def _handle_door_unlock(self, params: dict[str, Any]) -> dict[str, Any]:
-        reason = await self._execute_command("door_unlock")
-        return {"result": True, "reason": reason}
+        return await self._simple_command("door_unlock")
 
     async def _handle_climate_on(self, params: dict[str, Any]) -> dict[str, Any]:
-        reason = await self._execute_command("auto_conditioning_start")
-        return {"result": True, "reason": reason}
+        return await self._simple_command("auto_conditioning_start")
 
     async def _handle_climate_off(self, params: dict[str, Any]) -> dict[str, Any]:
-        reason = await self._execute_command("auto_conditioning_stop")
-        return {"result": True, "reason": reason}
+        return await self._simple_command("auto_conditioning_stop")
 
     async def _handle_climate_set_temp(self, params: dict[str, Any]) -> dict[str, Any]:
         temp = params.get("temp")
         if temp is None:
             raise ValueError("climate.set_temp requires 'temp' parameter")
         temp_f = float(temp)
-        reason = await self._execute_command(
+        return await self._simple_command(
             "set_temps", {"driver_temp": temp_f, "passenger_temp": temp_f}
         )
-        return {"result": True, "reason": reason}
 
     async def _handle_charge_start(self, params: dict[str, Any]) -> dict[str, Any]:
-        reason = await self._execute_command("charge_start")
-        return {"result": True, "reason": reason}
+        return await self._simple_command("charge_start")
 
     async def _handle_charge_stop(self, params: dict[str, Any]) -> dict[str, Any]:
-        reason = await self._execute_command("charge_stop")
-        return {"result": True, "reason": reason}
+        return await self._simple_command("charge_stop")
 
     async def _handle_charge_set_limit(self, params: dict[str, Any]) -> dict[str, Any]:
         percent = params.get("percent")
         if percent is None:
             raise ValueError("charge.set_limit requires 'percent' parameter")
-        reason = await self._execute_command("set_charge_limit", {"percent": int(percent)})
-        return {"result": True, "reason": reason}
+        return await self._simple_command("set_charge_limit", {"percent": int(percent)})
 
     async def _handle_trunk_open(self, params: dict[str, Any]) -> dict[str, Any]:
-        reason = await self._execute_command("actuate_trunk", {"which_trunk": "rear"})
-        return {"result": True, "reason": reason}
+        return await self._simple_command("actuate_trunk", {"which_trunk": "rear"})
 
     async def _handle_frunk_open(self, params: dict[str, Any]) -> dict[str, Any]:
-        reason = await self._execute_command("actuate_trunk", {"which_trunk": "front"})
-        return {"result": True, "reason": reason}
+        return await self._simple_command("actuate_trunk", {"which_trunk": "front"})
 
     async def _handle_flash_lights(self, params: dict[str, Any]) -> dict[str, Any]:
-        reason = await self._execute_command("flash_lights")
-        return {"result": True, "reason": reason}
+        return await self._simple_command("flash_lights")
 
     async def _handle_honk_horn(self, params: dict[str, Any]) -> dict[str, Any]:
-        reason = await self._execute_command("honk_horn")
-        return {"result": True, "reason": reason}
+        return await self._simple_command("honk_horn")
 
     async def _handle_sentry_on(self, params: dict[str, Any]) -> dict[str, Any]:
-        reason = await self._execute_command("set_sentry_mode", {"on": True})
-        return {"result": True, "reason": reason}
+        return await self._simple_command("set_sentry_mode", {"on": True})
 
     async def _handle_sentry_off(self, params: dict[str, Any]) -> dict[str, Any]:
-        reason = await self._execute_command("set_sentry_mode", {"on": False})
-        return {"result": True, "reason": reason}
+        return await self._simple_command("set_sentry_mode", {"on": False})
+
+    # -- Meta-dispatch handler -----------------------------------------------
+
+    async def _handle_system_run(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Invoke any registered handler by name.
+
+        Accepts both OpenClaw-style (``door.lock``) and API-style
+        (``door_lock``) method names via :data:`_METHOD_ALIASES`.
+        """
+        method = params.get("method", "")
+        if not method:
+            raise ValueError("system.run requires 'method' parameter")
+        resolved = _METHOD_ALIASES.get(method, method)
+        inner_params = params.get("params", {})
+        result = await self.dispatch({"method": resolved, "params": inner_params})
+        if result is None:
+            raise ValueError(f"Unknown method: {method}")
+        return result
+
+    # -- Trigger handlers ----------------------------------------------------
+
+    def _require_trigger_manager(self) -> TriggerManager:
+        """Return the trigger manager or raise if unavailable."""
+        if self._trigger_manager is None:
+            raise RuntimeError("Triggers not available")
+        return self._trigger_manager
+
+    async def _handle_trigger_create(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Create a new trigger from the given condition parameters."""
+        mgr = self._require_trigger_manager()
+        field = params.get("field", "")
+        if not field:
+            raise ValueError("trigger.create requires 'field' parameter")
+
+        op_str = params.get("operator", "")
+        if not op_str:
+            raise ValueError("trigger.create requires 'operator' parameter")
+
+        operator = TriggerOperator(op_str)
+        condition = TriggerCondition(
+            field=field,
+            operator=operator,
+            value=params.get("value"),
+        )
+        trigger = TriggerDefinition(
+            condition=condition,
+            once=params.get("once", False),
+            cooldown_seconds=params.get("cooldown_seconds", 60.0),
+        )
+        created = mgr.create(trigger)
+        return {
+            "id": created.id,
+            "field": created.condition.field,
+            "operator": created.condition.operator.value,
+        }
+
+    async def _handle_trigger_delete(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Delete a trigger by ID."""
+        mgr = self._require_trigger_manager()
+        trigger_id = params.get("id", "")
+        if not trigger_id:
+            raise ValueError("trigger.delete requires 'id' parameter")
+        deleted = mgr.delete(trigger_id)
+        return {"deleted": deleted, "id": trigger_id}
+
+    async def _handle_trigger_list(self, params: dict[str, Any]) -> dict[str, Any]:
+        """List all registered triggers."""
+        mgr = self._require_trigger_manager()
+        triggers = mgr.list_all()
+        return {
+            "triggers": [
+                {
+                    "id": t.id,
+                    "field": t.condition.field,
+                    "operator": t.condition.operator.value,
+                    "value": t.condition.value,
+                    "once": t.once,
+                    "cooldown_seconds": t.cooldown_seconds,
+                }
+                for t in triggers
+            ]
+        }
+
+    async def _handle_trigger_poll(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Drain and return pending trigger notifications."""
+        mgr = self._require_trigger_manager()
+        notifications = mgr.drain_pending()
+        return {"notifications": [n.model_dump(mode="json") for n in notifications]}
+
+    # -- Convenience trigger aliases -----------------------------------------
+
+    async def _handle_cabin_temp_trigger(self, params: dict[str, Any]) -> dict[str, Any]:
+        return await self._handle_trigger_create({**params, "field": "InsideTemp"})
+
+    async def _handle_outside_temp_trigger(self, params: dict[str, Any]) -> dict[str, Any]:
+        return await self._handle_trigger_create({**params, "field": "OutsideTemp"})
+
+    async def _handle_battery_trigger(self, params: dict[str, Any]) -> dict[str, Any]:
+        return await self._handle_trigger_create({**params, "field": "BatteryLevel"})
+
+    async def _handle_location_trigger(self, params: dict[str, Any]) -> dict[str, Any]:
+        return await self._handle_trigger_create({**params, "field": "Location"})

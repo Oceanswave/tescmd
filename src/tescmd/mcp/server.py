@@ -11,9 +11,32 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _CliToolDef:
+    """Definition of a CLI-backed MCP tool."""
+
+    args: list[str]
+    description: str
+    is_write: bool
+
+
+@dataclass(frozen=True)
+class _CustomToolDef:
+    """Definition of a custom callable MCP tool."""
+
+    handler: Callable[[dict[str, Any]], dict[str, Any]]
+    description: str
+    input_schema: dict[str, Any]
+    is_write: bool
 
 
 # ---------------------------------------------------------------------------
@@ -122,19 +145,42 @@ class MCPServer:
     ) -> None:
         self._client_id = client_id
         self._client_secret = client_secret
-        self._tools: dict[str, tuple[list[str], str, bool]] = {}
+        self._tools: dict[str, _CliToolDef] = {}
+        self._custom_tools: dict[str, _CustomToolDef] = {}
         for name, (args, desc) in _READ_TOOLS.items():
-            self._tools[name] = (args, desc, False)
+            self._tools[name] = _CliToolDef(args=args, description=desc, is_write=False)
         for name, (args, desc) in _WRITE_TOOLS.items():
-            self._tools[name] = (args, desc, True)
+            self._tools[name] = _CliToolDef(args=args, description=desc, is_write=True)
+
+    def register_custom_tool(
+        self,
+        name: str,
+        handler: Any,
+        description: str,
+        input_schema: dict[str, Any],
+        *,
+        is_write: bool = False,
+    ) -> None:
+        """Register a tool backed by a direct callable.
+
+        Unlike CLI-based tools which route through ``CliRunner``, custom
+        tools call *handler* directly with the arguments dict and expect
+        a dict return value (serialised to JSON by the MCP wrapper).
+        """
+        self._custom_tools[name] = _CustomToolDef(
+            handler=handler,
+            description=description,
+            input_schema=input_schema,
+            is_write=is_write,
+        )
 
     def list_tools(self) -> list[dict[str, Any]]:
         """Return MCP tool descriptors."""
         tools = []
-        for name, (_args, desc, is_write) in sorted(self._tools.items()):
+        for name, defn in sorted(self._tools.items()):
             tool: dict[str, Any] = {
                 "name": name,
-                "description": desc,
+                "description": defn.description,
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -150,23 +196,41 @@ class MCPServer:
                     },
                 },
             }
-            if is_write:
-                tool["annotations"] = {"readOnlyHint": False}
-            else:
-                tool["annotations"] = {"readOnlyHint": True}
+            tool["annotations"] = {"readOnlyHint": not defn.is_write}
             tools.append(tool)
+        for name, cdefn in sorted(self._custom_tools.items()):
+            tools.append(
+                {
+                    "name": name,
+                    "description": cdefn.description,
+                    "inputSchema": cdefn.input_schema,
+                    "annotations": {"readOnlyHint": not cdefn.is_write},
+                }
+            )
         return tools
 
     def invoke_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Invoke a tool by running the corresponding CLI command.
 
+        Custom tools (registered via :meth:`register_custom_tool`) call the
+        handler directly.  CLI tools route through ``CliRunner``.
+
         Returns the parsed JSON output or an error dict.
         """
+        if name in self._custom_tools:
+            cdefn = self._custom_tools[name]
+            try:
+                return cdefn.handler(arguments)
+            except Exception as exc:
+                logger.warning("Custom tool %s failed: %s", name, exc)
+                return {"error": str(exc)}
+
         if name not in self._tools:
             logger.info("Unknown tool: %s", name)
             return {"error": f"Unknown tool: {name}"}
 
-        args_template, _desc, _is_write = self._tools[name]
+        defn = self._tools[name]
+        args_template = defn.args
 
         # Build CLI args
         cli_args = ["--format", "json", "--wake"]
@@ -217,8 +281,10 @@ class MCPServer:
 
         mcp = FastMCP("tescmd", instructions="Tesla vehicle management via Fleet API")
 
-        for name, (_args, desc, _is_write) in self._tools.items():
-            self._register_fastmcp_tool(mcp, name, desc)
+        for name, defn in self._tools.items():
+            self._register_fastmcp_tool(mcp, name, defn.description)
+        for name, cdefn in self._custom_tools.items():
+            self._register_custom_fastmcp_tool(mcp, name, cdefn.description)
 
         await mcp.run_stdio_async()
 
@@ -281,8 +347,10 @@ class MCPServer:
             ),
         )
 
-        for name, (_args, desc, _is_write) in self._tools.items():
-            self._register_fastmcp_tool(mcp, name, desc)
+        for name, defn in self._tools.items():
+            self._register_fastmcp_tool(mcp, name, defn.description)
+        for name, cdefn in self._custom_tools.items():
+            self._register_custom_fastmcp_tool(mcp, name, cdefn.description)
 
         return mcp.streamable_http_app()
 
@@ -301,12 +369,31 @@ class MCPServer:
         tool_name: str,
         description: str,
     ) -> None:
-        """Register a single tool with the FastMCP server."""
+        """Register a CLI-backed tool with the FastMCP server."""
         server = self
 
         @mcp.tool(name=tool_name, description=description)  # type: ignore[misc]
         def _tool(vin: str = "", args: list[str] | None = None) -> str:
             result = server.invoke_tool(tool_name, {"vin": vin, "args": args or []})
+            return json.dumps(result, default=str, indent=2)
+
+    def _register_custom_fastmcp_tool(
+        self,
+        mcp: Any,
+        tool_name: str,
+        description: str,
+    ) -> None:
+        """Register a custom callable tool with the FastMCP server.
+
+        Custom tools accept a JSON ``params`` string rather than the
+        standard ``vin``/``args`` signature used by CLI tools.
+        """
+        server = self
+
+        @mcp.tool(name=tool_name, description=description)  # type: ignore[misc]
+        def _tool(params: str = "{}") -> str:
+            arguments = json.loads(params) if params else {}
+            result = server.invoke_tool(tool_name, arguments)
             return json.dumps(result, default=str, indent=2)
 
 

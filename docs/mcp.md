@@ -214,6 +214,60 @@ Write tools send commands to the vehicle. They are annotated with `readOnlyHint:
 | `software_schedule` | `software schedule` | Schedule software update |
 | `cache_clear` | `cache clear` | Clear response cache |
 
+### Trigger Tools (telemetry mode only)
+
+When the MCP server is running with telemetry active (`tescmd serve VIN`), four additional tools are registered for managing trigger subscriptions. These are custom tools backed by in-memory state, not CLI commands.
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `trigger_create` | Create a telemetry trigger | `field`, `operator`, `value?`, `once?`, `cooldown_seconds?` |
+| `trigger_delete` | Delete a trigger by ID | `id` |
+| `trigger_list` | List all active triggers | -- |
+| `trigger_poll` | Poll for fired notifications | -- |
+
+These tools are not available in MCP-only mode (`--no-telemetry`) since there is no telemetry data to evaluate triggers against.
+
+See [openclaw.md](openclaw.md#trigger-subscription-system) for full trigger documentation including operators, geofencing, and firing modes.
+
+**Example: Create a low-battery trigger**
+
+```json
+{
+  "name": "trigger_create",
+  "arguments": {
+    "params": "{\"field\": \"BatteryLevel\", \"operator\": \"lt\", \"value\": 20, \"once\": true}"
+  }
+}
+```
+
+**Example: Poll for notifications**
+
+```json
+{
+  "name": "trigger_poll",
+  "arguments": {}
+}
+```
+
+Returns:
+
+```json
+{
+  "notifications": [
+    {
+      "trigger_id": "a1b2c3d4e5f6",
+      "field": "BatteryLevel",
+      "operator": "lt",
+      "threshold": 20,
+      "value": 18,
+      "previous_value": 21,
+      "fired_at": "2026-01-31T10:30:00Z",
+      "vin": "5YJ3E1EA1NF000000"
+    }
+  ]
+}
+```
+
 ### Excluded Commands
 
 The following commands are excluded from MCP because they are long-running, interactive, or infrastructure operations:

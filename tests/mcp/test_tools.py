@@ -10,19 +10,17 @@ class TestToolParameterMapping:
         server = MCPServer(client_id="test-id", client_secret="test-secret")
         for name in _READ_TOOLS:
             tool = server._tools[name]
-            args, _desc, is_write = tool
-            assert isinstance(args, list)
-            assert len(args) >= 2, f"{name} should have at least group + command"
-            assert is_write is False
+            assert isinstance(tool.args, list)
+            assert len(tool.args) >= 2, f"{name} should have at least group + command"
+            assert tool.is_write is False
 
     def test_all_write_tools_have_valid_args(self) -> None:
         server = MCPServer(client_id="test-id", client_secret="test-secret")
         for name in _WRITE_TOOLS:
             tool = server._tools[name]
-            args, _desc, is_write = tool
-            assert isinstance(args, list)
-            assert len(args) >= 2, f"{name} should have at least group + command"
-            assert is_write is True
+            assert isinstance(tool.args, list)
+            assert len(tool.args) >= 2, f"{name} should have at least group + command"
+            assert tool.is_write is True
 
     def test_no_duplicate_tool_names(self) -> None:
         all_names = list(_READ_TOOLS.keys()) + list(_WRITE_TOOLS.keys())
@@ -32,9 +30,9 @@ class TestToolParameterMapping:
 class TestToolDescriptions:
     def test_all_tools_have_descriptions(self) -> None:
         server = MCPServer(client_id="test-id", client_secret="test-secret")
-        for name, (_args, desc, _is_write) in server._tools.items():
-            assert desc, f"Tool {name} has empty description"
-            assert len(desc) > 5, f"Tool {name} has very short description"
+        for name, defn in server._tools.items():
+            assert defn.description, f"Tool {name} has empty description"
+            assert len(defn.description) > 5, f"Tool {name} has very short description"
 
 
 class TestHelpOutput:

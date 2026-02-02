@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import random
 
@@ -93,13 +92,8 @@ async def _cmd_bridge(
     dry_run: bool,
 ) -> None:
     from tescmd.cli.main import AppContext
-    from tescmd.openclaw.bridge import TelemetryBridge
+    from tescmd.openclaw.bridge import build_openclaw_pipeline
     from tescmd.openclaw.config import BridgeConfig
-    from tescmd.openclaw.dispatcher import CommandDispatcher
-    from tescmd.openclaw.emitter import EventEmitter
-    from tescmd.openclaw.filters import DualGateFilter
-    from tescmd.openclaw.gateway import GatewayClient
-    from tescmd.openclaw.telemetry_store import TelemetryStore
     from tescmd.telemetry.fields import resolve_fields
     from tescmd.telemetry.setup import telemetry_session
 
@@ -119,29 +113,26 @@ async def _cmd_bridge(
         gateway_token=gateway_token,
     )
 
-    # Build pipeline components
-    telemetry_store = TelemetryStore()
-    dispatcher = CommandDispatcher(vin=vin, app_ctx=app_ctx, telemetry_store=telemetry_store)
-    filt = DualGateFilter(config.telemetry)
-    emitter = EventEmitter(client_id=config.client_id)
-    from tescmd import __version__
+    # Build pipeline via shared factory
+    from tescmd.triggers.manager import TriggerManager
 
-    gw = GatewayClient(
-        config.gateway_url,
-        token=config.gateway_token,
-        client_id=config.client_id,
-        client_version=config.client_version,
-        display_name=f"tescmd-{__version__}-{vin}",
-        capabilities=config.capabilities,
-        on_request=dispatcher.dispatch,
+    trigger_manager = TriggerManager(vin=vin)
+    pipeline = build_openclaw_pipeline(
+        config, vin, app_ctx, trigger_manager=trigger_manager, dry_run=dry_run
     )
-    bridge = TelemetryBridge(gw, filt, emitter, dry_run=dry_run, telemetry_store=telemetry_store)
+    gw = pipeline.gateway
+    bridge = pipeline.bridge
 
     # Build fanout with the OpenClaw bridge as the primary sink
     from tescmd.telemetry.fanout import FrameFanout
 
     fanout = FrameFanout()
     fanout.add_sink(bridge.on_frame)
+
+    # Register trigger push callback — sends notifications to gateway
+    push_cb = bridge.make_trigger_push_callback()
+    if push_cb is not None:
+        trigger_manager.add_on_fire(push_cb)
 
     # Connect to gateway (unless dry-run)
     if not dry_run:
@@ -165,6 +156,8 @@ async def _cmd_bridge(
                 formatter.rich.info("Press Ctrl+C to stop.")
                 formatter.rich.info("")
 
+            from tescmd.cli.serve import _wait_for_interrupt
+
             await _wait_for_interrupt()
 
             if formatter.format != "json":
@@ -172,13 +165,5 @@ async def _cmd_bridge(
                     f"\n[dim]Events sent: {bridge.event_count}, dropped: {bridge.drop_count}[/dim]"
                 )
     finally:
+        await bridge.send_disconnecting()
         await gw.close()
-
-
-async def _wait_for_interrupt() -> None:
-    """Block until Ctrl+C."""
-    try:
-        while True:
-            await asyncio.sleep(1)
-    except (asyncio.CancelledError, KeyboardInterrupt):
-        pass

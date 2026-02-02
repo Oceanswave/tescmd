@@ -42,12 +42,12 @@ class TestDeviceIdentity:
             Ed25519PrivateKey,
         )
 
-        with patch("tescmd.openclaw.gateway._DEVICE_KEY_DIR", tmp_path):
+        with patch("tescmd.openclaw.gateway._device_key_dir", return_value=tmp_path):
             key = _ensure_device_key()
             assert isinstance(key, Ed25519PrivateKey)
 
     def test_ensure_device_key_reuses_existing(self, tmp_path: object) -> None:
-        with patch("tescmd.openclaw.gateway._DEVICE_KEY_DIR", tmp_path):
+        with patch("tescmd.openclaw.gateway._device_key_dir", return_value=tmp_path):
             key1 = _ensure_device_key()
             key2 = _ensure_device_key()
             assert _public_key_raw_b64url(key1) == _public_key_raw_b64url(key2)
@@ -55,7 +55,7 @@ class TestDeviceIdentity:
     def test_public_key_is_32_bytes_b64url(self, tmp_path: object) -> None:
         import base64
 
-        with patch("tescmd.openclaw.gateway._DEVICE_KEY_DIR", tmp_path):
+        with patch("tescmd.openclaw.gateway._device_key_dir", return_value=tmp_path):
             key = _ensure_device_key()
             b64 = _public_key_raw_b64url(key)
             # Base64url without padding for 32 bytes = 43 chars
@@ -66,7 +66,7 @@ class TestDeviceIdentity:
         """Signature is valid Ed25519."""
         import base64
 
-        with patch("tescmd.openclaw.gateway._DEVICE_KEY_DIR", tmp_path):
+        with patch("tescmd.openclaw.gateway._device_key_dir", return_value=tmp_path):
             key = _ensure_device_key()
             payload = "v2|dev|cli|backend|node|node.telemetry,node.command|1000||nonce"
             sig_b64 = _sign_payload(key, payload)
@@ -84,27 +84,27 @@ class TestAuthPayload:
         p = _build_auth_payload(
             device_id="dev1",
             client_id="cli",
-            client_mode="backend",
+            client_mode="node",
             role="node",
             scopes=["node.telemetry", "node.command"],
             signed_at_ms=1000,
             token="tok",
             nonce="abc",
         )
-        assert p == "v2|dev1|cli|backend|node|node.telemetry,node.command|1000|tok|abc"
+        assert p == "v2|dev1|cli|node|node|node.telemetry,node.command|1000|tok|abc"
 
     def test_v1_without_nonce(self) -> None:
         p = _build_auth_payload(
             device_id="dev1",
             client_id="cli",
-            client_mode="backend",
+            client_mode="node",
             role="node",
             scopes=["node.telemetry", "node.command"],
             signed_at_ms=1000,
             token=None,
             nonce=None,
         )
-        assert p == "v1|dev1|cli|backend|node|node.telemetry,node.command|1000|"
+        assert p == "v1|dev1|cli|node|node|node.telemetry,node.command|1000|"
 
 
 class TestGatewayHandshake:
@@ -136,8 +136,12 @@ class TestGatewayHandshake:
         # Client block — uses the client_id from constructor
         assert p["client"]["id"] == "test"
         assert "tescmd" in p["client"]["version"]
-        assert "platform" in p["client"]
-        assert p["client"]["mode"] == "backend"
+        assert p["client"]["platform"] == "tescmd"
+        assert p["client"]["mode"] == "node"
+        # deviceFamily auto-detected from OS, modelIdentifier defaults to "tescmd"
+        assert isinstance(p["client"]["deviceFamily"], str)
+        assert len(p["client"]["deviceFamily"]) > 0
+        assert p["client"]["modelIdentifier"] == "tescmd"
         # No displayName when not provided
         assert "displayName" not in p["client"]
 
@@ -250,6 +254,74 @@ class TestGatewayHandshake:
             mock_connect.return_value = mock_ws
             with pytest.raises(GatewayConnectionError, match="Handshake failed"):
                 await gw.connect()
+
+
+class TestDeviceKeyDir:
+    def test_default_dir(self) -> None:
+        """Without TESLA_CONFIG_DIR, key dir is under ~/.config/tescmd."""
+        from tescmd.openclaw.gateway import _device_key_dir
+
+        with patch.dict("os.environ", {}, clear=False):
+            # Remove TESLA_CONFIG_DIR if present
+            import os
+
+            env = os.environ.copy()
+            env.pop("TESLA_CONFIG_DIR", None)
+            with patch.dict("os.environ", env, clear=True):
+                d = _device_key_dir()
+                assert d.name == "openclaw"
+                assert "tescmd" in str(d.parent)
+
+    def test_respects_tesla_config_dir(self, tmp_path: object) -> None:
+        """TESLA_CONFIG_DIR env var overrides the default key directory."""
+        from tescmd.openclaw.gateway import _device_key_dir
+
+        with patch.dict("os.environ", {"TESLA_CONFIG_DIR": str(tmp_path)}):
+            from pathlib import Path
+
+            d = _device_key_dir()
+            assert d == Path(str(tmp_path)) / "openclaw"
+
+
+class TestGatewayDropCount:
+    @pytest.mark.asyncio
+    async def test_drop_count_increments_when_disconnected(self) -> None:
+        gw = GatewayClient("ws://test:1234")
+        gw._connected = False
+        assert gw.drop_count == 0
+
+        await gw.send_event({"method": "req:agent"})
+        assert gw.drop_count == 1
+
+        await gw.send_event({"method": "req:agent"})
+        assert gw.drop_count == 2
+
+    @pytest.mark.asyncio
+    async def test_drop_count_increments_on_send_failure(self) -> None:
+        mock_ws = AsyncMock()
+        mock_ws.send = AsyncMock(side_effect=ConnectionError("broken"))
+
+        gw = GatewayClient("ws://test:1234")
+        gw._ws = mock_ws
+        gw._connected = True
+        assert gw.drop_count == 0
+
+        await gw.send_event({"method": "req:agent"})
+        assert gw.drop_count == 1
+        assert gw.is_connected is False
+
+    @pytest.mark.asyncio
+    async def test_drop_count_not_incremented_on_success(self) -> None:
+        mock_ws = AsyncMock()
+        mock_ws.send = AsyncMock()
+
+        gw = GatewayClient("ws://test:1234")
+        gw._ws = mock_ws
+        gw._connected = True
+
+        await gw.send_event({"method": "req:agent"})
+        assert gw.drop_count == 0
+        assert gw.send_count == 1
 
 
 class TestGatewaySendEvent:
@@ -440,6 +512,51 @@ class TestHandshakeCapabilities:
         assert sent["params"]["permissions"] == {"location.get": True, "door.lock": True}
 
     @pytest.mark.asyncio
+    async def test_default_capabilities_sends_all_commands(self) -> None:
+        """Default NodeCapabilities sends all 20 commands in the connect params."""
+        caps = NodeCapabilities()  # defaults: 6 reads + 14 writes
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[_challenge(), _hello_ok()])
+        mock_ws.send = AsyncMock()
+
+        gw = GatewayClient("ws://test:1234", token="t", capabilities=caps)
+        gw._ws = mock_ws
+        await gw._handshake()
+
+        sent = json.loads(mock_ws.send.call_args[0][0])
+        commands = sent["params"]["commands"]
+        permissions = sent["params"]["permissions"]
+        caps_list = sent["params"]["caps"]
+
+        # All 29 commands must be present
+        # (6 reads + 14 writes + 4 trigger + 4 convenience + system.run)
+        assert len(commands) == 29
+        assert "location.get" in commands
+        assert "battery.get" in commands
+        assert "temperature.get" in commands
+        assert "charge_state.get" in commands
+        assert "speed.get" in commands
+        assert "security.get" in commands
+        assert "door.lock" in commands
+        assert "climate.set_temp" in commands
+        assert "charge.start" in commands
+        assert "sentry.on" in commands
+        assert "trigger.create" in commands
+        assert "trigger.delete" in commands
+        assert "trigger.list" in commands
+        assert "trigger.poll" in commands
+        assert "battery.trigger" in commands
+        assert "system.run" in commands
+
+        # permissions must match commands 1:1
+        assert len(permissions) == 29
+        assert all(permissions[cmd] is True for cmd in commands)
+
+        # caps should include all unique prefixes
+        # 14 original + trigger, cabin_temp, outside_temp, system = 18
+        assert len(caps_list) == 18
+
+    @pytest.mark.asyncio
     async def test_no_capabilities_omits_caps(self) -> None:
         """Without capabilities, caps/commands/permissions are absent."""
         mock_ws = AsyncMock()
@@ -486,91 +603,202 @@ class TestHandshakeDisplayName:
         assert "displayName" not in sent["params"]["client"]
 
 
-class TestReceiveLoop:
+class TestHandshakeDeviceIdentification:
     @pytest.mark.asyncio
-    async def test_receive_loop_dispatches_req(self) -> None:
-        """Inbound req frames are dispatched and responded to."""
+    async def test_platform_is_tescmd(self) -> None:
+        """Platform field identifies as 'tescmd', not the local OS."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[_challenge(), _hello_ok()])
+        mock_ws.send = AsyncMock()
+
+        gw = GatewayClient("ws://test:1234")
+        gw._ws = mock_ws
+        await gw._handshake()
+
+        sent = json.loads(mock_ws.send.call_args[0][0])
+        assert sent["params"]["client"]["platform"] == "tescmd"
+
+    @pytest.mark.asyncio
+    async def test_model_identifier_is_vin(self) -> None:
+        """modelIdentifier carries the VIN when provided."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[_challenge(), _hello_ok()])
+        mock_ws.send = AsyncMock()
+
+        gw = GatewayClient("ws://test:1234", model_identifier="5YJ3E1EA7PF123456")
+        gw._ws = mock_ws
+        await gw._handshake()
+
+        sent = json.loads(mock_ws.send.call_args[0][0])
+        assert sent["params"]["client"]["modelIdentifier"] == "5YJ3E1EA7PF123456"
+
+    @pytest.mark.asyncio
+    async def test_model_identifier_defaults_to_tescmd(self) -> None:
+        """Without VIN, modelIdentifier falls back to 'tescmd'."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[_challenge(), _hello_ok()])
+        mock_ws.send = AsyncMock()
+
+        gw = GatewayClient("ws://test:1234")
+        gw._ws = mock_ws
+        await gw._handshake()
+
+        sent = json.loads(mock_ws.send.call_args[0][0])
+        assert sent["params"]["client"]["modelIdentifier"] == "tescmd"
+
+    @pytest.mark.asyncio
+    async def test_device_family_auto_detected(self) -> None:
+        """deviceFamily defaults to the OS name when not overridden."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[_challenge(), _hello_ok()])
+        mock_ws.send = AsyncMock()
+
+        gw = GatewayClient("ws://test:1234")
+        gw._ws = mock_ws
+        await gw._handshake()
+
+        sent = json.loads(mock_ws.send.call_args[0][0])
+        client = sent["params"]["client"]
+        assert isinstance(client["deviceFamily"], str)
+        assert len(client["deviceFamily"]) > 0
+
+    @pytest.mark.asyncio
+    async def test_custom_device_family(self) -> None:
+        """Explicit device_family overrides auto-detection."""
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[_challenge(), _hello_ok()])
+        mock_ws.send = AsyncMock()
+
+        gw = GatewayClient("ws://test:1234", device_family="server")
+        gw._ws = mock_ws
+        await gw._handshake()
+
+        sent = json.loads(mock_ws.send.call_args[0][0])
+        assert sent["params"]["client"]["deviceFamily"] == "server"
+
+
+def _invoke_request(invoke_id: str, command: str, params: dict[str, Any] | None = None) -> str:
+    """Build a ``node.invoke.request`` event frame for tests."""
+    return json.dumps(
+        {
+            "type": "event",
+            "event": "node.invoke.request",
+            "payload": {
+                "id": invoke_id,
+                "nodeId": "test-node",
+                "command": command,
+                "paramsJSON": json.dumps(params or {}),
+                "timeoutMs": 10000,
+            },
+        }
+    )
+
+
+class TestReceiveLoop:
+    """Tests for the inbound receive loop with auto-reconnect.
+
+    The receive loop runs ``while True`` — after the WebSocket closes it calls
+    ``_try_reconnect()``.  All tests mock ``_try_reconnect`` to return ``False``
+    so the loop exits cleanly after one pass.
+    """
+
+    @pytest.mark.asyncio
+    async def test_receive_loop_dispatches_invoke(self) -> None:
+        """Inbound node.invoke.request events are dispatched and responded to."""
         handler = AsyncMock(return_value={"result": True})
-        req_frame = json.dumps({"type": "req", "id": "42", "method": "door.lock", "params": {}})
-        mock_ws = _MockWebSocket([req_frame])
+        mock_ws = _MockWebSocket([_invoke_request("42", "door.lock")])
 
         gw = GatewayClient("ws://test:1234", on_request=handler)
         gw._ws = mock_ws
         gw._connected = True
+        gw._node_id = "my-node-id"
 
-        await gw._receive_loop()
+        with patch.object(gw, "_try_reconnect", new_callable=AsyncMock, return_value=False):
+            await gw._receive_loop()
 
         handler.assert_awaited_once()
         call_msg = handler.call_args[0][0]
         assert call_msg["method"] == "door.lock"
+        assert call_msg["id"] == "42"
 
-        # Verify response was sent
+        # Verify node.invoke.result was sent
         sent = json.loads(mock_ws.send.call_args[0][0])
-        assert sent["type"] == "res"
-        assert sent["id"] == "42"
-        assert sent["ok"] is True
-        assert sent["payload"] == {"result": True}
+        assert sent["type"] == "req"
+        assert sent["method"] == "node.invoke.result"
+        p = sent["params"]
+        assert p["id"] == "42"
+        assert p["nodeId"] == "my-node-id"
+        assert p["ok"] is True
+        assert json.loads(p["payloadJSON"]) == {"result": True}
 
     @pytest.mark.asyncio
-    async def test_receive_loop_sends_error_on_unknown_method(self) -> None:
-        """Handler returning None → error response."""
+    async def test_receive_loop_sends_error_on_unknown_command(self) -> None:
+        """Handler returning None → error invoke result."""
         handler = AsyncMock(return_value=None)
-        req_frame = json.dumps({"type": "req", "id": "99", "method": "unknown.cmd", "params": {}})
-        mock_ws = _MockWebSocket([req_frame])
+        mock_ws = _MockWebSocket([_invoke_request("99", "unknown.cmd")])
 
         gw = GatewayClient("ws://test:1234", on_request=handler)
         gw._ws = mock_ws
         gw._connected = True
 
-        await gw._receive_loop()
+        with patch.object(gw, "_try_reconnect", new_callable=AsyncMock, return_value=False):
+            await gw._receive_loop()
 
         sent = json.loads(mock_ws.send.call_args[0][0])
-        assert sent["ok"] is False
-        assert "unknown method" in sent["error"]
+        assert sent["method"] == "node.invoke.result"
+        p = sent["params"]
+        assert p["ok"] is False
+        assert "unknown command" in p["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_receive_loop_sends_error_on_handler_exception(self) -> None:
-        """Handler raising → error response."""
+        """Handler raising → error invoke result."""
         handler = AsyncMock(side_effect=RuntimeError("boom"))
-        req_frame = json.dumps({"type": "req", "id": "7", "method": "door.lock", "params": {}})
-        mock_ws = _MockWebSocket([req_frame])
+        mock_ws = _MockWebSocket([_invoke_request("7", "door.lock")])
 
         gw = GatewayClient("ws://test:1234", on_request=handler)
         gw._ws = mock_ws
         gw._connected = True
 
-        await gw._receive_loop()
+        with patch.object(gw, "_try_reconnect", new_callable=AsyncMock, return_value=False):
+            await gw._receive_loop()
 
         sent = json.loads(mock_ws.send.call_args[0][0])
-        assert sent["ok"] is False
-        assert "boom" in sent["error"]
+        assert sent["method"] == "node.invoke.result"
+        p = sent["params"]
+        assert p["ok"] is False
+        assert "boom" in p["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_receive_loop_handles_timeout(self) -> None:
-        """Handler exceeding 30s → timeout error response."""
+        """Handler exceeding 30s → timeout error invoke result."""
 
         async def _slow_handler(msg: dict[str, Any]) -> dict[str, Any]:
             await asyncio.sleep(60)
             return {"result": True}
 
-        req_frame = json.dumps({"type": "req", "id": "T1", "method": "slow.cmd", "params": {}})
-        mock_ws = _MockWebSocket([req_frame])
+        mock_ws = _MockWebSocket([_invoke_request("T1", "slow.cmd")])
 
         gw = GatewayClient("ws://test:1234", on_request=_slow_handler)
         gw._ws = mock_ws
         gw._connected = True
 
         # Patch wait_for to raise TimeoutError immediately
-        with patch("tescmd.openclaw.gateway.asyncio.wait_for", side_effect=asyncio.TimeoutError):
+        with (
+            patch("tescmd.openclaw.gateway.asyncio.wait_for", side_effect=asyncio.TimeoutError),
+            patch.object(gw, "_try_reconnect", new_callable=AsyncMock, return_value=False),
+        ):
             await gw._receive_loop()
 
         sent = json.loads(mock_ws.send.call_args[0][0])
-        assert sent["ok"] is False
-        assert "timeout" in sent["error"]
+        assert sent["method"] == "node.invoke.result"
+        p = sent["params"]
+        assert p["ok"] is False
+        assert "timeout" in p["error"]["message"]
 
     @pytest.mark.asyncio
-    async def test_receive_loop_sets_disconnected_on_close(self) -> None:
-        """ConnectionClosed marks the client as disconnected."""
+    async def test_receive_loop_reconnects_on_close(self) -> None:
+        """ConnectionClosed triggers _try_reconnect; disconnected if reconnect fails."""
         from websockets.exceptions import ConnectionClosed
 
         mock_ws = _RaisingWebSocket(ConnectionClosed(None, None))
@@ -579,33 +807,41 @@ class TestReceiveLoop:
         gw._ws = mock_ws
         gw._connected = True
 
-        await gw._receive_loop()
+        mock_reconnect = AsyncMock(return_value=False)
+        with patch.object(gw, "_try_reconnect", mock_reconnect):
+            await gw._receive_loop()
+
         assert gw._connected is False
+        mock_reconnect.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_receive_loop_ignores_non_req_frames(self) -> None:
-        """Event frames are silently ignored by the receive loop."""
+    async def test_receive_loop_ignores_non_invoke_events(self) -> None:
+        """Non-invoke events (heartbeat, etc.) are silently ignored."""
         handler = AsyncMock(return_value={"result": True})
-        event_frame = json.dumps({"type": "event", "event": "heartbeat"})
-        req_frame = json.dumps({"type": "req", "id": "1", "method": "door.lock", "params": {}})
-        mock_ws = _MockWebSocket([event_frame, req_frame])
+        heartbeat = json.dumps({"type": "event", "event": "heartbeat"})
+        plain_req = json.dumps({"type": "req", "id": "1", "method": "something"})
+        invoke = _invoke_request("1", "door.lock")
+        mock_ws = _MockWebSocket([heartbeat, plain_req, invoke])
 
         gw = GatewayClient("ws://test:1234", on_request=handler)
         gw._ws = mock_ws
         gw._connected = True
 
-        await gw._receive_loop()
+        with patch.object(gw, "_try_reconnect", new_callable=AsyncMock, return_value=False):
+            await gw._receive_loop()
 
-        # Only the req frame should have been dispatched
+        # Only the invoke request should have been dispatched
         handler.assert_awaited_once()
+        call_msg = handler.call_args[0][0]
+        assert call_msg["method"] == "door.lock"
 
     @pytest.mark.asyncio
     async def test_recv_count_increments(self) -> None:
         handler = AsyncMock(return_value={"ok": True})
         mock_ws = _MockWebSocket(
             [
-                json.dumps({"type": "req", "id": "1", "method": "a", "params": {}}),
-                json.dumps({"type": "req", "id": "2", "method": "b", "params": {}}),
+                _invoke_request("1", "door.lock"),
+                _invoke_request("2", "climate.on"),
             ]
         )
 
@@ -614,8 +850,77 @@ class TestReceiveLoop:
         gw._connected = True
 
         assert gw.recv_count == 0
-        await gw._receive_loop()
+        with patch.object(gw, "_try_reconnect", new_callable=AsyncMock, return_value=False):
+            await gw._receive_loop()
         assert gw.recv_count == 2
+
+    @pytest.mark.asyncio
+    async def test_invoke_parses_params_json(self) -> None:
+        """paramsJSON is parsed and passed to the handler as params dict."""
+        handler = AsyncMock(return_value={"ok": True})
+        mock_ws = _MockWebSocket([_invoke_request("P1", "climate.set_temp", {"temp_c": 22.5})])
+
+        gw = GatewayClient("ws://test:1234", on_request=handler)
+        gw._ws = mock_ws
+        gw._connected = True
+
+        with patch.object(gw, "_try_reconnect", new_callable=AsyncMock, return_value=False):
+            await gw._receive_loop()
+
+        call_msg = handler.call_args[0][0]
+        assert call_msg["params"] == {"temp_c": 22.5}
+
+    @pytest.mark.asyncio
+    async def test_invoke_without_handler_sends_error(self) -> None:
+        """Without on_request, invoke requests get an error response."""
+        mock_ws = _MockWebSocket([_invoke_request("N1", "door.lock")])
+
+        gw = GatewayClient("ws://test:1234")  # no on_request
+        gw._ws = mock_ws
+        gw._connected = True
+
+        with patch.object(gw, "_try_reconnect", new_callable=AsyncMock, return_value=False):
+            await gw._receive_loop()
+
+        sent = json.loads(mock_ws.send.call_args[0][0])
+        p = sent["params"]
+        assert p["ok"] is False
+        assert "no handler" in p["error"]["message"]
+
+    @pytest.mark.asyncio
+    async def test_reconnect_resumes_receiving(self) -> None:
+        """After reconnect, the loop processes frames from the new WebSocket."""
+        handler = AsyncMock(return_value={"ok": True})
+
+        # First ws: one invoke, then closes
+        ws1 = _MockWebSocket([_invoke_request("R1", "door.lock")])
+        # Second ws: one invoke, then closes
+        ws2 = _MockWebSocket([_invoke_request("R2", "climate.on")])
+
+        gw = GatewayClient("ws://test:1234", on_request=handler)
+        gw._ws = ws1
+        gw._connected = True
+
+        reconnect_count = 0
+
+        async def _fake_reconnect() -> bool:
+            nonlocal reconnect_count
+            reconnect_count += 1
+            if reconnect_count == 1:
+                # First reconnect: swap to ws2
+                gw._ws = ws2
+                gw._connected = True
+                return True
+            # Second reconnect: stop the loop
+            return False
+
+        with patch.object(gw, "_try_reconnect", side_effect=_fake_reconnect):
+            await gw._receive_loop()
+
+        # Both invokes should have been dispatched
+        assert handler.await_count == 2
+        calls = [c[0][0]["method"] for c in handler.call_args_list]
+        assert calls == ["door.lock", "climate.on"]
 
 
 class TestGatewayCloseWithRecv:

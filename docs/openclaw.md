@@ -130,24 +130,48 @@ Set `"enabled": false` in the config to stop a field from emitting entirely:
 
 ## Gateway Protocol
 
-The bridge connects to the OpenClaw Gateway using the operator protocol:
+The bridge connects to the OpenClaw Gateway using the **node protocol** with Ed25519 device key signing:
 
 ### Handshake
 
-1. Gateway sends `connect.challenge` with a nonce
-2. Bridge sends `connect` with operator role, scopes, client info, and auth token
-3. Gateway responds with `hello-ok` on success
+1. Gateway sends `connect.challenge` event with a nonce
+2. Bridge signs a pipe-delimited auth payload with its Ed25519 device key
+3. Bridge sends `connect` request with role, scopes, client info, device identity, and auth token
+4. Gateway responds with `hello-ok` on success
 
 ```json
-{"method": "connect", "params": {
-  "role": "operator",
-  "scopes": ["operator.send"],
-  "client_id": "node-host",
-  "client_version": "0.1.0",
-  "nonce": "abc123",
-  "token": "my-secret-token"
-}}
+{
+  "type": "req",
+  "id": "1",
+  "method": "connect",
+  "params": {
+    "role": "node",
+    "scopes": ["node.telemetry", "node.command"],
+    "minProtocol": 3,
+    "maxProtocol": 3,
+    "client": {
+      "id": "node-host",
+      "version": "tescmd/0.6.0",
+      "platform": "tescmd",
+      "deviceFamily": "darwin",
+      "modelIdentifier": "tescmd",
+      "mode": "node"
+    },
+    "device": {
+      "id": "<sha256-of-public-key>",
+      "publicKey": "<base64url-ed25519-public-key>",
+      "signature": "<base64url-ed25519-signature>",
+      "signedAt": 1706700000000,
+      "nonce": "<challenge-nonce>"
+    },
+    "auth": {
+      "token": "my-secret-token"
+    }
+  }
+}
 ```
+
+The device key is an Ed25519 keypair stored at `~/.config/tescmd/openclaw/device-key.pem` (auto-generated on first use). The signed payload format is: `v2|deviceId|clientId|mode|role|scopes|timestamp|token|nonce`.
 
 ### Events
 
@@ -173,12 +197,13 @@ After the handshake, events are sent as `req:agent` messages:
 
 ### Reconnection
 
-If the gateway connection drops, the bridge reconnects with exponential backoff:
+If the gateway connection drops, reconnection uses exponential backoff at two levels:
 
-- Base delay: 1 second
-- Max delay: 60 seconds
-- Factor: 2x per attempt
-- Jitter: 10% of current delay
+**Gateway level** (receive loop reconnect — handles WebSocket close/error):
+- Base delay: 1 second, max: 60 seconds, factor: 2x, jitter: 10%
+
+**Bridge level** (on_frame reconnect — handles disconnection during event sends):
+- Base delay: 5 seconds, max: 120 seconds, factor: 2x
 
 Events are silently dropped while disconnected. The bridge never crashes due to a send failure.
 
@@ -195,13 +220,15 @@ The emitter maps Tesla Fleet Telemetry fields to OpenClaw event types:
 | `InsideTemp` | `inside_temp` | `inside_temp_f` (converted to Fahrenheit) |
 | `OutsideTemp` | `outside_temp` | `outside_temp_f` (converted to Fahrenheit) |
 | `VehicleSpeed` | `speed` | `speed_mph` |
-| `ChargeState` | `charge_started` / `charge_complete` / `charge_stopped` | `state` |
+| `ChargeState` | `charge_started` / `charge_complete` / `charge_stopped` / `charge_state_changed` | `state` |
 | `DetailedChargeState` | same as ChargeState | `state` |
 | `Locked` | `security_changed` | `field`, `value` |
 | `SentryMode` | `security_changed` | `field`, `value` |
 | `Gear` | `gear_changed` | `gear` |
 
 Unmapped telemetry fields are silently dropped.
+
+> **Temperature units:** The emitter converts raw telemetry (Celsius) to Fahrenheit for outbound events (`inside_temp_f`, `outside_temp_f`). Read handlers (`temperature.get`) return Celsius (`inside_temp_c`, `outside_temp_c`) to match the Fleet API convention. Bots consuming both channels should be aware of this difference.
 
 ## Dry-Run Mode
 
@@ -223,6 +250,214 @@ The bridge is composed of four independent modules:
 | `DualGateFilter` | `openclaw/filters.py` | Delta + throttle gating per field |
 | `EventEmitter` | `openclaw/emitter.py` | Transform telemetry data to OpenClaw events |
 | `GatewayClient` | `openclaw/gateway.py` | WebSocket connection, handshake, send, reconnect |
-| `TelemetryBridge` | `openclaw/bridge.py` | Orchestrator wiring filter, emitter, and gateway |
+| `TelemetryBridge` | `openclaw/bridge.py` | Orchestrator wiring filter, emitter, gateway, and triggers |
+| `CommandDispatcher` | `openclaw/dispatcher.py` | Inbound command handling (reads, writes, triggers, system.run) |
+| `TelemetryStore` | `openclaw/telemetry_store.py` | In-memory cache of latest telemetry values |
+| `TriggerManager` | `triggers/manager.py` | Trigger evaluation, cooldown, delivery |
 
 The `TelemetryBridge.on_frame` method is passed as a callback to the telemetry server. For each frame, it iterates over the data, applies the filter, transforms passing data to events, and sends them to the gateway.
+
+## Lifecycle Events
+
+The bridge sends lifecycle events to the gateway at connection boundaries:
+
+| Event Type | When | Purpose |
+|---|---|---|
+| `node.connected` | First telemetry frame received | Signals the node is live and streaming |
+| `node.disconnecting` | Shutdown (Ctrl+C or graceful close) | Signals the node is leaving |
+
+Lifecycle events use the standard `req:agent` envelope:
+
+```json
+{
+  "method": "req:agent",
+  "params": {
+    "event_type": "node.connected",
+    "source": "node-host",
+    "vin": "5YJ3E1EA1NF000000",
+    "timestamp": "2026-01-31T10:30:00Z",
+    "data": {}
+  }
+}
+```
+
+In dry-run mode, lifecycle events are not sent.
+
+## Bidirectional Command Dispatch
+
+The bridge accepts inbound commands from bots via the gateway. When a bot sends a command (e.g. `door.lock`), the gateway forwards it to the node as a `node.invoke.request` event. The bridge's `CommandDispatcher` executes the command and sends the result back.
+
+### Read Commands
+
+Query cached telemetry state (no API call, instant response):
+
+| Command | Returns |
+|---|---|
+| `location.get` | `latitude`, `longitude`, `heading`, `speed` |
+| `battery.get` | `battery_level`, `range_miles` |
+| `temperature.get` | `inside_temp_c`, `outside_temp_c` |
+| `speed.get` | `speed_mph` |
+| `charge_state.get` | `charge_state` |
+| `security.get` | `locked`, `sentry_mode` |
+
+### Write Commands
+
+Execute vehicle commands via the Tesla Fleet API:
+
+| Command | Parameters | Description |
+|---|---|---|
+| `door.lock` | -- | Lock vehicle doors |
+| `door.unlock` | -- | Unlock vehicle doors |
+| `climate.on` | -- | Start climate control |
+| `climate.off` | -- | Stop climate control |
+| `climate.set_temp` | `temp` (Fahrenheit) | Set cabin temperature |
+| `charge.start` | -- | Start charging |
+| `charge.stop` | -- | Stop charging |
+| `charge.set_limit` | `percent` | Set charge limit |
+| `trunk.open` | -- | Open rear trunk |
+| `frunk.open` | -- | Open front trunk |
+| `flash_lights` | -- | Flash vehicle lights |
+| `honk_horn` | -- | Sound the horn |
+| `sentry.on` | -- | Enable Sentry Mode |
+| `sentry.off` | -- | Disable Sentry Mode |
+
+Write commands enforce the same guards as the CLI: tier check (`readonly` tier blocks writes) and VCSEC signing requirement check.
+
+### `system.run` Meta-Dispatch
+
+The `system.run` command lets bots invoke any registered handler by name, useful when the bot doesn't match the exact OpenClaw command format:
+
+```json
+{
+  "method": "system.run",
+  "params": {
+    "method": "door_lock",
+    "params": {}
+  }
+}
+```
+
+Accepts both OpenClaw-style (`door.lock`) and API-style (`door_lock`) names via an alias table:
+
+| API Name | OpenClaw Command |
+|---|---|
+| `door_lock` | `door.lock` |
+| `door_unlock` | `door.unlock` |
+| `auto_conditioning_start` | `climate.on` |
+| `auto_conditioning_stop` | `climate.off` |
+| `set_temps` | `climate.set_temp` |
+| `charge_start` | `charge.start` |
+| `charge_stop` | `charge.stop` |
+| `set_charge_limit` | `charge.set_limit` |
+| `actuate_trunk` | `trunk.open` |
+| `flash_lights` | `flash_lights` |
+| `honk_horn` | `honk_horn` |
+
+## Trigger Subscription System
+
+Triggers let bots register conditions on telemetry fields and get notified when they fire. Triggers are evaluated on every incoming telemetry frame, regardless of the dual-gate filter.
+
+### Trigger Commands
+
+| Command | Parameters | Description |
+|---|---|---|
+| `trigger.create` | `field`, `operator`, `value?`, `once?`, `cooldown_seconds?` | Create a trigger |
+| `trigger.delete` | `id` | Delete a trigger |
+| `trigger.list` | -- | List all triggers |
+| `trigger.poll` | -- | Drain pending notifications |
+
+### Convenience Aliases
+
+These wrap `trigger.create` with a pre-filled field name:
+
+| Command | Pre-filled Field | Example |
+|---|---|---|
+| `cabin_temp.trigger` | `InsideTemp` | `{operator: "gt", value: 100}` — cabin exceeds 100F |
+| `outside_temp.trigger` | `OutsideTemp` | `{operator: "lt", value: 32}` — freezing outside |
+| `battery.trigger` | `BatteryLevel` | `{operator: "lt", value: 20}` — battery low |
+| `location.trigger` | `Location` | `{operator: "enter", value: {latitude, longitude, radius_m}}` |
+
+### Operators
+
+| Operator | Behavior | Example |
+|---|---|---|
+| `lt` | Numeric less than | `battery < 20` |
+| `gt` | Numeric greater than | `speed > 80` |
+| `lte` | Numeric less than or equal | `temp <= 32` |
+| `gte` | Numeric greater than or equal | `temp >= 100` |
+| `eq` | Exact match (string, bool, numeric) | `ChargeState == "Charging"` |
+| `neq` | Not equal | `Gear != "P"` |
+| `changed` | Value differs from previous | `Locked changed` (no threshold) |
+| `enter` | Geofence: vehicle enters radius | See geofence below |
+| `leave` | Geofence: vehicle leaves radius | See geofence below |
+
+### Geofencing
+
+Location triggers (`enter`/`leave`) operate on the `Location` field. The `value` is an object with `latitude`, `longitude`, and `radius_m`:
+
+```json
+{
+  "field": "Location",
+  "operator": "enter",
+  "value": {"latitude": 37.7749, "longitude": -122.4194, "radius_m": 500}
+}
+```
+
+Geofence triggers require a boundary crossing to fire -- being "already inside" a geofence on the first frame does not trigger an `enter` event. This prevents false positives on startup.
+
+### Firing Modes
+
+- **One-shot** (`once: true`): fires once, then auto-deletes
+- **Persistent** (`once: false`, default): fires repeatedly with a `cooldown_seconds` delay between firings (default 60s)
+
+### Notification Delivery
+
+When a trigger fires, notifications are delivered through two channels:
+
+1. **OpenClaw push** (gateway connected): a `trigger.fired` event is sent to the gateway:
+
+```json
+{
+  "method": "req:agent",
+  "params": {
+    "event_type": "trigger.fired",
+    "source": "node-host",
+    "vin": "5YJ3E1EA1NF000000",
+    "timestamp": "2026-01-31T10:30:00Z",
+    "data": {
+      "trigger_id": "a1b2c3d4e5f6",
+      "field": "BatteryLevel",
+      "operator": "lt",
+      "threshold": 20,
+      "value": 18,
+      "previous_value": 21,
+      "fired_at": "2026-01-31T10:30:00Z",
+      "vin": "5YJ3E1EA1NF000000"
+    }
+  }
+}
+```
+
+2. **MCP polling** (`trigger.poll`): notifications accumulate in a pending queue (max 500) and are returned/cleared when `trigger.poll` is called. This works even without a gateway connection.
+
+### Example: Low Battery Alert
+
+```json
+{"method": "trigger.create", "params": {
+  "field": "BatteryLevel",
+  "operator": "lt",
+  "value": 20,
+  "once": true
+}}
+```
+
+Response:
+
+```json
+{"id": "a1b2c3d4e5f6", "field": "BatteryLevel", "operator": "lt"}
+```
+
+### Limits
+
+- Maximum 100 triggers per session
+- Pending notification queue holds up to 500 entries (oldest dropped on overflow)

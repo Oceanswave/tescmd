@@ -532,6 +532,23 @@ def _check_signing_requirement(
         )
 
 
+def check_command_guards(
+    cmd_api: CommandAPI | SignedCommandAPI,
+    method_name: str,
+) -> None:
+    """Enforce tier + VCSEC signing guards before executing a write command.
+
+    Raises :class:`TierError`, :class:`ConfigError`, or
+    :class:`KeyNotEnrolledError` on violation.
+
+    Called by both CLI :func:`execute_command` and the OpenClaw dispatcher.
+    """
+    settings = AppSettings()
+    if settings.setup_tier == "readonly":
+        raise TierError("This command requires 'full' tier setup. Run 'tescmd setup' to upgrade.")
+    _check_signing_requirement(cmd_api, method_name, settings)
+
+
 async def execute_command(
     app_ctx: AppContext,
     vin_positional: str | None,
@@ -546,17 +563,12 @@ async def execute_command(
     Resolves the VIN, obtains a :class:`CommandAPI`, calls *method_name* with
     ``auto_wake``, invalidates the cache, and outputs the result.
     """
-    # Tier enforcement — readonly tier cannot execute write commands
-    settings = AppSettings()
-    if settings.setup_tier == "readonly":
-        raise TierError("This command requires 'full' tier setup. Run 'tescmd setup' to upgrade.")
-
     formatter = app_ctx.formatter
     vin = require_vin(vin_positional, app_ctx.vin)
     client, vehicle_api, cmd_api = get_command_api(app_ctx)
 
-    # Guard: VCSEC commands require signed channel — don't silently fall back
-    _check_signing_requirement(cmd_api, method_name, settings)
+    # Guard: tier + VCSEC signing — fail fast before waking the vehicle
+    check_command_guards(cmd_api, method_name)
 
     try:
         method = getattr(cmd_api, method_name)

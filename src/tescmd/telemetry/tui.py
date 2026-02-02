@@ -1620,12 +1620,8 @@ def _format_value(
     return str(value)
 
 
-def _format_with_units(field_name: str, value: Any, units: DisplayUnits) -> str:
-    """Apply unit conversion based on user preferences."""
-    from tescmd.output.rich_output import DistanceUnit, PressureUnit, TempUnit
-
-    # Temperature fields (API returns Celsius).
-    _temp_fields = {
+_TEMP_FIELDS = frozenset(
+    {
         "InsideTemp",
         "OutsideTemp",
         "HvacLeftTemperatureRequest",
@@ -1633,46 +1629,53 @@ def _format_with_units(field_name: str, value: Any, units: DisplayUnits) -> str:
         "ModuleTempMax",
         "ModuleTempMin",
     }
-    if field_name in _temp_fields and isinstance(value, (int, float)):
-        if units.temp == TempUnit.F:
-            return f"{value * 9 / 5 + 32:.1f}\u00b0F"
-        return f"{value:.1f}\u00b0C"
-
-    # Distance fields (API returns miles).
-    _distance_fields = {
+)
+_DISTANCE_FIELDS = frozenset(
+    {
         "Odometer",
         "EstBatteryRange",
         "IdealBatteryRange",
         "RatedRange",
         "MilesToArrival",
     }
-    if field_name in _distance_fields and isinstance(value, (int, float)):
-        if units.distance == DistanceUnit.KM:
-            return f"{value * 1.60934:.1f} km"
-        return f"{value:.1f} mi"
-
-    # Speed fields (API returns mph).
-    _speed_fields = {"VehicleSpeed", "CruiseSetSpeed", "CurrentLimitMph"}
-    if field_name in _speed_fields and isinstance(value, (int, float)):
-        if units.distance == DistanceUnit.KM:
-            return f"{value * 1.60934:.0f} km/h"
-        return f"{value:.0f} mph"
-
-    # Pressure fields (API returns bar).
-    _pressure_fields = {
+)
+_SPEED_FIELDS = frozenset({"VehicleSpeed", "CruiseSetSpeed", "CurrentLimitMph"})
+_PRESSURE_FIELDS = frozenset(
+    {
         "TpmsPressureFl",
         "TpmsPressureFr",
         "TpmsPressureRl",
         "TpmsPressureRr",
     }
-    if field_name in _pressure_fields and isinstance(value, (int, float)):
+)
+_PCT_FIELDS = frozenset({"Soc", "BatteryLevel", "ChargeLimitSoc"})
+
+
+def _format_with_units(field_name: str, value: Any, units: DisplayUnits) -> str:
+    """Apply unit conversion based on user preferences."""
+    from tescmd.output.rich_output import DistanceUnit, PressureUnit, TempUnit
+
+    if field_name in _TEMP_FIELDS and isinstance(value, (int, float)):
+        if units.temp == TempUnit.F:
+            return f"{value * 9 / 5 + 32:.1f}\u00b0F"
+        return f"{value:.1f}\u00b0C"
+
+    if field_name in _DISTANCE_FIELDS and isinstance(value, (int, float)):
+        if units.distance == DistanceUnit.KM:
+            return f"{value * 1.60934:.1f} km"
+        return f"{value:.1f} mi"
+
+    if field_name in _SPEED_FIELDS and isinstance(value, (int, float)):
+        if units.distance == DistanceUnit.KM:
+            return f"{value * 1.60934:.0f} km/h"
+        return f"{value:.0f} mph"
+
+    if field_name in _PRESSURE_FIELDS and isinstance(value, (int, float)):
         if units.pressure == PressureUnit.PSI:
             return f"{value * 14.5038:.1f} psi"
         return f"{value:.2f} bar"
 
-    # Percentage fields.
-    _pct_fields = {"Soc", "BatteryLevel", "ChargeLimitSoc"}
-    if field_name in _pct_fields and isinstance(value, (int, float)):
+    if field_name in _PCT_FIELDS and isinstance(value, (int, float)):
         return f"{value}%"
 
     # Voltage / current.

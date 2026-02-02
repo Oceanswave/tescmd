@@ -8,9 +8,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from tescmd.api.errors import AuthError, TierError, VehicleAsleepError
-from tescmd.openclaw.dispatcher import CommandDispatcher
+from tescmd.api.errors import (
+    AuthError,
+    ConfigError,
+    KeyNotEnrolledError,
+    TierError,
+    VehicleAsleepError,
+)
+from tescmd.openclaw.dispatcher import _METHOD_ALIASES, CommandDispatcher
 from tescmd.openclaw.telemetry_store import TelemetryStore
+from tescmd.triggers.manager import TriggerManager
 
 
 def _mock_app_ctx() -> MagicMock:
@@ -194,6 +201,7 @@ class TestWriteHandlers:
                 return_value=(mock_client, mock_vehicle_api, mock_cmd_api),
             ),
             patch("tescmd.openclaw.dispatcher.invalidate_cache_for_vin"),
+            patch("tescmd.openclaw.dispatcher.check_command_guards"),
         ):
             result = await d.dispatch({"method": "door.lock", "params": {}})
 
@@ -217,6 +225,7 @@ class TestWriteHandlers:
                 return_value=(mock_client, AsyncMock(), mock_cmd_api),
             ),
             patch("tescmd.openclaw.dispatcher.invalidate_cache_for_vin"),
+            patch("tescmd.openclaw.dispatcher.check_command_guards"),
         ):
             result = await d.dispatch({"method": "door.unlock", "params": {}})
         assert result["result"] is True
@@ -237,6 +246,7 @@ class TestWriteHandlers:
                 return_value=(mock_client, AsyncMock(), mock_cmd_api),
             ),
             patch("tescmd.openclaw.dispatcher.invalidate_cache_for_vin"),
+            patch("tescmd.openclaw.dispatcher.check_command_guards"),
         ):
             result = await d.dispatch({"method": "climate.on", "params": {}})
         assert result["result"] is True
@@ -257,6 +267,7 @@ class TestWriteHandlers:
                 return_value=(mock_client, AsyncMock(), mock_cmd_api),
             ),
             patch("tescmd.openclaw.dispatcher.invalidate_cache_for_vin"),
+            patch("tescmd.openclaw.dispatcher.check_command_guards"),
         ):
             result = await d.dispatch({"method": "climate.set_temp", "params": {"temp": 72.0}})
         assert result["result"] is True
@@ -287,6 +298,7 @@ class TestWriteHandlers:
                 return_value=(mock_client, AsyncMock(), mock_cmd_api),
             ),
             patch("tescmd.openclaw.dispatcher.invalidate_cache_for_vin"),
+            patch("tescmd.openclaw.dispatcher.check_command_guards"),
         ):
             result = await d.dispatch({"method": "charge.set_limit", "params": {"percent": 80}})
         assert result["result"] is True
@@ -315,6 +327,7 @@ class TestWriteHandlers:
                 return_value=(mock_client, AsyncMock(), mock_cmd_api),
             ),
             patch("tescmd.openclaw.dispatcher.invalidate_cache_for_vin"),
+            patch("tescmd.openclaw.dispatcher.check_command_guards"),
         ):
             result = await d.dispatch({"method": "trunk.open", "params": {}})
         assert result["result"] is True
@@ -336,6 +349,7 @@ class TestWriteHandlers:
                 return_value=(mock_client, AsyncMock(), mock_cmd_api),
             ),
             patch("tescmd.openclaw.dispatcher.invalidate_cache_for_vin"),
+            patch("tescmd.openclaw.dispatcher.check_command_guards"),
         ):
             result = await d.dispatch({"method": "frunk.open", "params": {}})
         assert result["result"] is True
@@ -357,6 +371,7 @@ class TestWriteHandlers:
                 return_value=(mock_client, AsyncMock(), mock_cmd_api),
             ),
             patch("tescmd.openclaw.dispatcher.invalidate_cache_for_vin"),
+            patch("tescmd.openclaw.dispatcher.check_command_guards"),
         ):
             result = await d.dispatch({"method": "flash_lights", "params": {}})
         assert result["result"] is True
@@ -377,6 +392,7 @@ class TestWriteHandlers:
                 return_value=(mock_client, AsyncMock(), mock_cmd_api),
             ),
             patch("tescmd.openclaw.dispatcher.invalidate_cache_for_vin"),
+            patch("tescmd.openclaw.dispatcher.check_command_guards"),
         ):
             result = await d.dispatch({"method": "sentry.on", "params": {}})
         assert result["result"] is True
@@ -420,6 +436,7 @@ class TestAutoWakeRetry:
                 return_value=(mock_wake_client, mock_wake_api),
             ),
             patch("tescmd.openclaw.dispatcher.invalidate_cache_for_vin"),
+            patch("tescmd.openclaw.dispatcher.check_command_guards"),
         ):
             result = await d.dispatch({"method": "door.lock", "params": {}})
 
@@ -444,6 +461,7 @@ class TestErrorPropagation:
                 "tescmd.openclaw.dispatcher.get_command_api",
                 return_value=(mock_client, AsyncMock(), mock_cmd_api),
             ),
+            patch("tescmd.openclaw.dispatcher.check_command_guards"),
             pytest.raises(AuthError),
         ):
             await d.dispatch({"method": "door.lock", "params": {}})
@@ -461,3 +479,444 @@ class TestErrorPropagation:
             pytest.raises(TierError),
         ):
             await d.dispatch({"method": "door.lock", "params": {}})
+
+
+class TestCommandGuards:
+    """Tests for check_command_guards() integration in _execute_command."""
+
+    @pytest.mark.asyncio
+    async def test_readonly_tier_raises_tier_error(self) -> None:
+        ctx = _mock_app_ctx()
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
+        mock_client = AsyncMock()
+        mock_client.close = AsyncMock()
+        mock_cmd_api = AsyncMock()
+
+        with (
+            patch(
+                "tescmd.openclaw.dispatcher.get_command_api",
+                return_value=(mock_client, AsyncMock(), mock_cmd_api),
+            ),
+            patch(
+                "tescmd.openclaw.dispatcher.check_command_guards",
+                side_effect=TierError("readonly"),
+            ),
+            pytest.raises(TierError),
+        ):
+            await d.dispatch({"method": "door.lock", "params": {}})
+
+    @pytest.mark.asyncio
+    async def test_signing_guard_raises_config_error(self) -> None:
+        ctx = _mock_app_ctx()
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
+        mock_client = AsyncMock()
+        mock_client.close = AsyncMock()
+        mock_cmd_api = AsyncMock()
+
+        with (
+            patch(
+                "tescmd.openclaw.dispatcher.get_command_api",
+                return_value=(mock_client, AsyncMock(), mock_cmd_api),
+            ),
+            patch(
+                "tescmd.openclaw.dispatcher.check_command_guards",
+                side_effect=ConfigError("No EC key pair"),
+            ),
+            pytest.raises(ConfigError),
+        ):
+            await d.dispatch({"method": "door.lock", "params": {}})
+
+    @pytest.mark.asyncio
+    async def test_key_not_enrolled_raises(self) -> None:
+        ctx = _mock_app_ctx()
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
+        mock_client = AsyncMock()
+        mock_client.close = AsyncMock()
+        mock_cmd_api = AsyncMock()
+
+        with (
+            patch(
+                "tescmd.openclaw.dispatcher.get_command_api",
+                return_value=(mock_client, AsyncMock(), mock_cmd_api),
+            ),
+            patch(
+                "tescmd.openclaw.dispatcher.check_command_guards",
+                side_effect=KeyNotEnrolledError("not enrolled", status_code=422),
+            ),
+            pytest.raises(KeyNotEnrolledError),
+        ):
+            await d.dispatch({"method": "door.unlock", "params": {}})
+
+
+class TestSystemRun:
+    """Tests for system.run meta-dispatch handler."""
+
+    @pytest.mark.asyncio
+    async def test_system_run_dispatches_openclaw_method(self) -> None:
+        ctx = _mock_app_ctx()
+        store = _store_with(Soc=72.0)
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, telemetry_store=store)
+        result = await d.dispatch(
+            {"method": "system.run", "params": {"method": "battery.get", "params": {}}}
+        )
+        assert result is not None
+        assert "battery_level" in result
+
+    @pytest.mark.asyncio
+    async def test_system_run_resolves_api_style_alias(self) -> None:
+        ctx = _mock_app_ctx()
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
+        cmd_result = _make_command_result("Locked.")
+        mock_client = AsyncMock()
+        mock_client.close = AsyncMock()
+        mock_cmd_api = AsyncMock()
+        mock_cmd_api.door_lock = AsyncMock(return_value=cmd_result)
+
+        with (
+            patch(
+                "tescmd.openclaw.dispatcher.get_command_api",
+                return_value=(mock_client, AsyncMock(), mock_cmd_api),
+            ),
+            patch("tescmd.openclaw.dispatcher.invalidate_cache_for_vin"),
+            patch("tescmd.openclaw.dispatcher.check_command_guards"),
+        ):
+            result = await d.dispatch(
+                {"method": "system.run", "params": {"method": "door_lock", "params": {}}}
+            )
+        assert result is not None
+        assert result["result"] is True
+
+    @pytest.mark.asyncio
+    async def test_system_run_unknown_method_raises(self) -> None:
+        ctx = _mock_app_ctx()
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
+        with pytest.raises(ValueError, match="Unknown method"):
+            await d.dispatch(
+                {"method": "system.run", "params": {"method": "nonexistent.cmd", "params": {}}}
+            )
+
+    @pytest.mark.asyncio
+    async def test_system_run_missing_method_raises(self) -> None:
+        ctx = _mock_app_ctx()
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
+        with pytest.raises(ValueError, match="requires 'method'"):
+            await d.dispatch({"method": "system.run", "params": {}})
+
+    def test_method_aliases_cover_key_commands(self) -> None:
+        assert "door_lock" in _METHOD_ALIASES
+        assert "door_unlock" in _METHOD_ALIASES
+        assert "auto_conditioning_start" in _METHOD_ALIASES
+        assert "charge_start" in _METHOD_ALIASES
+        assert _METHOD_ALIASES["door_lock"] == "door.lock"
+
+
+class TestTriggerHandlers:
+    """Tests for trigger.* command handlers."""
+
+    @pytest.mark.asyncio
+    async def test_trigger_create(self) -> None:
+        ctx = _mock_app_ctx()
+        mgr = TriggerManager(vin="VIN1")
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, trigger_manager=mgr)
+        result = await d.dispatch(
+            {
+                "method": "trigger.create",
+                "params": {"field": "BatteryLevel", "operator": "lt", "value": 20},
+            }
+        )
+        assert result is not None
+        assert "id" in result
+        assert result["field"] == "BatteryLevel"
+        assert result["operator"] == "lt"
+        assert len(mgr.list_all()) == 1
+
+    @pytest.mark.asyncio
+    async def test_trigger_create_once(self) -> None:
+        ctx = _mock_app_ctx()
+        mgr = TriggerManager(vin="VIN1")
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, trigger_manager=mgr)
+        await d.dispatch(
+            {
+                "method": "trigger.create",
+                "params": {"field": "Soc", "operator": "lt", "value": 10, "once": True},
+            }
+        )
+        trigger = mgr.list_all()[0]
+        assert trigger.once is True
+
+    @pytest.mark.asyncio
+    async def test_trigger_create_custom_cooldown(self) -> None:
+        ctx = _mock_app_ctx()
+        mgr = TriggerManager(vin="VIN1")
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, trigger_manager=mgr)
+        await d.dispatch(
+            {
+                "method": "trigger.create",
+                "params": {
+                    "field": "Soc",
+                    "operator": "lt",
+                    "value": 10,
+                    "cooldown_seconds": 30.0,
+                },
+            }
+        )
+        trigger = mgr.list_all()[0]
+        assert trigger.cooldown_seconds == 30.0
+
+    @pytest.mark.asyncio
+    async def test_trigger_create_missing_field_raises(self) -> None:
+        ctx = _mock_app_ctx()
+        mgr = TriggerManager(vin="VIN1")
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, trigger_manager=mgr)
+        with pytest.raises(ValueError, match="requires 'field'"):
+            await d.dispatch(
+                {
+                    "method": "trigger.create",
+                    "params": {"operator": "lt", "value": 20},
+                }
+            )
+
+    @pytest.mark.asyncio
+    async def test_trigger_create_missing_operator_raises(self) -> None:
+        ctx = _mock_app_ctx()
+        mgr = TriggerManager(vin="VIN1")
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, trigger_manager=mgr)
+        with pytest.raises(ValueError, match="requires 'operator'"):
+            await d.dispatch(
+                {
+                    "method": "trigger.create",
+                    "params": {"field": "BatteryLevel", "value": 20},
+                }
+            )
+
+    @pytest.mark.asyncio
+    async def test_trigger_delete(self) -> None:
+        ctx = _mock_app_ctx()
+        mgr = TriggerManager(vin="VIN1")
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, trigger_manager=mgr)
+        create_result = await d.dispatch(
+            {
+                "method": "trigger.create",
+                "params": {"field": "BatteryLevel", "operator": "lt", "value": 20},
+            }
+        )
+        trigger_id = create_result["id"]
+        delete_result = await d.dispatch(
+            {
+                "method": "trigger.delete",
+                "params": {"id": trigger_id},
+            }
+        )
+        assert delete_result["deleted"] is True
+        assert delete_result["id"] == trigger_id
+        assert len(mgr.list_all()) == 0
+
+    @pytest.mark.asyncio
+    async def test_trigger_delete_nonexistent(self) -> None:
+        ctx = _mock_app_ctx()
+        mgr = TriggerManager(vin="VIN1")
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, trigger_manager=mgr)
+        result = await d.dispatch(
+            {
+                "method": "trigger.delete",
+                "params": {"id": "nonexistent123"},
+            }
+        )
+        assert result["deleted"] is False
+
+    @pytest.mark.asyncio
+    async def test_trigger_delete_missing_id_raises(self) -> None:
+        ctx = _mock_app_ctx()
+        mgr = TriggerManager(vin="VIN1")
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, trigger_manager=mgr)
+        with pytest.raises(ValueError, match="requires 'id'"):
+            await d.dispatch({"method": "trigger.delete", "params": {}})
+
+    @pytest.mark.asyncio
+    async def test_trigger_list_empty(self) -> None:
+        ctx = _mock_app_ctx()
+        mgr = TriggerManager(vin="VIN1")
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, trigger_manager=mgr)
+        result = await d.dispatch({"method": "trigger.list", "params": {}})
+        assert result["triggers"] == []
+
+    @pytest.mark.asyncio
+    async def test_trigger_list_returns_all(self) -> None:
+        ctx = _mock_app_ctx()
+        mgr = TriggerManager(vin="VIN1")
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, trigger_manager=mgr)
+        await d.dispatch(
+            {
+                "method": "trigger.create",
+                "params": {"field": "BatteryLevel", "operator": "lt", "value": 20},
+            }
+        )
+        await d.dispatch(
+            {
+                "method": "trigger.create",
+                "params": {"field": "InsideTemp", "operator": "gt", "value": 100},
+            }
+        )
+        result = await d.dispatch({"method": "trigger.list", "params": {}})
+        assert len(result["triggers"]) == 2
+        fields = {t["field"] for t in result["triggers"]}
+        assert fields == {"BatteryLevel", "InsideTemp"}
+
+    @pytest.mark.asyncio
+    async def test_trigger_poll_empty(self) -> None:
+        ctx = _mock_app_ctx()
+        mgr = TriggerManager(vin="VIN1")
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, trigger_manager=mgr)
+        result = await d.dispatch({"method": "trigger.poll", "params": {}})
+        assert result["notifications"] == []
+
+    @pytest.mark.asyncio
+    async def test_trigger_poll_returns_notifications(self) -> None:
+        ctx = _mock_app_ctx()
+        mgr = TriggerManager(vin="VIN1")
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, trigger_manager=mgr)
+        await d.dispatch(
+            {
+                "method": "trigger.create",
+                "params": {"field": "BatteryLevel", "operator": "lt", "value": 20},
+            }
+        )
+        # Simulate trigger firing via evaluate
+        ts = datetime(2026, 2, 1, 12, 0, 0, tzinfo=UTC)
+        await mgr.evaluate("BatteryLevel", 15.0, 25.0, ts)
+        result = await d.dispatch({"method": "trigger.poll", "params": {}})
+        assert len(result["notifications"]) == 1
+        n = result["notifications"][0]
+        assert n["field"] == "BatteryLevel"
+        assert n["value"] == 15.0
+
+    @pytest.mark.asyncio
+    async def test_trigger_poll_drains(self) -> None:
+        """Polling should clear the pending queue."""
+        ctx = _mock_app_ctx()
+        mgr = TriggerManager(vin="VIN1")
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, trigger_manager=mgr)
+        await d.dispatch(
+            {
+                "method": "trigger.create",
+                "params": {"field": "BatteryLevel", "operator": "lt", "value": 20},
+            }
+        )
+        ts = datetime(2026, 2, 1, 12, 0, 0, tzinfo=UTC)
+        await mgr.evaluate("BatteryLevel", 15.0, 25.0, ts)
+        # First poll returns notification
+        r1 = await d.dispatch({"method": "trigger.poll", "params": {}})
+        assert len(r1["notifications"]) == 1
+        # Second poll is empty
+        r2 = await d.dispatch({"method": "trigger.poll", "params": {}})
+        assert len(r2["notifications"]) == 0
+
+
+class TestTriggerConvenienceAliases:
+    """Tests for convenience trigger aliases that pre-fill field names."""
+
+    @pytest.mark.asyncio
+    async def test_cabin_temp_trigger(self) -> None:
+        ctx = _mock_app_ctx()
+        mgr = TriggerManager(vin="VIN1")
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, trigger_manager=mgr)
+        result = await d.dispatch(
+            {
+                "method": "cabin_temp.trigger",
+                "params": {"operator": "gt", "value": 100},
+            }
+        )
+        assert result["field"] == "InsideTemp"
+        assert result["operator"] == "gt"
+
+    @pytest.mark.asyncio
+    async def test_outside_temp_trigger(self) -> None:
+        ctx = _mock_app_ctx()
+        mgr = TriggerManager(vin="VIN1")
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, trigger_manager=mgr)
+        result = await d.dispatch(
+            {
+                "method": "outside_temp.trigger",
+                "params": {"operator": "lt", "value": 32},
+            }
+        )
+        assert result["field"] == "OutsideTemp"
+
+    @pytest.mark.asyncio
+    async def test_battery_trigger(self) -> None:
+        ctx = _mock_app_ctx()
+        mgr = TriggerManager(vin="VIN1")
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, trigger_manager=mgr)
+        result = await d.dispatch(
+            {
+                "method": "battery.trigger",
+                "params": {"operator": "lt", "value": 20},
+            }
+        )
+        assert result["field"] == "BatteryLevel"
+
+    @pytest.mark.asyncio
+    async def test_location_trigger(self) -> None:
+        ctx = _mock_app_ctx()
+        mgr = TriggerManager(vin="VIN1")
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, trigger_manager=mgr)
+        result = await d.dispatch(
+            {
+                "method": "location.trigger",
+                "params": {
+                    "operator": "enter",
+                    "value": {"latitude": 37.77, "longitude": -122.42, "radius_m": 500},
+                },
+            }
+        )
+        assert result["field"] == "Location"
+        assert result["operator"] == "enter"
+
+
+class TestTriggerHandlersWithoutManager:
+    """Trigger handlers raise RuntimeError when no TriggerManager is wired."""
+
+    @pytest.mark.asyncio
+    async def test_trigger_create_no_manager(self) -> None:
+        ctx = _mock_app_ctx()
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
+        with pytest.raises(RuntimeError, match="Triggers not available"):
+            await d.dispatch(
+                {
+                    "method": "trigger.create",
+                    "params": {"field": "BatteryLevel", "operator": "lt", "value": 20},
+                }
+            )
+
+    @pytest.mark.asyncio
+    async def test_trigger_delete_no_manager(self) -> None:
+        ctx = _mock_app_ctx()
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
+        with pytest.raises(RuntimeError, match="Triggers not available"):
+            await d.dispatch({"method": "trigger.delete", "params": {"id": "abc"}})
+
+    @pytest.mark.asyncio
+    async def test_trigger_list_no_manager(self) -> None:
+        ctx = _mock_app_ctx()
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
+        with pytest.raises(RuntimeError, match="Triggers not available"):
+            await d.dispatch({"method": "trigger.list", "params": {}})
+
+    @pytest.mark.asyncio
+    async def test_trigger_poll_no_manager(self) -> None:
+        ctx = _mock_app_ctx()
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
+        with pytest.raises(RuntimeError, match="Triggers not available"):
+            await d.dispatch({"method": "trigger.poll", "params": {}})
+
+    @pytest.mark.asyncio
+    async def test_convenience_alias_no_manager(self) -> None:
+        ctx = _mock_app_ctx()
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
+        with pytest.raises(RuntimeError, match="Triggers not available"):
+            await d.dispatch(
+                {
+                    "method": "battery.trigger",
+                    "params": {"operator": "lt", "value": 20},
+                }
+            )

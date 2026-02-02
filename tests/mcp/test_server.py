@@ -124,6 +124,103 @@ class TestInvokeTool:
             assert kwargs["env"] is not os.environ
 
 
+class TestCustomTools:
+    def test_register_custom_tool(self) -> None:
+        server = MCPServer(client_id="test-id", client_secret="test-secret")
+        handler = lambda params: {"result": "ok"}  # noqa: E731
+        server.register_custom_tool(
+            "my_custom",
+            handler,
+            "A custom tool",
+            {"type": "object", "properties": {"x": {"type": "integer"}}},
+        )
+        assert "my_custom" in server._custom_tools
+
+    def test_custom_tool_in_list_tools(self) -> None:
+        server = MCPServer(client_id="test-id", client_secret="test-secret")
+        server.register_custom_tool(
+            "my_custom",
+            lambda params: {},
+            "Custom description",
+            {"type": "object", "properties": {"x": {"type": "integer"}}},
+        )
+        tools = server.list_tools()
+        names = {t["name"] for t in tools}
+        assert "my_custom" in names
+
+    def test_custom_tool_schema(self) -> None:
+        server = MCPServer(client_id="test-id", client_secret="test-secret")
+        schema = {"type": "object", "properties": {"field": {"type": "string"}}}
+        server.register_custom_tool("my_tool", lambda p: {}, "desc", schema)
+        tools = server.list_tools()
+        tool = next(t for t in tools if t["name"] == "my_tool")
+        assert tool["inputSchema"] == schema
+        assert tool["description"] == "desc"
+
+    def test_custom_tool_annotations(self) -> None:
+        server = MCPServer(client_id="test-id", client_secret="test-secret")
+        server.register_custom_tool(
+            "read_tool",
+            lambda p: {},
+            "read",
+            {},
+            is_write=False,
+        )
+        server.register_custom_tool(
+            "write_tool",
+            lambda p: {},
+            "write",
+            {},
+            is_write=True,
+        )
+        tools = server.list_tools()
+        read = next(t for t in tools if t["name"] == "read_tool")
+        write = next(t for t in tools if t["name"] == "write_tool")
+        assert read["annotations"]["readOnlyHint"] is True
+        assert write["annotations"]["readOnlyHint"] is False
+
+    def test_custom_tool_count(self) -> None:
+        server = MCPServer(client_id="test-id", client_secret="test-secret")
+        base_count = len(server.list_tools())
+        server.register_custom_tool("extra1", lambda p: {}, "d1", {})
+        server.register_custom_tool("extra2", lambda p: {}, "d2", {})
+        assert len(server.list_tools()) == base_count + 2
+
+    def test_invoke_custom_tool(self) -> None:
+        server = MCPServer(client_id="test-id", client_secret="test-secret")
+        server.register_custom_tool(
+            "echo",
+            lambda params: {"echoed": params.get("msg", "")},
+            "Echo tool",
+            {"type": "object", "properties": {"msg": {"type": "string"}}},
+        )
+        result = server.invoke_tool("echo", {"msg": "hello"})
+        assert result == {"echoed": "hello"}
+
+    def test_invoke_custom_tool_error(self) -> None:
+        def broken(params: dict) -> dict:
+            raise ValueError("boom")
+
+        server = MCPServer(client_id="test-id", client_secret="test-secret")
+        server.register_custom_tool("broken", broken, "Broken tool", {})
+        result = server.invoke_tool("broken", {})
+        assert "error" in result
+        assert "boom" in result["error"]
+
+    def test_invoke_custom_tool_over_cli_tool(self) -> None:
+        """Custom tools take precedence when name overlaps with CLI tools."""
+        server = MCPServer(client_id="test-id", client_secret="test-secret")
+        # Register a custom tool with a name that exists in CLI tools
+        server.register_custom_tool(
+            "cache_status",
+            lambda p: {"custom": True},
+            "Override",
+            {},
+        )
+        result = server.invoke_tool("cache_status", {})
+        assert result == {"custom": True}
+
+
 class TestToolCLIArgs:
     def test_args_include_format_json_wake(self) -> None:
         """Verify the invocation uses --format json --wake."""
@@ -133,16 +230,14 @@ class TestToolCLIArgs:
         # entry exists and has the right structure
         tool_def = server._tools.get("vehicle_list")
         assert tool_def is not None
-        args, _desc, is_write = tool_def
-        assert args == ["vehicle", "list"]
-        assert is_write is False
+        assert tool_def.args == ["vehicle", "list"]
+        assert tool_def.is_write is False
 
     def test_write_tool_marked_correctly(self) -> None:
         server = MCPServer(client_id="test-id", client_secret="test-secret")
         tool_def = server._tools.get("charge_start")
         assert tool_def is not None
-        _, _, is_write = tool_def
-        assert is_write is True
+        assert tool_def.is_write is True
 
 
 def _mock_client(client_id: str = "test-client") -> Any:

@@ -22,7 +22,8 @@ src/tescmd/
 │   ├── status.py, trunk.py, vehicle.py, media.py, nav.py, partner.py
 │   ├── software.py, energy.py, user.py, sharing.py, raw.py, key.py
 │   ├── setup.py           # Interactive first-run wizard
-│   ├── openclaw.py        # openclaw bridge command
+│   ├── serve.py           # Unified MCP + telemetry + OpenClaw command
+│   ├── openclaw.py        # Standalone openclaw bridge command
 │   └── mcp_cmd.py         # mcp serve command
 ├── api/                   # HTTP client + domain APIs (composition pattern)
 │   ├── client.py          # TeslaFleetClient (base HTTP, auth headers, retries)
@@ -39,13 +40,18 @@ src/tescmd/
 │   ├── setup.py           # Reusable telemetry_session() context manager
 │   ├── server.py, decoder.py, fields.py, dashboard.py, tailscale.py
 ├── openclaw/              # OpenClaw bridge
-│   ├── config.py          # BridgeConfig, FieldFilter (pydantic)
+│   ├── config.py          # BridgeConfig, FieldFilter, NodeCapabilities (pydantic)
 │   ├── filters.py         # DualGateFilter (delta + throttle), haversine()
 │   ├── emitter.py         # EventEmitter (telemetry → OpenClaw events)
-│   ├── gateway.py         # GatewayClient (WebSocket, operator protocol)
-│   └── bridge.py          # TelemetryBridge orchestrator
+│   ├── gateway.py         # GatewayClient (WebSocket, node protocol, Ed25519 auth)
+│   ├── bridge.py          # TelemetryBridge orchestrator, build_openclaw_pipeline()
+│   ├── dispatcher.py      # CommandDispatcher (reads, writes, triggers, system.run)
+│   └── telemetry_store.py # In-memory latest-value cache for telemetry fields
+├── triggers/              # Trigger subscription system
+│   ├── models.py          # TriggerOperator, TriggerCondition, TriggerDefinition, TriggerNotification
+│   └── manager.py         # TriggerManager (evaluation, cooldown, delivery, geofencing)
 ├── mcp/                   # MCP server
-│   └── server.py          # MCPServer (FastMCP, CliRunner-based tool invoke)
+│   └── server.py          # MCPServer (FastMCP, CliRunner + custom callable tools)
 ├── deploy/                # Key hosting (GitHub Pages, Tailscale Funnel)
 └── _internal/             # vin.py, async_utils.py, permissions.py
 ```
@@ -75,9 +81,11 @@ src/tescmd/
 
 **Telemetry session lifecycle:** `telemetry/setup.py:telemetry_session()` is an async context manager handling: server start → Tailscale tunnel → partner domain re-registration → fleet config → yield → cleanup. Used by both `cli/vehicle.py` (stream) and `cli/openclaw.py` (bridge).
 
-**OpenClaw pipeline:** `TelemetryServer.on_frame` → `DualGateFilter.should_emit()` → `EventEmitter.to_event()` → `GatewayClient.send_event()`. The `TelemetryBridge` class wires these together.
+**OpenClaw pipeline:** `TelemetryServer.on_frame` → `DualGateFilter.should_emit()` → `EventEmitter.to_event()` → `GatewayClient.send_event()`. The `TelemetryBridge` class wires these together. `build_openclaw_pipeline()` is the shared factory used by both `cli/openclaw.py` (standalone) and `cli/serve.py` (combined mode). Inbound commands flow: gateway `node.invoke.request` → `CommandDispatcher.dispatch()` → handler → `node.invoke.result`.
 
-**MCP tools:** `mcp/server.py` maps tool names to CLI arg lists. `invoke_tool()` uses `CliRunner.invoke(cli, ["--format", "json", "--wake", *args], env=os.environ.copy())`. Read/write tools are separated for `readOnlyHint` annotations. HTTP transport uses OAuth 2.1 via `_InMemoryOAuthProvider` (auto-approve authorization, dynamic client registration, in-memory token storage) with `_PermissiveClient` wrappers that accept any redirect URI. DNS rebinding protection is configured to allow the Tailscale Funnel hostname when `public_url` is set.
+**Trigger system:** `TriggerManager` evaluates conditions on every telemetry frame (independent of the dual-gate filter). Supports numeric comparison (`lt`, `gt`, `eq`, etc.), `changed` detection, and geofence `enter`/`leave` with haversine distance. One-shot and persistent (with cooldown) firing modes. Notifications delivered via OpenClaw push and MCP polling (`trigger.poll`).
+
+**MCP tools:** `mcp/server.py` maps tool names to CLI arg lists via `_CliToolDef` dataclasses. `invoke_tool()` uses `CliRunner.invoke(cli, ["--format", "json", "--wake", *args], env=os.environ.copy())`. Custom tools (e.g. trigger CRUD) use `_CustomToolDef` with direct callable handlers registered via `register_custom_tool()`. Read/write tools are separated for `readOnlyHint` annotations. HTTP transport uses OAuth 2.1 via `_InMemoryOAuthProvider` (auto-approve authorization, dynamic client registration, in-memory token storage) with `_PermissiveClient` wrappers that accept any redirect URI. DNS rebinding protection is configured to allow the Tailscale Funnel hostname when `public_url` is set.
 
 ## Build & Test
 
@@ -86,8 +94,9 @@ src/tescmd/
 python -m build                    # hatchling via pyproject.toml
 
 # Test (parallel by default via pytest-xdist)
-pytest                             # all ~1200 tests
+pytest                             # all ~1600 tests
 pytest tests/openclaw/ -x -v       # openclaw tests
+pytest tests/triggers/ -x -v       # trigger tests
 pytest tests/mcp/ -x -v            # mcp tests
 pytest -m e2e                      # live API smoke tests (needs TESLA_ACCESS_TOKEN)
 
