@@ -7,9 +7,27 @@ description: Use when querying or controlling Tesla vehicles, energy products, o
 
 Query data from and send commands to Tesla vehicles, energy products, and Supercharger billing via the Tesla Fleet API. Supports CLI invocation, MCP tool calls, and OpenClaw gateway dispatch.
 
-## Agent Invocation
+## Prefer MCP or OpenClaw Over Direct CLI
 
-Always use these flags:
+**Every direct CLI call to the Tesla Fleet API is billable** — including 4xx errors like "vehicle asleep" (408) and rate limits (429). There is no free tier.
+
+If `tescmd serve` is running (MCP + telemetry), **always prefer the MCP tools or OpenClaw gateway** over spawning CLI subprocesses:
+
+| Method | Read cost | Write cost | Best for |
+|--------|-----------|------------|----------|
+| **MCP tool** (via `tescmd serve`) | **Free** — reads served from telemetry-warmed cache | Billable (1 API call) | Agents connected to MCP server |
+| **OpenClaw dispatch** (via gateway) | **Free** — reads served from in-memory telemetry store | Billable (1 API call) | Bots connected to OpenClaw gateway |
+| **Direct CLI** (`tescmd --format json`) | Billable per call (cached 30s–1h) | Billable per call | Fallback when no server is running |
+
+**Why this matters:** A naive script polling `vehicle_data` every 5 minutes generates ~1,000+ billable requests/day. With `tescmd serve` running, telemetry pushes data for free and the MCP/OpenClaw read paths serve it from cache at zero cost. Only write commands (lock, charge, climate) hit the API.
+
+**Decision flow:**
+1. Is `tescmd serve` running? → Use MCP tools or OpenClaw dispatch
+2. No server? → Fall back to direct CLI with `--format json --wake`
+
+## Direct CLI Invocation (Fallback)
+
+When no MCP/OpenClaw server is available, use these flags:
 
 ```bash
 tescmd --format json --wake <command> [args]
@@ -425,9 +443,11 @@ Example: `{"method": "system.run", "params": {"method": "door_lock", "params": {
 
 ## Server Modes
 
+Start `tescmd serve` first, then use MCP tools or OpenClaw dispatch for all reads — this eliminates per-request API costs for vehicle state queries.
+
 ### `tescmd serve` (recommended)
 
-Combined MCP + telemetry + OpenClaw with TUI dashboard:
+Combined MCP + telemetry + OpenClaw with TUI dashboard. Telemetry pushes keep the cache warm so MCP reads are free:
 
 ```bash
 tescmd serve VIN                                    # MCP + telemetry TUI
