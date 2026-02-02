@@ -212,7 +212,9 @@ async def _cmd_window(
                 if lat is not None and lon is not None:
                     use_lat, use_lon = lat, lon
                 else:
-                    vdata = await vehicle_api.get_vehicle_data(vin, endpoints=["drive_state"])
+                    vdata = await vehicle_api.get_vehicle_data(
+                        vin, endpoints=["drive_state", "location_data"]
+                    )
                     ds = vdata.drive_state
                     if ds and ds.latitude is not None and ds.longitude is not None:
                         use_lat, use_lon = ds.latitude, ds.longitude

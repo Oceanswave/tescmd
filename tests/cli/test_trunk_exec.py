@@ -283,7 +283,7 @@ class TestTrunkWindowClose:
         """--close without --lat/--lon fetches vehicle_data for drive_state coords."""
         # First request: vehicle_data to get drive_state location
         httpx_mock.add_response(
-            url=f"{FLEET}/api/1/vehicles/{VIN}/vehicle_data?endpoints=drive_state",
+            url=f"{FLEET}/api/1/vehicles/{VIN}/vehicle_data?endpoints=drive_state%3Blocation_data",
             json=VEHICLE_DATA_WITH_DRIVE_STATE,
         )
         # Second request: window_control command
