@@ -21,6 +21,24 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _make_cli_runner() -> Any:
+    """Create a CliRunner with stderr separation.
+
+    Click 8.2 removed the ``mix_stderr`` parameter (stderr is always
+    separate).  Click 8.1 defaults to ``mix_stderr=True``, so we pass
+    ``False`` when supported.  Routed through ``Any`` to avoid a
+    version-dependent ``type: ignore`` that fails strict mypy on one
+    version or the other.
+    """
+    from click.testing import CliRunner as _Runner
+
+    _ctor: Any = _Runner
+    try:
+        return _ctor(mix_stderr=False)
+    except TypeError:
+        return _Runner()
+
+
 @dataclass(frozen=True)
 class _CliToolDef:
     """Definition of a CLI-backed MCP tool."""
@@ -256,11 +274,9 @@ class MCPServer:
 
         import os
 
-        from click.testing import CliRunner
-
         from tescmd.cli.main import cli
 
-        runner = CliRunner(mix_stderr=False)
+        runner = _make_cli_runner()
         result = runner.invoke(cli, cli_args, env=os.environ.copy())
 
         output = result.output.strip()
@@ -383,7 +399,7 @@ class MCPServer:
         """Register a CLI-backed tool with the FastMCP server."""
         server = self
 
-        @mcp.tool(name=tool_name, description=description)  # type: ignore[misc]
+        @mcp.tool(name=tool_name, description=description)  # type: ignore
         async def _tool(vin: str = "", args: list[str] | None = None) -> str:
             result = await asyncio.to_thread(
                 server.invoke_tool, tool_name, {"vin": vin, "args": args or []}
@@ -403,7 +419,7 @@ class MCPServer:
         """
         server = self
 
-        @mcp.tool(name=tool_name, description=description)  # type: ignore[misc]
+        @mcp.tool(name=tool_name, description=description)  # type: ignore
         def _tool(params: str = "{}") -> str:
             try:
                 arguments = json.loads(params) if params else {}

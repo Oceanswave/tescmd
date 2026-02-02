@@ -30,6 +30,25 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _make_cli_runner() -> Any:
+    """Create a CliRunner with stderr separation.
+
+    Click 8.2 removed the ``mix_stderr`` parameter (stderr is always
+    separate).  Click 8.1 defaults to ``mix_stderr=True``, so we pass
+    ``False`` when supported.  Routed through ``Any`` to avoid a
+    version-dependent ``type: ignore`` that fails strict mypy on one
+    version or the other.
+    """
+    from click.testing import CliRunner as _Runner
+
+    _ctor: Any = _Runner
+    try:
+        return _ctor(mix_stderr=False)
+    except TypeError:
+        return _Runner()
+
+
 # ---------------------------------------------------------------------------
 # Panel field mapping — declarative schema for the dashboard layout
 # ---------------------------------------------------------------------------
@@ -860,8 +879,6 @@ class TelemetryTUI(App[None]):
         self._cmd_logger.info("%s  args=%s", description, cli_args)
 
         async def _invoke() -> None:
-            from click.testing import CliRunner
-
             from tescmd.cli.main import cli
 
             # Suppress httpx/httpcore logging during invocation — their INFO
@@ -871,7 +888,7 @@ class TelemetryTUI(App[None]):
             for n in _noisy_loggers:
                 logging.getLogger(n).setLevel(logging.WARNING)
 
-            runner = CliRunner(mix_stderr=False)
+            runner = _make_cli_runner()
             env = os.environ.copy()
             if self._vin:
                 env["TESLA_VIN"] = self._vin
