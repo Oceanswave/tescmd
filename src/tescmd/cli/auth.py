@@ -374,9 +374,10 @@ async def _cmd_register(app_ctx: AppContext) -> None:
         region=region,
     )
 
+    already = bool(_result.get("already_registered"))
     if formatter.format == "json":
         data: dict[str, object] = {
-            "status": "registered",
+            "status": "already_registered" if already else "registered",
             "region": region,
             "domain": domain,
         }
@@ -384,7 +385,10 @@ async def _cmd_register(app_ctx: AppContext) -> None:
             data["partner_scopes"] = partner_scopes
         formatter.output(data, command="auth.register")
     else:
-        formatter.rich.info("[green]Registration successful.[/green]")
+        if already:
+            formatter.rich.info("[green]Already registered — no action needed.[/green]")
+        else:
+            formatter.rich.info("[green]Registration successful.[/green]")
         if partner_scopes:
             formatter.rich.info(f"Partner scopes: {', '.join(partner_scopes)}")
             missing = sorted(set(PARTNER_SCOPES) - set(partner_scopes))
@@ -448,7 +452,10 @@ async def _auto_register(
             domain=domain,
             region=region,
         )
-        formatter.rich.info("[green]Registration successful.[/green]")
+        if _result.get("already_registered"):
+            formatter.rich.info("[green]Already registered — no action needed.[/green]")
+        else:
+            formatter.rich.info("[green]Registration successful.[/green]")
         if partner_scopes:
             missing = sorted(set(PARTNER_SCOPES) - set(partner_scopes))
             if missing:

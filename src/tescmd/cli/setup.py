@@ -626,7 +626,10 @@ async def _registration_step(
             domain=domain,
             region=region,
         )
-        info("[green]Registration successful.[/green]")
+        if _result.get("already_registered"):
+            info("[green]Already registered — no action needed.[/green]")
+        else:
+            info("[green]Registration successful.[/green]")
     except Exception as exc:
         status_code = getattr(exc, "status_code", None)
         exc_text = str(exc)

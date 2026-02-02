@@ -1,4 +1,4 @@
-"""Extended OAuth tests — token exchange, refresh, and partner tokens."""
+"""Extended OAuth tests — token exchange, refresh, partner tokens, and registration."""
 
 from __future__ import annotations
 
@@ -7,7 +7,12 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tescmd.api.errors import AuthError
-from tescmd.auth.oauth import exchange_code, get_partner_token, refresh_access_token
+from tescmd.auth.oauth import (
+    exchange_code,
+    get_partner_token,
+    refresh_access_token,
+    register_partner_account,
+)
 
 if TYPE_CHECKING:
     from pytest_httpx import HTTPXMock
@@ -121,5 +126,118 @@ class TestGetPartnerToken:
             await get_partner_token(
                 client_id="cid",
                 client_secret="csecret",
+                region="invalid",
+            )
+
+
+NA_BASE = "https://fleet-api.prd.na.vn.cloud.tesla.com"
+PARTNER_URL = f"{NA_BASE}/api/1/partner_accounts"
+
+
+class TestRegisterPartnerAccount:
+    """Tests for register_partner_account() — including idempotent 422 handling."""
+
+    @pytest.mark.asyncio
+    async def test_success_returns_response_and_scopes(self, httpx_mock: HTTPXMock) -> None:
+        """Normal 200 returns the JSON body and partner scopes."""
+        # Mock partner token request
+        httpx_mock.add_response(
+            url=TOKEN_URL,
+            method="POST",
+            json={"access_token": "pt-123", "token_type": "Bearer", "expires_in": 3600},
+        )
+        # Mock registration endpoint
+        httpx_mock.add_response(
+            url=PARTNER_URL,
+            method="POST",
+            json={"response": {"domain": "example.com"}},
+        )
+        result, _scopes = await register_partner_account(
+            client_id="cid",
+            client_secret="csecret",
+            domain="example.com",
+            region="na",
+        )
+        assert result == {"response": {"domain": "example.com"}}
+        assert "already_registered" not in result
+
+    @pytest.mark.asyncio
+    async def test_422_already_taken_returns_success(self, httpx_mock: HTTPXMock) -> None:
+        """HTTP 422 'already been taken' is treated as success (idempotent)."""
+        httpx_mock.add_response(
+            url=TOKEN_URL,
+            method="POST",
+            json={"access_token": "pt-123", "token_type": "Bearer", "expires_in": 3600},
+        )
+        httpx_mock.add_response(
+            url=PARTNER_URL,
+            method="POST",
+            status_code=422,
+            json={
+                "response": None,
+                "error": "Validation failed: Public key hash has already been taken",
+                "error_description": "",
+            },
+        )
+        result, _scopes = await register_partner_account(
+            client_id="cid",
+            client_secret="csecret",
+            domain="example.com",
+            region="na",
+        )
+        assert result["already_registered"] is True
+
+    @pytest.mark.asyncio
+    async def test_422_other_error_raises(self, httpx_mock: HTTPXMock) -> None:
+        """HTTP 422 without 'already been taken' still raises AuthError."""
+        httpx_mock.add_response(
+            url=TOKEN_URL,
+            method="POST",
+            json={"access_token": "pt-123", "token_type": "Bearer", "expires_in": 3600},
+        )
+        httpx_mock.add_response(
+            url=PARTNER_URL,
+            method="POST",
+            status_code=422,
+            json={"error": "Validation failed: Something else went wrong"},
+        )
+        with pytest.raises(AuthError, match="Partner registration failed"):
+            await register_partner_account(
+                client_id="cid",
+                client_secret="csecret",
+                domain="example.com",
+                region="na",
+            )
+
+    @pytest.mark.asyncio
+    async def test_non_422_error_raises(self, httpx_mock: HTTPXMock) -> None:
+        """Other HTTP errors (e.g. 412, 500) still raise AuthError."""
+        httpx_mock.add_response(
+            url=TOKEN_URL,
+            method="POST",
+            json={"access_token": "pt-123", "token_type": "Bearer", "expires_in": 3600},
+        )
+        httpx_mock.add_response(
+            url=PARTNER_URL,
+            method="POST",
+            status_code=412,
+            text="Origin mismatch",
+        )
+        with pytest.raises(AuthError, match="Partner registration failed"):
+            await register_partner_account(
+                client_id="cid",
+                client_secret="csecret",
+                domain="example.com",
+                region="na",
+            )
+
+    @pytest.mark.asyncio
+    async def test_invalid_region_raises(self) -> None:
+        """Invalid region raises AuthError before any HTTP call."""
+        with pytest.raises(AuthError, match="Unknown region"):
+            await register_partner_account(
+                client_id="cid",
+                client_secret="csecret",
+                domain="example.com",
                 region="invalid",
             )
