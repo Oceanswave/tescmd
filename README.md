@@ -5,10 +5,6 @@
 # tescmd
 
 <p align="center">
-  <img src="images/tescmd_logo.jpeg" alt="tescmd logo" width="180">
-</p>
-
-<p align="center">
   <a href="https://pypi.org/project/tescmd/"><img src="https://img.shields.io/pypi/v/tescmd" alt="PyPI"></a>
   <a href="https://pypi.org/project/tescmd/"><img src="https://img.shields.io/pypi/pyversions/tescmd" alt="Python"></a>
   <a href="https://github.com/oceanswave/tescmd/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/oceanswave/tescmd/test.yml?branch=main&label=build" alt="Build"></a>
@@ -488,3 +484,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 ## License
 
 MIT
+
+<p align="center">
+  <img src="images/tescmd_logo.jpeg" alt="tescmd logo" width="180">
+</p>

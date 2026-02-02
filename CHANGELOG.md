@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-02-02
+
+### Added
+
+- **README overhaul** — header banner, logo, new "What It Does" summary section, expanded Prerequisites table with Python 3.11+, pip, Tesla account, and helpful links
+- **Tailscale Funnel auto-detection in auth setup** — `_interactive_setup` now detects Tailscale and offers to start Funnel so Tesla can verify the origin URL during Developer Portal configuration; cleans up Funnel on exit
+- **Tailscale hostname passthrough** — setup wizard forwards detected Tailscale hostname to auth flow, showing a concrete "Also add" origin URL instead of the generic placeholder
+- **Comprehensive agent skill documentation** — expanded skill covering all command groups, triggers, and OpenClaw dispatch
+
+### Fixed
+
+- **Cross-platform file permissions** — OpenClaw gateway key file now uses `secure_file()` from `_internal.permissions` instead of raw `chmod(0o600)`, adding proper Windows support via `icacls`
+- **12-factor app compliance** — config, disposability, and concurrency improvements across the codebase
+- **Documentation accuracy** — corrected `media_adjust_volume` tool name in MCP docs; emphasized MCP/OpenClaw over direct CLI for cost savings in agent skill
+
 ## [0.3.0] - 2026-02-01
 
 ### Added
