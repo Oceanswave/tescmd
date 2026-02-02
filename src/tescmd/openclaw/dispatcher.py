@@ -41,6 +41,11 @@ _METHOD_ALIASES: dict[str, str] = {
     "actuate_trunk": "trunk.open",
     "flash_lights": "flash_lights",
     "honk_horn": "honk_horn",
+    "share": "nav.send",
+    "navigation_gps_request": "nav.gps",
+    "navigation_sc_request": "nav.supercharger",
+    "navigation_waypoints_request": "nav.waypoints",
+    "trigger_homelink": "homelink.trigger",
 }
 
 
@@ -94,6 +99,11 @@ class CommandDispatcher:
             "honk_horn": self._handle_honk_horn,
             "sentry.on": self._handle_sentry_on,
             "sentry.off": self._handle_sentry_off,
+            "nav.send": self._handle_nav_send,
+            "nav.gps": self._handle_nav_gps,
+            "nav.supercharger": self._handle_nav_supercharger,
+            "nav.waypoints": self._handle_nav_waypoints,
+            "homelink.trigger": self._handle_homelink,
             "system.run": self._handle_system_run,
             # Trigger commands
             "trigger.create": self._handle_trigger_create,
@@ -369,6 +379,43 @@ class CommandDispatcher:
 
     async def _handle_sentry_off(self, params: dict[str, Any]) -> dict[str, Any]:
         return await self._simple_command("set_sentry_mode", {"on": False})
+
+    # -- Navigation handlers -------------------------------------------------
+
+    async def _handle_nav_send(self, params: dict[str, Any]) -> dict[str, Any]:
+        address = params.get("address")
+        if not address:
+            raise ValueError("nav.send requires 'address' parameter")
+        return await self._simple_command("share", {"address": address})
+
+    async def _handle_nav_gps(self, params: dict[str, Any]) -> dict[str, Any]:
+        lat = params.get("lat")
+        lon = params.get("lon")
+        if lat is None or lon is None:
+            raise ValueError("nav.gps requires 'lat' and 'lon' parameters")
+        body: dict[str, Any] = {"lat": float(lat), "lon": float(lon)}
+        order = params.get("order")
+        if order is not None:
+            body["order"] = int(order)
+        return await self._simple_command("navigation_gps_request", body)
+
+    async def _handle_nav_supercharger(self, params: dict[str, Any]) -> dict[str, Any]:
+        return await self._simple_command("navigation_sc_request")
+
+    async def _handle_nav_waypoints(self, params: dict[str, Any]) -> dict[str, Any]:
+        waypoints = params.get("waypoints")
+        if not waypoints:
+            raise ValueError("nav.waypoints requires 'waypoints' parameter")
+        return await self._simple_command("navigation_waypoints_request", {"waypoints": waypoints})
+
+    async def _handle_homelink(self, params: dict[str, Any]) -> dict[str, Any]:
+        lat = params.get("lat")
+        lon = params.get("lon")
+        if lat is None or lon is None:
+            raise ValueError("homelink.trigger requires 'lat' and 'lon' parameters")
+        return await self._simple_command(
+            "trigger_homelink", {"lat": float(lat), "lon": float(lon)}
+        )
 
     # -- Meta-dispatch handler -----------------------------------------------
 

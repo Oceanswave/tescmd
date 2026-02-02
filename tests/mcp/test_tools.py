@@ -35,6 +35,29 @@ class TestToolDescriptions:
             assert len(defn.description) > 5, f"Tool {name} has very short description"
 
 
+class TestNavToolsRegistered:
+    def test_nav_gps_registered(self) -> None:
+        assert "nav_gps" in _WRITE_TOOLS
+        args, _desc = _WRITE_TOOLS["nav_gps"]
+        assert args == ["nav", "gps"]
+
+    def test_nav_waypoints_registered(self) -> None:
+        assert "nav_waypoints" in _WRITE_TOOLS
+        args, _desc = _WRITE_TOOLS["nav_waypoints"]
+        assert args == ["nav", "waypoints"]
+
+    def test_nav_homelink_registered(self) -> None:
+        assert "nav_homelink" in _WRITE_TOOLS
+        args, _desc = _WRITE_TOOLS["nav_homelink"]
+        assert args == ["nav", "homelink"]
+
+    def test_nav_tools_are_write_tools(self) -> None:
+        server = MCPServer(client_id="test-id", client_secret="test-secret")
+        for name in ("nav_send", "nav_gps", "nav_supercharger", "nav_waypoints", "nav_homelink"):
+            assert name in server._tools, f"{name} not found in server tools"
+            assert server._tools[name].is_write is True, f"{name} should be a write tool"
+
+
 class TestHelpOutput:
     def test_openclaw_bridge_help(self) -> None:
         from click.testing import CliRunner

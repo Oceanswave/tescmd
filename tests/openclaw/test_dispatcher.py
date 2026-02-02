@@ -399,6 +399,203 @@ class TestWriteHandlers:
         mock_cmd_api.set_sentry_mode.assert_awaited_once_with("VIN1", on=True)
 
 
+class TestNavHandlers:
+    """Tests for navigation command handlers."""
+
+    @pytest.mark.asyncio
+    async def test_nav_send(self) -> None:
+        ctx = _mock_app_ctx()
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
+        cmd_result = _make_command_result("Destination sent.")
+        mock_client = AsyncMock()
+        mock_client.close = AsyncMock()
+        mock_cmd_api = AsyncMock()
+        mock_cmd_api.share = AsyncMock(return_value=cmd_result)
+
+        with (
+            patch(
+                "tescmd.openclaw.dispatcher.get_command_api",
+                return_value=(mock_client, AsyncMock(), mock_cmd_api),
+            ),
+            patch("tescmd.openclaw.dispatcher.invalidate_cache_for_vin"),
+            patch("tescmd.openclaw.dispatcher.check_command_guards"),
+        ):
+            result = await d.dispatch({"method": "nav.send", "params": {"address": "123 Main St"}})
+        assert result["result"] is True
+        mock_cmd_api.share.assert_awaited_once_with("VIN1", address="123 Main St")
+
+    @pytest.mark.asyncio
+    async def test_nav_send_missing_address_raises(self) -> None:
+        ctx = _mock_app_ctx()
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
+        with pytest.raises(ValueError, match="requires 'address'"):
+            await d.dispatch({"method": "nav.send", "params": {}})
+
+    @pytest.mark.asyncio
+    async def test_nav_gps(self) -> None:
+        ctx = _mock_app_ctx()
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
+        cmd_result = _make_command_result("GPS sent.")
+        mock_client = AsyncMock()
+        mock_client.close = AsyncMock()
+        mock_cmd_api = AsyncMock()
+        mock_cmd_api.navigation_gps_request = AsyncMock(return_value=cmd_result)
+
+        with (
+            patch(
+                "tescmd.openclaw.dispatcher.get_command_api",
+                return_value=(mock_client, AsyncMock(), mock_cmd_api),
+            ),
+            patch("tescmd.openclaw.dispatcher.invalidate_cache_for_vin"),
+            patch("tescmd.openclaw.dispatcher.check_command_guards"),
+        ):
+            result = await d.dispatch(
+                {"method": "nav.gps", "params": {"lat": 37.77, "lon": -122.42}}
+            )
+        assert result["result"] is True
+        mock_cmd_api.navigation_gps_request.assert_awaited_once_with(
+            "VIN1", lat=37.77, lon=-122.42
+        )
+
+    @pytest.mark.asyncio
+    async def test_nav_gps_with_order(self) -> None:
+        ctx = _mock_app_ctx()
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
+        cmd_result = _make_command_result()
+        mock_client = AsyncMock()
+        mock_client.close = AsyncMock()
+        mock_cmd_api = AsyncMock()
+        mock_cmd_api.navigation_gps_request = AsyncMock(return_value=cmd_result)
+
+        with (
+            patch(
+                "tescmd.openclaw.dispatcher.get_command_api",
+                return_value=(mock_client, AsyncMock(), mock_cmd_api),
+            ),
+            patch("tescmd.openclaw.dispatcher.invalidate_cache_for_vin"),
+            patch("tescmd.openclaw.dispatcher.check_command_guards"),
+        ):
+            result = await d.dispatch(
+                {"method": "nav.gps", "params": {"lat": 37.77, "lon": -122.42, "order": 2}}
+            )
+        assert result["result"] is True
+        mock_cmd_api.navigation_gps_request.assert_awaited_once_with(
+            "VIN1", lat=37.77, lon=-122.42, order=2
+        )
+
+    @pytest.mark.asyncio
+    async def test_nav_gps_missing_coords_raises(self) -> None:
+        ctx = _mock_app_ctx()
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
+        with pytest.raises(ValueError, match="requires 'lat' and 'lon'"):
+            await d.dispatch({"method": "nav.gps", "params": {"lat": 37.77}})
+
+    @pytest.mark.asyncio
+    async def test_nav_supercharger(self) -> None:
+        ctx = _mock_app_ctx()
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
+        cmd_result = _make_command_result("Navigating to Supercharger.")
+        mock_client = AsyncMock()
+        mock_client.close = AsyncMock()
+        mock_cmd_api = AsyncMock()
+        mock_cmd_api.navigation_sc_request = AsyncMock(return_value=cmd_result)
+
+        with (
+            patch(
+                "tescmd.openclaw.dispatcher.get_command_api",
+                return_value=(mock_client, AsyncMock(), mock_cmd_api),
+            ),
+            patch("tescmd.openclaw.dispatcher.invalidate_cache_for_vin"),
+            patch("tescmd.openclaw.dispatcher.check_command_guards"),
+        ):
+            result = await d.dispatch({"method": "nav.supercharger", "params": {}})
+        assert result["result"] is True
+        mock_cmd_api.navigation_sc_request.assert_awaited_once_with("VIN1")
+
+    @pytest.mark.asyncio
+    async def test_nav_waypoints(self) -> None:
+        ctx = _mock_app_ctx()
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
+        cmd_result = _make_command_result("Waypoints sent.")
+        mock_client = AsyncMock()
+        mock_client.close = AsyncMock()
+        mock_cmd_api = AsyncMock()
+        mock_cmd_api.navigation_waypoints_request = AsyncMock(return_value=cmd_result)
+
+        with (
+            patch(
+                "tescmd.openclaw.dispatcher.get_command_api",
+                return_value=(mock_client, AsyncMock(), mock_cmd_api),
+            ),
+            patch("tescmd.openclaw.dispatcher.invalidate_cache_for_vin"),
+            patch("tescmd.openclaw.dispatcher.check_command_guards"),
+        ):
+            result = await d.dispatch(
+                {
+                    "method": "nav.waypoints",
+                    "params": {"waypoints": "refId:ChIJ1,refId:ChIJ2"},
+                }
+            )
+        assert result["result"] is True
+        mock_cmd_api.navigation_waypoints_request.assert_awaited_once_with(
+            "VIN1", waypoints="refId:ChIJ1,refId:ChIJ2"
+        )
+
+    @pytest.mark.asyncio
+    async def test_nav_waypoints_missing_param_raises(self) -> None:
+        ctx = _mock_app_ctx()
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
+        with pytest.raises(ValueError, match="requires 'waypoints'"):
+            await d.dispatch({"method": "nav.waypoints", "params": {}})
+
+    @pytest.mark.asyncio
+    async def test_homelink_trigger(self) -> None:
+        ctx = _mock_app_ctx()
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
+        cmd_result = _make_command_result("HomeLink triggered.")
+        mock_client = AsyncMock()
+        mock_client.close = AsyncMock()
+        mock_cmd_api = AsyncMock()
+        mock_cmd_api.trigger_homelink = AsyncMock(return_value=cmd_result)
+
+        with (
+            patch(
+                "tescmd.openclaw.dispatcher.get_command_api",
+                return_value=(mock_client, AsyncMock(), mock_cmd_api),
+            ),
+            patch("tescmd.openclaw.dispatcher.invalidate_cache_for_vin"),
+            patch("tescmd.openclaw.dispatcher.check_command_guards"),
+        ):
+            result = await d.dispatch(
+                {"method": "homelink.trigger", "params": {"lat": 37.77, "lon": -122.42}}
+            )
+        assert result["result"] is True
+        mock_cmd_api.trigger_homelink.assert_awaited_once_with("VIN1", lat=37.77, lon=-122.42)
+
+    @pytest.mark.asyncio
+    async def test_homelink_missing_coords_raises(self) -> None:
+        ctx = _mock_app_ctx()
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
+        with pytest.raises(ValueError, match="requires 'lat' and 'lon'"):
+            await d.dispatch({"method": "homelink.trigger", "params": {"lat": 37.77}})
+
+
+class TestNavMethodAliases:
+    """Tests that nav method aliases resolve correctly via system.run."""
+
+    def test_nav_aliases_present(self) -> None:
+        assert "share" in _METHOD_ALIASES
+        assert _METHOD_ALIASES["share"] == "nav.send"
+        assert "navigation_gps_request" in _METHOD_ALIASES
+        assert _METHOD_ALIASES["navigation_gps_request"] == "nav.gps"
+        assert "navigation_sc_request" in _METHOD_ALIASES
+        assert _METHOD_ALIASES["navigation_sc_request"] == "nav.supercharger"
+        assert "navigation_waypoints_request" in _METHOD_ALIASES
+        assert _METHOD_ALIASES["navigation_waypoints_request"] == "nav.waypoints"
+        assert "trigger_homelink" in _METHOD_ALIASES
+        assert _METHOD_ALIASES["trigger_homelink"] == "homelink.trigger"
+
+
 class TestAutoWakeRetry:
     @pytest.mark.asyncio
     async def test_auto_wake_retries_on_asleep(self) -> None:
