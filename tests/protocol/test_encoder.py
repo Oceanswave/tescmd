@@ -47,9 +47,9 @@ class TestBuildSessionInfoRequest:
         assert msg.to_destination is not None
         assert msg.to_destination.domain == Domain.DOMAIN_VEHICLE_SECURITY
 
-        # from_destination carries the client public key as routing_address
+        # from_destination uses a 16-byte random routing address (not the public key)
         assert msg.from_destination is not None
-        assert msg.from_destination.routing_address == FAKE_PUBLIC_KEY
+        assert len(msg.from_destination.routing_address) == 16
 
         # session_info_request contains the public key
         assert msg.session_info_request is not None
@@ -84,9 +84,9 @@ class TestBuildSignedCommand:
         assert msg.to_destination is not None
         assert msg.to_destination.domain == Domain.DOMAIN_INFOTAINMENT
 
-        # from_destination carries the client public key
+        # from_destination uses a 16-byte random routing address (not the public key)
         assert msg.from_destination is not None
-        assert msg.from_destination.routing_address == FAKE_PUBLIC_KEY
+        assert len(msg.from_destination.routing_address) == 16
 
         # payload is stored verbatim
         assert msg.protobuf_message_as_bytes == FAKE_PAYLOAD

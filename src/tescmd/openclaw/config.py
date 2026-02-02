@@ -9,6 +9,71 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+class NodeCapabilities(BaseModel):
+    """Advertised capabilities for the OpenClaw node role.
+
+    Maps to the gateway connect schema fields:
+    - ``caps``: broad capability categories (e.g. ``"location"``, ``"climate"``)
+    - ``commands``: specific method names the node can handle
+    - ``permissions``: per-command permission booleans
+
+    The ``reads`` and ``writes`` helpers provide a logical grouping that
+    gets flattened into the gateway-native fields via :meth:`to_connect_params`.
+    """
+
+    reads: list[str] = [
+        "location.get",
+        "battery.get",
+        "temperature.get",
+        "speed.get",
+        "charge_state.get",
+        "security.get",
+    ]
+    writes: list[str] = [
+        "door.lock",
+        "door.unlock",
+        "climate.on",
+        "climate.off",
+        "climate.set_temp",
+        "charge.start",
+        "charge.stop",
+        "charge.set_limit",
+        "trunk.open",
+        "frunk.open",
+        "flash_lights",
+        "honk_horn",
+        "sentry.on",
+        "sentry.off",
+    ]
+
+    @property
+    def all_commands(self) -> list[str]:
+        """All command method names (reads + writes), deduplicated."""
+        return list(dict.fromkeys(self.reads + self.writes))
+
+    @property
+    def caps(self) -> list[str]:
+        """Unique capability categories derived from command prefixes."""
+        seen: dict[str, None] = {}
+        for cmd in self.all_commands:
+            category = cmd.split(".")[0] if "." in cmd else cmd
+            seen.setdefault(category, None)
+        return list(seen)
+
+    @property
+    def permissions(self) -> dict[str, bool]:
+        """Per-command permissions (all ``True`` for advertised commands)."""
+        return {cmd: True for cmd in self.all_commands}
+
+    def to_connect_params(self) -> dict[str, Any]:
+        """Return the gateway-native connect param fields."""
+        return {
+            "caps": self.caps,
+            "commands": self.all_commands,
+            "permissions": self.permissions,
+        }
+
+
 class FieldFilter(BaseModel):
     """Per-field filter configuration for the dual-gate filter."""
 
@@ -49,9 +114,10 @@ class BridgeConfig(BaseModel):
 
     gateway_url: str = "ws://127.0.0.1:18789"
     gateway_token: str | None = Field(default=None)
-    client_id: str = "tescmd-bridge"
-    client_version: str = "0.1.0"
+    client_id: str = "node-host"
+    client_version: str | None = None
     telemetry: dict[str, FieldFilter] = Field(default_factory=lambda: dict(_DEFAULT_FILTERS))
+    capabilities: NodeCapabilities = Field(default_factory=NodeCapabilities)
 
     @classmethod
     def load(cls, path: Path | str | None = None) -> BridgeConfig:

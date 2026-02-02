@@ -95,9 +95,11 @@ async def _cmd_bridge(
     from tescmd.cli.main import AppContext
     from tescmd.openclaw.bridge import TelemetryBridge
     from tescmd.openclaw.config import BridgeConfig
+    from tescmd.openclaw.dispatcher import CommandDispatcher
     from tescmd.openclaw.emitter import EventEmitter
     from tescmd.openclaw.filters import DualGateFilter
     from tescmd.openclaw.gateway import GatewayClient
+    from tescmd.openclaw.telemetry_store import TelemetryStore
     from tescmd.telemetry.fields import resolve_fields
     from tescmd.telemetry.setup import telemetry_session
 
@@ -118,15 +120,22 @@ async def _cmd_bridge(
     )
 
     # Build pipeline components
+    telemetry_store = TelemetryStore()
+    dispatcher = CommandDispatcher(vin=vin, app_ctx=app_ctx, telemetry_store=telemetry_store)
     filt = DualGateFilter(config.telemetry)
     emitter = EventEmitter(client_id=config.client_id)
+    from tescmd import __version__
+
     gw = GatewayClient(
         config.gateway_url,
         token=config.gateway_token,
         client_id=config.client_id,
         client_version=config.client_version,
+        display_name=f"tescmd-{__version__}-{vin}",
+        capabilities=config.capabilities,
+        on_request=dispatcher.dispatch,
     )
-    bridge = TelemetryBridge(gw, filt, emitter, dry_run=dry_run)
+    bridge = TelemetryBridge(gw, filt, emitter, dry_run=dry_run, telemetry_store=telemetry_store)
 
     # Build fanout with the OpenClaw bridge as the primary sink
     from tescmd.telemetry.fanout import FrameFanout

@@ -72,7 +72,7 @@ Create `~/.config/tescmd/bridge.json` to customize the bridge:
 {
   "gateway_url": "ws://127.0.0.1:18789",
   "gateway_token": "my-secret-token",
-  "client_id": "tescmd-bridge",
+  "client_id": "node-host",
   "client_version": "0.1.0",
   "telemetry": {
     "Location": {"enabled": true, "granularity": 50.0, "throttle_seconds": 1.0},
@@ -142,7 +142,7 @@ The bridge connects to the OpenClaw Gateway using the operator protocol:
 {"method": "connect", "params": {
   "role": "operator",
   "scopes": ["operator.send"],
-  "client_id": "tescmd-bridge",
+  "client_id": "node-host",
   "client_version": "0.1.0",
   "nonce": "abc123",
   "token": "my-secret-token"
@@ -158,7 +158,7 @@ After the handshake, events are sent as `req:agent` messages:
   "method": "req:agent",
   "params": {
     "event_type": "location",
-    "source": "tescmd-bridge",
+    "source": "node-host",
     "vin": "5YJ3E1EA1NF000000",
     "timestamp": "2026-01-31T10:30:00Z",
     "data": {

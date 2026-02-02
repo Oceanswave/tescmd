@@ -651,8 +651,15 @@ class TelemetryTUI(App[None]):
             log.propagate = False
 
         # Suppress noisy library loggers that would corrupt the terminal.
-        for name in ("uvicorn", "uvicorn.error", "uvicorn.access",
-                     "httpx", "httpcore", "websockets", "mcp"):
+        for name in (
+            "uvicorn",
+            "uvicorn.error",
+            "uvicorn.access",
+            "httpx",
+            "httpcore",
+            "websockets",
+            "mcp",
+        ):
             log = logging.getLogger(name)
             self._original_propagate[name] = log.propagate
             log.propagate = False
@@ -661,9 +668,9 @@ class TelemetryTUI(App[None]):
         # console output while the TUI owns the terminal.
         self._saved_root_handlers = logging.root.handlers[:]
         logging.root.handlers = [
-            h for h in logging.root.handlers
-            if not isinstance(h, logging.StreamHandler)
-            or isinstance(h, logging.FileHandler)
+            h
+            for h in logging.root.handlers
+            if not isinstance(h, logging.StreamHandler) or isinstance(h, logging.FileHandler)
         ]
 
     async def _process_activity_queue(self) -> None:
@@ -1135,21 +1142,21 @@ class TelemetryTUI(App[None]):
             "Seat heater: driver high",
             "Set driver seat heater to high",
             lambda: self._run_command(
-                ["climate", "seat", "--position", "0", "--level", "3"], "Driver seat heater high"
+                ["climate", "seat", "driver", "3"], "Driver seat heater high"
             ),
         )
         yield SystemCommand(
             "Seat heater: driver off",
             "Turn off driver seat heater",
             lambda: self._run_command(
-                ["climate", "seat", "--position", "0", "--level", "0"], "Driver seat heater off"
+                ["climate", "seat", "driver", "0"], "Driver seat heater off"
             ),
         )
         yield SystemCommand(
             "Seat heater: passenger high",
             "Set passenger seat heater to high",
             lambda: self._run_command(
-                ["climate", "seat", "--position", "1", "--level", "3"],
+                ["climate", "seat", "passenger", "3"],
                 "Passenger seat heater high",
             ),
         )
@@ -1157,21 +1164,21 @@ class TelemetryTUI(App[None]):
             "Seat heater: passenger off",
             "Turn off passenger seat heater",
             lambda: self._run_command(
-                ["climate", "seat", "--position", "1", "--level", "0"], "Passenger seat heater off"
+                ["climate", "seat", "passenger", "0"], "Passenger seat heater off"
             ),
         )
         yield SystemCommand(
             "Auto seat climate: driver on",
             "Enable driver auto seat climate",
             lambda: self._run_command(
-                ["climate", "auto-seat", "--position", "1", "--on"], "Auto seat driver on"
+                ["climate", "auto-seat", "driver", "--on"], "Auto seat driver on"
             ),
         )
         yield SystemCommand(
             "Auto seat climate: driver off",
             "Disable driver auto seat climate",
             lambda: self._run_command(
-                ["climate", "auto-seat", "--position", "1", "--off"], "Auto seat driver off"
+                ["climate", "auto-seat", "driver", "--off"], "Auto seat driver off"
             ),
         )
         yield SystemCommand(

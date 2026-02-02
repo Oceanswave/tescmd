@@ -29,7 +29,7 @@ class EventEmitter:
     Returns ``None`` for fields that don't map to an event type.
     """
 
-    def __init__(self, client_id: str = "tescmd-bridge") -> None:
+    def __init__(self, client_id: str = "node-host") -> None:
         self._client_id = client_id
 
     def to_event(

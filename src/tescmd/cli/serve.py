@@ -350,9 +350,11 @@ async def _cmd_serve(
 
             from tescmd.openclaw.bridge import TelemetryBridge
             from tescmd.openclaw.config import BridgeConfig
+            from tescmd.openclaw.dispatcher import CommandDispatcher
             from tescmd.openclaw.emitter import EventEmitter
             from tescmd.openclaw.filters import DualGateFilter
             from tescmd.openclaw.gateway import GatewayClient
+            from tescmd.openclaw.telemetry_store import TelemetryStore
 
             if openclaw_config_path:
                 config = BridgeConfig.load(Path(openclaw_config_path))
@@ -362,16 +364,26 @@ async def _cmd_serve(
                 gateway_url=openclaw_url,
                 gateway_token=openclaw_token,
             )
+            oc_telemetry_store = TelemetryStore()
+            oc_dispatcher = CommandDispatcher(
+                vin=vin, app_ctx=app_ctx, telemetry_store=oc_telemetry_store
+            )
             filt = DualGateFilter(config.telemetry)
             emitter = EventEmitter(client_id=config.client_id)
+            from tescmd import __version__ as _tescmd_version
+
             gw = GatewayClient(
                 config.gateway_url,
                 token=config.gateway_token,
                 client_id=config.client_id,
                 client_version=config.client_version,
+                display_name=f"tescmd-{_tescmd_version}-{vin}",
+                capabilities=config.capabilities,
+                on_request=oc_dispatcher.dispatch,
             )
-            bridge = TelemetryBridge(gw, filt, emitter, dry_run=dry_run)
-            fanout.add_sink(bridge.on_frame)
+            bridge = TelemetryBridge(
+                gw, filt, emitter, dry_run=dry_run, telemetry_store=oc_telemetry_store
+            )
 
             if not dry_run:
                 if formatter.format != "json":
@@ -384,6 +396,10 @@ async def _cmd_serve(
                     formatter.rich.info(
                         "[yellow]Dry-run mode — events will be logged as JSONL to stderr.[/yellow]"
                     )
+
+            # Register sink AFTER gateway is connected (or dry-run confirmed)
+            # so early telemetry frames aren't silently dropped.
+            fanout.add_sink(bridge.on_frame)
 
     # -- Tailscale Funnel setup (optional, MCP-only mode) --
     public_url: str | None = None

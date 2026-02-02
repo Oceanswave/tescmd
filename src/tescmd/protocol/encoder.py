@@ -38,7 +38,7 @@ def build_session_info_request(
     """
     return RoutableMessage(
         to_destination=Destination(domain=domain),
-        from_destination=Destination(routing_address=client_public_key),
+        from_destination=Destination(routing_address=os.urandom(16)),
         session_info_request=SessionInfoRequest(public_key=client_public_key),
         uuid=os.urandom(16),
     )
@@ -80,7 +80,7 @@ def build_signed_command(
     """
     return RoutableMessage(
         to_destination=Destination(domain=domain),
-        from_destination=Destination(routing_address=client_public_key),
+        from_destination=Destination(routing_address=os.urandom(16)),
         protobuf_message_as_bytes=payload,
         signature_data=SignatureData(
             signer_identity=KeyIdentity(public_key=client_public_key),
