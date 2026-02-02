@@ -221,8 +221,11 @@ class MCPServer:
             cdefn = self._custom_tools[name]
             try:
                 return cdefn.handler(arguments)
+            except KeyError as exc:
+                logger.info("Custom tool %s missing parameter: %s", name, exc)
+                return {"error": f"Missing required parameter: {exc}"}
             except Exception as exc:
-                logger.warning("Custom tool %s failed: %s", name, exc)
+                logger.warning("Custom tool %s failed: %s", name, exc, exc_info=True)
                 return {"error": str(exc)}
 
         if name not in self._tools:
@@ -392,7 +395,10 @@ class MCPServer:
 
         @mcp.tool(name=tool_name, description=description)  # type: ignore[misc]
         def _tool(params: str = "{}") -> str:
-            arguments = json.loads(params) if params else {}
+            try:
+                arguments = json.loads(params) if params else {}
+            except (json.JSONDecodeError, TypeError) as exc:
+                return json.dumps({"error": f"Invalid params JSON: {exc}"}, indent=2)
             result = server.invoke_tool(tool_name, arguments)
             return json.dumps(result, default=str, indent=2)
 

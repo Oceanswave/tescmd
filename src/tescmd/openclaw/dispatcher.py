@@ -382,6 +382,8 @@ class CommandDispatcher:
         if not method:
             raise ValueError("system.run requires 'method' parameter")
         resolved = _METHOD_ALIASES.get(method, method)
+        if resolved == "system.run":
+            raise ValueError("system.run cannot invoke itself")
         inner_params = params.get("params", {})
         result = await self.dispatch({"method": resolved, "params": inner_params})
         if result is None:

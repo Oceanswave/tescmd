@@ -54,8 +54,10 @@ class TestCreate:
             mgr.create(_trig("Soc", TriggerOperator.LT, 20))
 
     def test_rejects_missing_value_for_non_changed(self) -> None:
+        from pydantic import ValidationError
+
         mgr = TriggerManager(vin="V")
-        with pytest.raises(ValueError, match="requires a 'value'"):
+        with pytest.raises(ValidationError, match="requires a 'value'"):
             mgr.create(_trig("Soc", TriggerOperator.LT, None))
 
     def test_allows_none_value_for_changed(self) -> None:
@@ -287,6 +289,25 @@ class TestDelivery:
         good_cb.assert_awaited_once()
         # Notification still in pending despite callback failure
         assert len(mgr.drain_pending()) == 1
+
+
+class TestPendingOverflow:
+    @pytest.mark.asyncio
+    async def test_oldest_notifications_dropped_on_overflow(self) -> None:
+        from tescmd.triggers.manager import MAX_PENDING
+
+        mgr = TriggerManager(vin="V")
+        mgr.create(_trig("Soc", TriggerOperator.CHANGED, None, cooldown=0))
+
+        # Fill beyond MAX_PENDING
+        for i in range(MAX_PENDING + 10):
+            await mgr.evaluate("Soc", float(i), float(i - 1) if i > 0 else None, TS)
+
+        pending = mgr.drain_pending()
+        assert len(pending) == MAX_PENDING
+        # Oldest should have been dropped — first pending value should be 10.0
+        assert pending[0].value == 10.0
+        assert pending[-1].value == float(MAX_PENDING + 9)
 
 
 class TestFieldIndex:

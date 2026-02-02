@@ -632,7 +632,19 @@ class GatewayClient:
             }
 
         try:
-            await self._ws.send(json.dumps(event))
+            wire = json.dumps(event, default=str)
+        except (TypeError, ValueError):
+            self._drop_count += 1
+            logger.error(
+                "Event serialization failed (total drops: %d) — event keys: %s",
+                self._drop_count,
+                list(event.keys()),
+                exc_info=True,
+            )
+            return
+
+        try:
+            await self._ws.send(wire)
             self._send_count += 1
         except Exception:
             self._drop_count += 1

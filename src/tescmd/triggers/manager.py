@@ -53,7 +53,6 @@ class TriggerManager:
         """Register a trigger.  Returns the trigger with its assigned ID.
 
         Raises :class:`TriggerLimitError` if the limit is reached.
-        Raises :class:`ValueError` if a non-``CHANGED`` trigger is missing a value.
         """
         if len(self._triggers) >= MAX_TRIGGERS:
             raise TriggerLimitError(
@@ -62,11 +61,6 @@ class TriggerManager:
             )
 
         cond = trigger.condition
-        if cond.operator != TriggerOperator.CHANGED and cond.value is None:
-            raise ValueError(
-                f"Trigger operator '{cond.operator.value}' requires a 'value' parameter."
-            )
-
         self._triggers[trigger.id] = trigger
         self._field_index[cond.field].add(trigger.id)
         logger.info(
@@ -196,6 +190,13 @@ def _matches(condition: TriggerCondition, value: Any, previous_value: Any) -> bo
         fval = float(value)
         fthresh = float(condition.value)
     except (TypeError, ValueError):
+        logger.debug(
+            "Numeric coercion failed for %s %s (value=%r, threshold=%r)",
+            condition.field,
+            op.value,
+            value,
+            condition.value,
+        )
         return False
 
     if op == TriggerOperator.LT:
@@ -223,6 +224,7 @@ def _matches_geofence(condition: TriggerCondition, value: Any, previous_value: A
 
     geo = condition.value
     if not isinstance(geo, dict):
+        logger.warning("Geofence trigger on %s has non-dict value: %r", condition.field, geo)
         return False
 
     try:
@@ -230,6 +232,11 @@ def _matches_geofence(condition: TriggerCondition, value: Any, previous_value: A
         center_lon = float(geo["longitude"])
         radius = float(geo["radius_m"])
     except (KeyError, TypeError, ValueError):
+        logger.warning(
+            "Geofence trigger on %s has invalid config (need latitude, longitude, radius_m): %r",
+            condition.field,
+            geo,
+        )
         return False
 
     try:
@@ -238,6 +245,12 @@ def _matches_geofence(condition: TriggerCondition, value: Any, previous_value: A
         prev_lat = float(previous_value["latitude"])
         prev_lon = float(previous_value["longitude"])
     except (KeyError, TypeError, ValueError):
+        logger.debug(
+            "Geofence data missing coordinates for %s (value=%r, prev=%r)",
+            condition.field,
+            value,
+            previous_value,
+        )
         return False
 
     cur_dist = haversine(cur_lat, cur_lon, center_lat, center_lon)

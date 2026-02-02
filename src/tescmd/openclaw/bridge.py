@@ -136,7 +136,12 @@ class TelemetryBridge:
                         }
                     )
                 except Exception:
-                    logger.debug("Failed to push trigger notification", exc_info=True)
+                    logger.warning(
+                        "Failed to push trigger notification (trigger=%s field=%s)",
+                        n.trigger_id,
+                        n.field,
+                        exc_info=True,
+                    )
 
         return _push_trigger_notification
 
@@ -153,7 +158,7 @@ class TelemetryBridge:
             await self._gateway.send_event(event)
             logger.info("Sent node.disconnecting event")
         except Exception:
-            logger.debug("Failed to send disconnecting event", exc_info=True)
+            logger.warning("Failed to send disconnecting event", exc_info=True)
 
     async def on_frame(self, frame: TelemetryFrame) -> None:
         """Process a decoded telemetry frame through the filter pipeline.
@@ -175,7 +180,7 @@ class TelemetryBridge:
                     await self._gateway.send_event(event)
                     logger.info("Sent node.connected event")
                 except Exception:
-                    logger.debug("Failed to send connected event", exc_info=True)
+                    logger.warning("Failed to send connected event", exc_info=True)
 
         for datum in frame.data:
             if not self._filter.should_emit(datum.field_name, datum.value, now):

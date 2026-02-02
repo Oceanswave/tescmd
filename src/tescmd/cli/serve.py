@@ -446,13 +446,16 @@ async def _cmd_serve(
     # a Tailscale Funnel.  We need the hostname NOW so the MCP app's auth
     # settings (issuer_url) are correct before the app is built.
     if not no_telemetry and not no_mcp and public_url is None:
-        from tescmd.telemetry.tailscale import TailscaleManager
+        try:
+            from tescmd.telemetry.tailscale import TailscaleManager
 
-        _ts_pre = TailscaleManager()
-        await _ts_pre.check_available()
-        await _ts_pre.check_running()
-        _pre_hostname = await _ts_pre.get_hostname()
-        public_url = f"https://{_pre_hostname}"
+            _ts_pre = TailscaleManager()
+            await _ts_pre.check_available()
+            await _ts_pre.check_running()
+            _pre_hostname = await _ts_pre.get_hostname()
+            public_url = f"https://{_pre_hostname}"
+        except Exception:
+            logger.debug("Tailscale auto-detection failed — using localhost", exc_info=True)
 
     # -- Populate TUI with server info --
     if tui is not None:
@@ -602,9 +605,15 @@ def _register_trigger_tools(mcp_server: Any, trigger_manager: Any) -> None:
     from tescmd.triggers.models import TriggerCondition, TriggerDefinition, TriggerOperator
 
     def _handle_create(params: dict[str, Any]) -> dict[str, Any]:
+        field = params.get("field")
+        if not field:
+            raise ValueError("trigger_create requires 'field' parameter")
+        op_str = params.get("operator")
+        if not op_str:
+            raise ValueError("trigger_create requires 'operator' parameter")
         condition = TriggerCondition(
-            field=params["field"],
-            operator=TriggerOperator(params["operator"]),
+            field=field,
+            operator=TriggerOperator(op_str),
             value=params.get("value"),
         )
         trigger = TriggerDefinition(
@@ -616,8 +625,11 @@ def _register_trigger_tools(mcp_server: Any, trigger_manager: Any) -> None:
         return created.model_dump(mode="json")
 
     def _handle_delete(params: dict[str, Any]) -> dict[str, Any]:
-        deleted = trigger_manager.delete(params["id"])
-        return {"deleted": deleted, "id": params["id"]}
+        trigger_id = params.get("id")
+        if not trigger_id:
+            raise ValueError("trigger_delete requires 'id' parameter")
+        deleted = trigger_manager.delete(trigger_id)
+        return {"deleted": deleted, "id": trigger_id}
 
     def _handle_list(params: dict[str, Any]) -> dict[str, Any]:
         triggers = trigger_manager.list_all()
@@ -758,11 +770,18 @@ def _build_combined_app(
                     data = await websocket.receive_bytes()
                     try:
                         frame = decoder.decode(data)
+                    except Exception:
+                        logger.warning(
+                            "Failed to decode telemetry frame (%d bytes) — skipping",
+                            len(data),
+                            exc_info=True,
+                        )
+                        continue
+                    try:
                         await on_frame(frame)  # type: ignore[operator]
                     except Exception:
                         logger.warning(
-                            "Failed to decode/process telemetry frame (%d bytes) — skipping",
-                            len(data),
+                            "Failed to process telemetry frame — skipping",
                             exc_info=True,
                         )
             except WebSocketDisconnect:

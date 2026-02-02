@@ -596,6 +596,15 @@ class TestSystemRun:
             )
 
     @pytest.mark.asyncio
+    async def test_system_run_self_dispatch_rejected(self) -> None:
+        ctx = _mock_app_ctx()
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
+        with pytest.raises(ValueError, match="cannot invoke itself"):
+            await d.dispatch(
+                {"method": "system.run", "params": {"method": "system.run", "params": {}}}
+            )
+
+    @pytest.mark.asyncio
     async def test_system_run_missing_method_raises(self) -> None:
         ctx = _mock_app_ctx()
         d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
