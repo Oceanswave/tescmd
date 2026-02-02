@@ -174,7 +174,21 @@ class TeslaFleetClient:
             raise RateLimitError(retry_after=retry_after)
 
         if response.status_code == 408:
-            raise VehicleAsleepError("Vehicle is asleep", status_code=408)
+            # Tesla returns HTTP 408 for both "vehicle is asleep" and general
+            # request timeouts.  Inspect the body to distinguish the two.
+            body_text = response.text[:300]
+            body_lower = body_text.lower()
+            if "asleep" in body_lower or "offline" in body_lower or "unavailable" in body_lower:
+                raise VehicleAsleepError("Vehicle is asleep", status_code=408)
+            # No explicit sleep indicator — still raise VehicleAsleepError for
+            # backwards compatibility (most 408s *are* sleep), but include the
+            # raw body so callers can see what actually happened.
+            msg = (
+                f"Vehicle request timed out (HTTP 408): {body_text}"
+                if body_text
+                else "Vehicle is asleep"
+            )
+            raise VehicleAsleepError(msg, status_code=408)
 
         if response.status_code == 412:
             raise RegistrationRequiredError(

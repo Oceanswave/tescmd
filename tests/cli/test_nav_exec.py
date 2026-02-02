@@ -380,7 +380,7 @@ class TestNavHomelink:
         """nav homelink without --lat/--lon fetches vehicle drive_state first."""
         # First request: vehicle_data for drive_state coords
         httpx_mock.add_response(
-            url=f"{FLEET}/api/1/vehicles/{VIN}/vehicle_data?endpoints=drive_state%3Blocation_data",
+            url=f"{FLEET}/api/1/vehicles/{VIN}/vehicle_data?endpoints=location_data",
             json={
                 "response": {
                     "vin": VIN,

@@ -432,29 +432,27 @@ class RichOutput:
     # ------------------------------------------------------------------
 
     def location(self, ds: DriveState) -> None:
-        """Print a table of drive-state / location fields."""
+        """Print a table of GPS location fields."""
         table = Table(title="Location")
         table.add_column("Field", style="bold")
         table.add_column("Value")
 
         if ds.latitude is not None and ds.longitude is not None:
-            table.add_row("Coordinates", f"{ds.latitude}, {ds.longitude}")
+            table.add_row("Latitude", str(ds.latitude))
+            table.add_row("Longitude", str(ds.longitude))
         if ds.heading is not None:
             table.add_row("Heading", f"{ds.heading}\u00b0")
-        if ds.shift_state:
-            table.add_row("Gear", ds.shift_state)
-        if ds.speed is not None:
-            table.add_row("Speed", self._fmt_speed(ds.speed))
-        if ds.power is not None:
-            table.add_row("Power", f"{ds.power} kW")
         if ds.timestamp is not None:
             table.add_row(
                 "Updated",
                 datetime.fromtimestamp(ds.timestamp / 1000).strftime("%Y-%m-%d %H:%M:%S"),
             )
 
-        # Show any additional fields returned by the API (extra="allow" on the model)
-        _known = {"latitude", "longitude", "heading", "shift_state", "speed", "power", "timestamp"}
+        # Show any additional location fields from the API (extra="allow")
+        _known = {
+            "latitude", "longitude", "heading", "timestamp",
+            "shift_state", "speed", "power",
+        }
         for key, value in sorted(ds.model_extra.items()):
             if key not in _known and value is not None:
                 label = key.replace("_", " ").title()

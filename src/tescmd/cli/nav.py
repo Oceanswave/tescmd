@@ -177,7 +177,7 @@ async def _cmd_homelink(
         client, vehicle_api = get_vehicle_api(app_ctx)
         try:
             vdata = await cached_vehicle_data(
-                app_ctx, vehicle_api, vin, endpoints=["drive_state", "location_data"]
+                app_ctx, vehicle_api, vin, endpoints=["location_data"]
             )
         finally:
             await client.close()

@@ -64,6 +64,7 @@ _CLOSURE_CLOSE = 4
 _CLOSURE_REAR_TRUNK = 5
 _CLOSURE_FRONT_TRUNK = 6
 _CLOSURE_CHARGE_PORT = 7
+_CLOSURE_TONNEAU = 8
 
 
 def _vcsec_rke(action: int) -> bytes:
@@ -540,6 +541,30 @@ def _keep_accessory_power_mode(body: dict[str, Any]) -> bytes:
     return _wrap_vehicle_action(_VA_KEEP_ACCESSORY_POWER, inner)
 
 
+def _batch_remove_precondition_schedules(body: dict[str, Any]) -> bytes:
+    """BatchRemovePreconditionSchedulesAction: home(1), work(2), other(3)."""
+    inner = b""
+    if body.get("home"):
+        inner += _encode_varint_field(1, 1)
+    if body.get("work"):
+        inner += _encode_varint_field(2, 1)
+    if body.get("other"):
+        inner += _encode_varint_field(3, 1)
+    return _wrap_vehicle_action(_VA_BATCH_REMOVE_PRECONDITION, inner)
+
+
+def _batch_remove_charge_schedules(body: dict[str, Any]) -> bytes:
+    """BatchRemoveChargeSchedulesAction: home(1), work(2), other(3)."""
+    inner = b""
+    if body.get("home"):
+        inner += _encode_varint_field(1, 1)
+    if body.get("work"):
+        inner += _encode_varint_field(2, 1)
+    if body.get("other"):
+        inner += _encode_varint_field(3, 1)
+    return _wrap_vehicle_action(_VA_BATCH_REMOVE_CHARGE, inner)
+
+
 # ---------------------------------------------------------------------------
 # Builder registry — maps REST command names to payload builder functions
 # ---------------------------------------------------------------------------
@@ -551,7 +576,11 @@ _BUILDERS: dict[str, _PayloadBuilder] = {
     "door_lock": lambda _: _vcsec_rke(_RKE_LOCK),
     "door_unlock": lambda _: _vcsec_rke(_RKE_UNLOCK),
     "remote_start_drive": lambda _: _vcsec_rke(_RKE_REMOTE_DRIVE),
+    "auto_secure_vehicle": lambda _: _vcsec_rke(_RKE_AUTO_SECURE),
     "actuate_trunk": lambda body: _build_trunk_payload(body),
+    "open_tonneau": lambda _: _vcsec_closure_move(**{str(_CLOSURE_TONNEAU): _CLOSURE_OPEN}),
+    "close_tonneau": lambda _: _vcsec_closure_move(**{str(_CLOSURE_TONNEAU): _CLOSURE_CLOSE}),
+    "stop_tonneau": lambda _: _vcsec_closure_move(**{str(_CLOSURE_TONNEAU): _CLOSURE_STOP}),
     # Infotainment commands → Action { VehicleAction } payloads
     "charge_start": _charging_start,
     "charge_stop": _charging_stop,
@@ -567,6 +596,8 @@ _BUILDERS: dict[str, _PayloadBuilder] = {
     "remove_charge_schedule": _remove_charge_schedule,
     "add_precondition_schedule": _add_precondition_schedule,
     "remove_precondition_schedule": _remove_precondition_schedule,
+    "batch_remove_precondition_schedules": _batch_remove_precondition_schedules,
+    "batch_remove_charge_schedules": _batch_remove_charge_schedules,
     # Climate
     "auto_conditioning_start": _hvac_auto_start,
     "auto_conditioning_stop": _hvac_auto_stop,

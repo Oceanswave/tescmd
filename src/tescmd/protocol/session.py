@@ -312,7 +312,8 @@ class SessionManager:
         # was zero.  The Go SDK does: timeZero = now - Duration(clockTime).
         # clock_time is a monotonic uptime counter (seconds since the
         # vehicle's security module last booted), NOT a Unix timestamp.
-        time_zero = time.time() - session_info.clock_time if session_info.clock_time else time.time()
+        now = time.time()
+        time_zero = now - session_info.clock_time if session_info.clock_time else now
 
         return Session(
             vin=vin,

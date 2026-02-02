@@ -228,7 +228,7 @@ class TestVehicleLocation:
             catch_exceptions=False,
         )
         request = httpx_mock.get_requests()[0]
-        assert "endpoints=drive_state" in str(request.url)
+        assert "endpoints=location_data" in str(request.url)
 
 
 # ---------------------------------------------------------------------------
