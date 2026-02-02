@@ -282,6 +282,8 @@ async def login_flow(
             state,
             force_consent=force_consent,
         )
+        logger.info("Authorization URL: %s", url)
+        print(f"\n  {url}\n")
         webbrowser.open(url)
 
         code, callback_state = server.wait_for_callback(timeout=120)
