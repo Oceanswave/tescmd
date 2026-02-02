@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os as _os
 from typing import Any
 
 from pydantic import BaseModel
@@ -44,10 +45,10 @@ DEFAULT_SCOPES: list[str] = [
     *USER_SCOPES,
 ]
 
-DEFAULT_PORT: int = 8085
+DEFAULT_PORT: int = int(_os.environ.get("TESCMD_OAUTH_PORT", "8085"))
 DEFAULT_REDIRECT_URI: str = f"http://localhost:{DEFAULT_PORT}/callback"
 
-AUTH_BASE_URL: str = "https://auth.tesla.com"
+AUTH_BASE_URL: str = _os.environ.get("TESLA_AUTH_BASE_URL", "https://auth.tesla.com")
 AUTHORIZE_URL: str = f"{AUTH_BASE_URL}/oauth2/v3/authorize"
 TOKEN_URL: str = f"{AUTH_BASE_URL}/oauth2/v3/token"
 

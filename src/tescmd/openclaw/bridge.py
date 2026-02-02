@@ -64,6 +64,7 @@ class TelemetryBridge:
         self._first_frame_received = False
         self._reconnect_at: float = 0.0
         self._reconnect_backoff: float = _RECONNECT_BASE
+        self._shutting_down = False
 
     @property
     def event_count(self) -> int:
@@ -79,6 +80,8 @@ class TelemetryBridge:
 
     async def _maybe_reconnect(self) -> None:
         """Attempt gateway reconnection with exponential backoff."""
+        if self._shutting_down:
+            return
         now = time.monotonic()
         if now < self._reconnect_at:
             return
@@ -151,6 +154,7 @@ class TelemetryBridge:
         Called during shutdown before the gateway connection is closed.
         Silently ignored if the gateway is not connected.
         """
+        self._shutting_down = True
         if self._dry_run:
             return
         event = self._build_lifecycle_event("node.disconnecting")

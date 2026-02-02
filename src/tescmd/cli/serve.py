@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import logging
 import random
-from typing import Any
+import signal
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import asyncio
 
 import click
 
@@ -23,7 +27,19 @@ logger = logging.getLogger(__name__)
     default="streamable-http",
     help="MCP transport (default: streamable-http)",
 )
-@click.option("--port", type=int, default=8080, help="MCP HTTP port (streamable-http only)")
+@click.option(
+    "--port",
+    type=int,
+    default=8080,
+    envvar="TESCMD_MCP_PORT",
+    help="MCP HTTP port (streamable-http only)",
+)
+@click.option(
+    "--host",
+    default="127.0.0.1",
+    envvar="TESCMD_HOST",
+    help="Bind address (default: 127.0.0.1)",
+)
 @click.option(
     "--telemetry-port",
     type=int,
@@ -109,6 +125,7 @@ def serve_cmd(
     vin_positional: str | None,
     transport: str,
     port: int,
+    host: str,
     telemetry_port: int | None,
     fields: str,
     interval: int | None,
@@ -189,6 +206,7 @@ def serve_cmd(
             vin_positional=vin_positional,
             transport=transport,
             mcp_port=port,
+            mcp_host=host,
             telemetry_port=telemetry_port,
             fields_spec=fields,
             interval_override=interval,
@@ -213,6 +231,7 @@ async def _cmd_serve(
     vin_positional: str | None,
     transport: str,
     mcp_port: int,
+    mcp_host: str = "127.0.0.1",
     telemetry_port: int | None,
     fields_spec: str,
     interval_override: int | None,
@@ -455,13 +474,13 @@ async def _cmd_serve(
             _pre_hostname = await _ts_pre.get_hostname()
             public_url = f"https://{_pre_hostname}"
         except Exception:
-            logger.debug("Tailscale auto-detection failed — using localhost", exc_info=True)
+            logger.warning("Tailscale auto-detection failed — using localhost")
 
     # -- Populate TUI with server info --
     if tui is not None:
         mcp_url = ""
         if not no_mcp:
-            mcp_url = f"{public_url}/mcp" if public_url else f"http://127.0.0.1:{mcp_port}/mcp"
+            mcp_url = f"{public_url}/mcp" if public_url else f"http://{mcp_host}:{mcp_port}/mcp"
             tui.set_mcp_url(mcp_url)
         if public_url:
             tui.set_tunnel_url(public_url)
@@ -471,13 +490,28 @@ async def _cmd_serve(
 
     # -- Start everything --
     if not no_mcp and is_rich and tui is None:
-        base_url = f"{public_url}/mcp" if public_url else f"http://127.0.0.1:{mcp_port}/mcp"
+        base_url = f"{public_url}/mcp" if public_url else f"http://{mcp_host}:{mcp_port}/mcp"
         formatter.rich.info(
             f"MCP server starting on {base_url} ({tool_count} tools, "
             f"{fanout.sink_count} telemetry sink(s))"
         )
     if (not no_mcp or not no_telemetry) and is_rich and tui is None:
         formatter.rich.info("Press Ctrl+C to stop.")
+
+    # -- SIGTERM handler for graceful container/systemd shutdown --
+    shutdown_event = asyncio.Event()
+
+    def _handle_sigterm() -> None:
+        logger.info("SIGTERM received — shutting down gracefully")
+        shutdown_event.set()
+
+    loop = asyncio.get_running_loop()
+    # Only add signal handler on Unix (Windows doesn't support loop.add_signal_handler)
+    if hasattr(signal, "SIGTERM"):
+        import contextlib
+
+        with contextlib.suppress(NotImplementedError):
+            loop.add_signal_handler(signal.SIGTERM, _handle_sigterm)
 
     combined_task: asyncio.Task[None] | None = None
     _uvi_server: Any = None  # uvicorn.Server — for graceful shutdown
@@ -515,12 +549,16 @@ async def _cmd_serve(
                 # Keep a handle on the uvicorn.Server so we can signal a
                 # graceful shutdown (should_exit) instead of cancelling.
                 _uvi_cfg = uvicorn.Config(
-                    combined_app, host="127.0.0.1", port=mcp_port, log_level="warning"
+                    combined_app, host=mcp_host, port=mcp_port, log_level="warning"
                 )
                 _uvi_server = uvicorn.Server(_uvi_cfg)
                 combined_task = asyncio.create_task(_uvi_server.serve())
                 # Give uvicorn a moment to bind the port.
                 await asyncio.sleep(0.5)
+                if combined_task.done():
+                    exc = combined_task.exception()
+                    if exc is not None:
+                        raise OSError(f"Failed to start server on port {mcp_port}: {exc}") from exc
 
             try:
                 async with telemetry_session(
@@ -539,7 +577,7 @@ async def _cmd_serve(
                         formatter.rich.info("Telemetry pipeline active.")
 
                     if tui is not None:
-                        await tui.run_async()
+                        await _race_shutdown(tui.run_async(), shutdown_event)
                     elif dashboard is not None:
                         from rich.live import Live
 
@@ -550,9 +588,9 @@ async def _cmd_serve(
                             refresh_per_second=4,
                         ) as live:
                             dashboard.set_live(live)
-                            await _wait_for_interrupt()
+                            await _wait_for_interrupt(shutdown_event)
                     else:
-                        await _wait_for_interrupt()
+                        await _wait_for_interrupt(shutdown_event)
             finally:
                 # Signal uvicorn to shut down gracefully rather than
                 # cancelling (which causes a CancelledError traceback
@@ -563,7 +601,10 @@ async def _cmd_serve(
                     with contextlib.suppress(asyncio.CancelledError):
                         await combined_task
         elif mcp_server is not None:
-            await mcp_server.run_http(port=mcp_port, public_url=public_url)
+            await _race_shutdown(
+                mcp_server.run_http(host=mcp_host, port=mcp_port, public_url=public_url),
+                shutdown_event,
+            )
     finally:
         if ts is not None:
             await ts.stop_funnel()
@@ -814,14 +855,17 @@ def _build_combined_app(
     return _LoggingASGI(_app)
 
 
-async def _wait_for_interrupt() -> None:
-    """Block until Ctrl+C or 'q' is pressed."""
+async def _wait_for_interrupt(shutdown_event: asyncio.Event | None = None) -> None:
+    """Block until Ctrl+C, 'q' is pressed, or *shutdown_event* is set."""
     import asyncio
     import sys
 
+    def _should_stop() -> bool:
+        return shutdown_event is not None and shutdown_event.is_set()
+
     if not sys.stdin.isatty():
         try:
-            while True:
+            while not _should_stop():
                 await asyncio.sleep(1)
         except asyncio.CancelledError:
             pass
@@ -833,7 +877,7 @@ async def _wait_for_interrupt() -> None:
         import tty
     except ImportError:
         try:
-            while True:
+            while not _should_stop():
                 await asyncio.sleep(1)
         except asyncio.CancelledError:
             pass
@@ -845,7 +889,7 @@ async def _wait_for_interrupt() -> None:
     try:
         tty.setcbreak(fd)
         sel.register(sys.stdin, selectors.EVENT_READ)
-        while True:
+        while not _should_stop():
             await asyncio.sleep(0.1)
             for _key, _ in sel.select(timeout=0):
                 ch = sys.stdin.read(1)
@@ -856,3 +900,24 @@ async def _wait_for_interrupt() -> None:
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
         sel.close()
+
+
+async def _race_shutdown(
+    coro: Any,
+    shutdown_event: asyncio.Event,
+) -> None:
+    """Run *coro* but return early if *shutdown_event* fires (SIGTERM)."""
+    import asyncio
+
+    task = asyncio.ensure_future(coro)
+    shutdown_waiter = asyncio.create_task(shutdown_event.wait())
+    done, pending = await asyncio.wait(
+        [task, shutdown_waiter],
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    for t in pending:
+        t.cancel()
+    # Re-raise exceptions from the main task if it finished with an error.
+    for t in done:
+        if t is not shutdown_waiter:
+            t.result()

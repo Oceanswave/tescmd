@@ -37,6 +37,8 @@ dependencies = [
     "websockets>=14.0",
     "mcp>=1.0",
     "textual>=1.0",
+    "uvicorn>=0.30",
+    "starlette>=0.37",
 ]
 
 [project.optional-dependencies]

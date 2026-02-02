@@ -60,6 +60,8 @@ class TelemetryServer:
         *,
         public_key_pem: str | None = None,
     ) -> None:
+        if not (0 <= port <= 65534):
+            raise ValueError(f"Port must be between 0 and 65534, got {port}")
         self._port = port
         self._ws_port = port + 1
         self._decoder = decoder

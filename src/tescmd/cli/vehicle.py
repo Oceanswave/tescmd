@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 from typing import TYPE_CHECKING
 
 import click
@@ -847,7 +848,7 @@ def telemetry_stream_cmd(
             app_ctx,
             vin_positional=vin_positional,
             transport="streamable-http",
-            mcp_port=8080,
+            mcp_port=int(os.environ.get("TESCMD_MCP_PORT", "8080")),
             telemetry_port=telemetry_port,
             fields_spec=fields,
             interval_override=interval,

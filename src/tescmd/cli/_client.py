@@ -134,7 +134,9 @@ async def reauth_on_expired_refresh(store: TokenStore, settings: AppSettings) ->
     meta = store.metadata or {}
     region = meta.get("region", "na")
     scopes = meta.get("scopes", DEFAULT_SCOPES)
-    port = 8085
+    from tescmd.models.auth import DEFAULT_PORT
+
+    port = DEFAULT_PORT
 
     click.echo("")
     click.echo("Opening your browser to sign in to Tesla...")

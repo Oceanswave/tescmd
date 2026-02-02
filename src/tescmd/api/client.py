@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os as _os
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -24,6 +25,10 @@ from tescmd.api.errors import (
 # ---------------------------------------------------------------------------
 # Region -> base URL mapping
 # ---------------------------------------------------------------------------
+
+# Allow a full override via TESLA_API_BASE_URL (e.g. for proxies / staging).
+# When set the region parameter is ignored and all requests go to this URL.
+_API_BASE_OVERRIDE: str | None = _os.environ.get("TESLA_API_BASE_URL")
 
 REGION_BASE_URLS: dict[str, str] = {
     "na": "https://fleet-api.prd.na.vn.cloud.tesla.com",
@@ -56,7 +61,7 @@ class TeslaFleetClient:
         on_token_refresh: Callable[[], Awaitable[str | None]] | None = None,
         on_rate_limit_wait: Callable[[int, int, int], Awaitable[None]] | None = None,
     ) -> None:
-        base_url = REGION_BASE_URLS.get(region)
+        base_url = _API_BASE_OVERRIDE or REGION_BASE_URLS.get(region)
         if base_url is None:
             msg = f"Unknown region {region!r}; expected one of {sorted(REGION_BASE_URLS)}"
             raise ValueError(msg)

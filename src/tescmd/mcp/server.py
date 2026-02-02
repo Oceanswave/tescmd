@@ -9,6 +9,7 @@ and returns the JSON output.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -291,7 +292,9 @@ class MCPServer:
 
         await mcp.run_stdio_async()
 
-    def create_http_app(self, *, port: int = 8080, public_url: str | None = None) -> Any:
+    def create_http_app(
+        self, *, host: str = "127.0.0.1", port: int = 8080, public_url: str | None = None
+    ) -> Any:
         """Build and return the MCP Starlette app (without starting uvicorn).
 
         Returns the ``Starlette`` ASGI application with auth routes and
@@ -334,7 +337,7 @@ class MCPServer:
         mcp = FastMCP(
             "tescmd",
             instructions="Tesla vehicle management via Fleet API",
-            host="127.0.0.1",
+            host=host,
             port=port,
             auth_server_provider=provider,
             auth=AuthSettings(
@@ -357,12 +360,14 @@ class MCPServer:
 
         return mcp.streamable_http_app()
 
-    async def run_http(self, *, port: int = 8080, public_url: str | None = None) -> None:
+    async def run_http(
+        self, *, host: str = "127.0.0.1", port: int = 8080, public_url: str | None = None
+    ) -> None:
         """Run the MCP server on streamable-http transport."""
         import uvicorn
 
-        app = self.create_http_app(port=port, public_url=public_url)
-        config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
+        app = self.create_http_app(host=host, port=port, public_url=public_url)
+        config = uvicorn.Config(app, host=host, port=port, log_level="warning")
         server = uvicorn.Server(config)
         await server.serve()
 
@@ -376,8 +381,10 @@ class MCPServer:
         server = self
 
         @mcp.tool(name=tool_name, description=description)  # type: ignore[misc]
-        def _tool(vin: str = "", args: list[str] | None = None) -> str:
-            result = server.invoke_tool(tool_name, {"vin": vin, "args": args or []})
+        async def _tool(vin: str = "", args: list[str] | None = None) -> str:
+            result = await asyncio.to_thread(
+                server.invoke_tool, tool_name, {"vin": vin, "args": args or []}
+            )
             return json.dumps(result, default=str, indent=2)
 
     def _register_custom_fastmcp_tool(

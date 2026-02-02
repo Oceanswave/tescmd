@@ -56,6 +56,8 @@ class CSVLogSink:
     """
 
     def __init__(self, path: Path, vin: str | None = None) -> None:
+        import atexit
+
         self._path = path
         self._vin = vin
         self._fh: IO[str] | None = None
@@ -63,6 +65,7 @@ class CSVLogSink:
         self._fieldnames: list[str] = list(_FIXED_COLUMNS)
         self._frame_count: int = 0
         self._since_flush: int = 0
+        atexit.register(self.close)
 
     # -- Properties -----------------------------------------------------------
 

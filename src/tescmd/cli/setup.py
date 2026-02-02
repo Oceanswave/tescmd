@@ -184,7 +184,9 @@ def _developer_portal_setup(
 
     # Delegate to the existing interactive setup wizard, passing the domain
     # so the portal instructions show the correct Allowed Origin URL
-    port = 8085
+    from tescmd.models.auth import DEFAULT_PORT
+
+    port = DEFAULT_PORT
     redirect_uri = f"http://localhost:{port}/callback"
     from tescmd.cli.auth import _interactive_setup
 
@@ -924,7 +926,9 @@ async def _oauth_login_step(
         info("[bold]Phase 5: OAuth Login[/bold]")
         info("")
 
-    port = 8085
+    from tescmd.models.auth import DEFAULT_PORT as _DEFAULT_PORT
+
+    port = _DEFAULT_PORT
     redirect_uri = f"http://localhost:{port}/callback"
 
     info("Opening your browser to sign in to Tesla...")

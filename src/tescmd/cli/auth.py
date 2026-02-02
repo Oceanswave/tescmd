@@ -49,7 +49,12 @@ auth_group = click.Group("auth", help="Authentication commands")
 
 
 @auth_group.command("login")
-@click.option("--port", type=int, default=8085, help="Local callback port")
+@click.option(
+    "--port",
+    type=int,
+    default=None,
+    help="Local callback port (default: 8085 or TESCMD_OAUTH_PORT)",
+)
 @click.option(
     "--reconsent",
     is_flag=True,
@@ -57,14 +62,19 @@ auth_group = click.Group("auth", help="Authentication commands")
     help="Force Tesla to re-display the scope consent screen.",
 )
 @global_options
-def login_cmd(app_ctx: AppContext, port: int, reconsent: bool) -> None:
+def login_cmd(app_ctx: AppContext, port: int | None, reconsent: bool) -> None:
     """Log in via OAuth2 PKCE flow."""
     run_async(_cmd_login(app_ctx, port, reconsent=reconsent))
 
 
-async def _cmd_login(app_ctx: AppContext, port: int, *, reconsent: bool = False) -> None:
+async def _cmd_login(app_ctx: AppContext, port: int | None, *, reconsent: bool = False) -> None:
+    from tescmd.models.auth import DEFAULT_PORT
+
     formatter = app_ctx.formatter
     settings = AppSettings()
+
+    if port is None:
+        port = DEFAULT_PORT
 
     client_id = settings.client_id
     client_secret = settings.client_secret

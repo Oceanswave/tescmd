@@ -85,9 +85,13 @@ async def exchange_code(
     code_verifier: str,
     client_id: str,
     client_secret: str | None = None,
-    redirect_uri: str = "http://localhost:8085/callback",
+    redirect_uri: str | None = None,
 ) -> TokenData:
     """Exchange an authorization code for tokens."""
+    if redirect_uri is None:
+        from tescmd.models.auth import DEFAULT_REDIRECT_URI
+
+        redirect_uri = DEFAULT_REDIRECT_URI
     payload: dict[str, Any] = {
         "grant_type": "authorization_code",
         "code": code,

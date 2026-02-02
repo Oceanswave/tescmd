@@ -27,8 +27,15 @@ POLL_INTERVAL = 5  # seconds
 # ---------------------------------------------------------------------------
 
 
+def _check_tool(name: str) -> None:
+    """Raise FileNotFoundError if *name* is not on PATH."""
+    if shutil.which(name) is None:
+        raise FileNotFoundError(f"Required tool {name!r} is not installed or not on PATH")
+
+
 def _run_gh(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
     """Run a ``gh`` CLI command and return the result."""
+    _check_tool("gh")
     return subprocess.run(
         ["gh", *args],
         capture_output=True,
@@ -44,6 +51,7 @@ def _run_git(
     check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     """Run a ``git`` command and return the result."""
+    _check_tool("git")
     return subprocess.run(
         ["git", *args],
         capture_output=True,

@@ -16,7 +16,19 @@ mcp_group = click.Group("mcp", help="MCP (Model Context Protocol) server.")
     default="streamable-http",
     help="MCP transport (default: streamable-http)",
 )
-@click.option("--port", type=int, default=8080, help="HTTP port (streamable-http only)")
+@click.option(
+    "--port",
+    type=int,
+    default=8080,
+    envvar="TESCMD_MCP_PORT",
+    help="HTTP port (streamable-http only)",
+)
+@click.option(
+    "--host",
+    default="127.0.0.1",
+    envvar="TESCMD_HOST",
+    help="Bind address (default: 127.0.0.1)",
+)
 @click.option("--tailscale", is_flag=True, default=False, help="Expose via Tailscale Funnel")
 @click.option(
     "--client-id",
@@ -35,6 +47,7 @@ def serve_cmd(
     app_ctx: object,
     transport: str,
     port: int,
+    host: str,
     tailscale: bool,
     client_id: str | None,
     client_secret: str | None,
@@ -76,13 +89,14 @@ def serve_cmd(
     if tailscale and transport == "stdio":
         raise click.UsageError("--tailscale cannot be used with --transport stdio")
 
-    run_async(_cmd_serve(app_ctx, transport, port, tailscale, client_id, client_secret))
+    run_async(_cmd_serve(app_ctx, transport, port, host, tailscale, client_id, client_secret))
 
 
 async def _cmd_serve(
     app_ctx: object,
     transport: str,
     port: int,
+    host: str,
     tailscale: bool,
     client_id: str,
     client_secret: str,
@@ -106,10 +120,10 @@ async def _cmd_serve(
     if not tailscale:
         if formatter.format != "json":
             formatter.rich.info(
-                f"MCP server starting on http://127.0.0.1:{port}/mcp ({tool_count} tools)"
+                f"MCP server starting on http://{host}:{port}/mcp ({tool_count} tools)"
             )
             formatter.rich.info("Press Ctrl+C to stop.")
-        await server.run_http(port=port)
+        await server.run_http(host=host, port=port)
         return
 
     # Tailscale Funnel mode
@@ -132,7 +146,7 @@ async def _cmd_serve(
         print(f'{{"url": "{public_url}"}}', file=sys.stderr)
 
     try:
-        await server.run_http(port=port, public_url=url)
+        await server.run_http(host=host, port=port, public_url=url)
     finally:
         await ts.stop_funnel()
         if formatter.format != "json":

@@ -125,7 +125,11 @@ class BridgeConfig(BaseModel):
     variables.
     """
 
-    gateway_url: str = "ws://127.0.0.1:18789"
+    gateway_url: str = Field(
+        default_factory=lambda: __import__("os").environ.get(
+            "OPENCLAW_GATEWAY_URL", "ws://127.0.0.1:18789"
+        )
+    )
     gateway_token: str | None = Field(default=None)
     client_id: str = "node-host"
     client_version: str | None = None

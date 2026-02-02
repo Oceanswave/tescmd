@@ -75,7 +75,11 @@ class _CallbackHandler(BaseHTTPRequestHandler):
 class OAuthCallbackServer(HTTPServer):
     """HTTPServer that waits for a single OAuth redirect callback."""
 
-    def __init__(self, port: int = 8085) -> None:
+    def __init__(self, port: int | None = None) -> None:
+        if port is None:
+            from tescmd.models.auth import DEFAULT_PORT
+
+            port = DEFAULT_PORT
         super().__init__(("127.0.0.1", port), _CallbackHandler)
         self.callback_event = threading.Event()
         self.callback_result: tuple[str | None, str | None, str | None] = (

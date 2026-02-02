@@ -266,7 +266,9 @@ async def _create_fleet_config(
             " [cyan]Allow[/cyan] to grant tescmd access."
         )
 
-        login_port = 8085
+        from tescmd.models.auth import DEFAULT_PORT
+
+        login_port = DEFAULT_PORT
         login_redirect = f"http://localhost:{login_port}/callback"
         login_store = TokenStore(
             profile=app_ctx.profile,
