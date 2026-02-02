@@ -19,6 +19,7 @@ from tescmd.api.errors import (
     RateLimitError,
     RegistrationRequiredError,
     TeslaAPIError,
+    VCPRequiredError,
     VehicleAsleepError,
 )
 
@@ -199,8 +200,16 @@ class TeslaFleetClient:
 
         if response.status_code == 403:
             text = response.text[:200]
-            if "missing scopes" in text.lower():
+            text_lower = text.lower()
+            if "missing scopes" in text_lower:
                 raise MissingScopesError(text, status_code=403)
+            if "vehicle command protocol required" in text_lower:
+                raise VCPRequiredError(
+                    "This command is not available via the Fleet API when "
+                    "Vehicle Command Protocol is enabled. Use the Tesla app "
+                    "or run tescmd behind a tesla-http-proxy.",
+                    status_code=403,
+                )
             raise AuthError(f"HTTP 403: {text}", status_code=403)
 
         if response.status_code >= 400:

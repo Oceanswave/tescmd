@@ -72,6 +72,11 @@ class MissingScopesError(AuthError):
     """Raised on HTTP 403 when the token lacks required OAuth scopes."""
 
 
+class VCPRequiredError(TeslaAPIError):
+    """Raised when the vehicle requires Vehicle Command Protocol for a command
+    that has no VCP proto definition (e.g. navigation commands)."""
+
+
 class KeyNotEnrolledError(TeslaAPIError):
     """Vehicle rejected the command — key not enrolled."""
 
