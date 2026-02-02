@@ -208,6 +208,14 @@ async def register_partner_account(
         )
 
     if resp.status_code >= 400:
+        # HTTP 422 with "already been taken" means the key or domain is
+        # already registered.  Treat as success — registration is idempotent.
+        if resp.status_code == 422 and "already been taken" in resp.text:
+            logger.info(
+                "Partner already registered for %s region (key already taken)",
+                region,
+            )
+            return {"already_registered": True}, granted_scopes
         raise AuthError(
             f"Partner registration failed (HTTP {resp.status_code}): {resp.text}",
             status_code=resp.status_code,
@@ -282,6 +290,8 @@ async def login_flow(
             state,
             force_consent=force_consent,
         )
+        logger.info("Authorization URL: %s", url)
+        print(f"\n  {url}\n")
         webbrowser.open(url)
 
         code, callback_state = server.wait_for_callback(timeout=120)

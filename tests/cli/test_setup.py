@@ -12,6 +12,7 @@ from tescmd.cli.setup import (
     TIER_FULL,
     TIER_READONLY,
     _cmd_setup,
+    _deploy_key_github,
     _developer_portal_setup,
     _domain_setup,
     _precheck_public_key,
@@ -816,6 +817,129 @@ class TestKeySetupTailscale:
             _key_setup(formatter, settings, "user.github.io")
 
         mock_gh_deploy.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Key deployment — remote vs local comparison
+# ---------------------------------------------------------------------------
+
+LOCAL_PEM = "-----BEGIN PUBLIC KEY-----\nLOCAL_KEY_DATA\n-----END PUBLIC KEY-----\n"
+REMOTE_PEM_MATCHING = "-----BEGIN PUBLIC KEY-----\nLOCAL_KEY_DATA\n-----END PUBLIC KEY-----"
+REMOTE_PEM_DIFFERENT = "-----BEGIN PUBLIC KEY-----\nOLD_KEY_DATA\n-----END PUBLIC KEY-----"
+
+
+class TestDeployKeyGitHubComparison:
+    """Verify _deploy_key_github compares remote vs local key before deploying."""
+
+    def _make_settings(self, monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("TESLA_GITHUB_REPO", "user/user.github.io")
+
+        from tescmd.models.config import AppSettings
+
+        return AppSettings(_env_file=None)  # type: ignore[call-arg]
+
+    def test_matching_key_skips_deploy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When remote PEM matches local, skip deployment."""
+        settings = self._make_settings(monkeypatch)
+        formatter = _make_formatter()
+        from pathlib import Path
+
+        with (
+            patch("tescmd.crypto.keys.load_public_key_pem", return_value=LOCAL_PEM),
+            patch("tescmd.deploy.github_pages.fetch_key_pem", return_value=REMOTE_PEM_MATCHING),
+            patch("tescmd.deploy.github_pages.is_gh_available", return_value=True),
+            patch("tescmd.deploy.github_pages.is_gh_authenticated", return_value=True),
+            patch("tescmd.deploy.github_pages.deploy_public_key") as mock_deploy,
+        ):
+            _deploy_key_github(formatter, settings, Path("/tmp/keys"), "user.github.io")
+
+        mock_deploy.assert_not_called()
+        calls = [str(c) for c in formatter.rich.info.call_args_list]
+        assert any("matches GitHub" in c for c in calls)
+
+    def test_mismatched_key_user_confirms_redeploy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When remote PEM differs and user confirms, redeploy."""
+        settings = self._make_settings(monkeypatch)
+        formatter = _make_formatter()
+        from pathlib import Path
+
+        with (
+            patch("tescmd.crypto.keys.load_public_key_pem", return_value=LOCAL_PEM),
+            patch("tescmd.deploy.github_pages.fetch_key_pem", return_value=REMOTE_PEM_DIFFERENT),
+            patch("tescmd.deploy.github_pages.is_gh_available", return_value=True),
+            patch("tescmd.deploy.github_pages.is_gh_authenticated", return_value=True),
+            patch("builtins.input", return_value="y"),
+            patch("tescmd.deploy.github_pages.deploy_public_key") as mock_deploy,
+            patch("tescmd.deploy.github_pages.wait_for_pages_deployment", return_value=True),
+        ):
+            _deploy_key_github(formatter, settings, Path("/tmp/keys"), "user.github.io")
+
+        mock_deploy.assert_called_once()
+        calls = [str(c) for c in formatter.rich.info.call_args_list]
+        assert any("differs" in c for c in calls)
+
+    def test_mismatched_key_user_declines_skips_deploy(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When remote PEM differs and user declines, leave GitHub unchanged."""
+        settings = self._make_settings(monkeypatch)
+        formatter = _make_formatter()
+        from pathlib import Path
+
+        with (
+            patch("tescmd.crypto.keys.load_public_key_pem", return_value=LOCAL_PEM),
+            patch("tescmd.deploy.github_pages.fetch_key_pem", return_value=REMOTE_PEM_DIFFERENT),
+            patch("tescmd.deploy.github_pages.is_gh_available", return_value=True),
+            patch("tescmd.deploy.github_pages.is_gh_authenticated", return_value=True),
+            patch("builtins.input", return_value="n"),
+            patch("tescmd.deploy.github_pages.deploy_public_key") as mock_deploy,
+        ):
+            _deploy_key_github(formatter, settings, Path("/tmp/keys"), "user.github.io")
+
+        mock_deploy.assert_not_called()
+        calls = [str(c) for c in formatter.rich.info.call_args_list]
+        assert any("Skipped" in c for c in calls)
+
+    def test_mismatched_key_eof_skips_deploy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """EOFError on confirmation prompt skips deploy."""
+        settings = self._make_settings(monkeypatch)
+        formatter = _make_formatter()
+        from pathlib import Path
+
+        with (
+            patch("tescmd.crypto.keys.load_public_key_pem", return_value=LOCAL_PEM),
+            patch("tescmd.deploy.github_pages.fetch_key_pem", return_value=REMOTE_PEM_DIFFERENT),
+            patch("tescmd.deploy.github_pages.is_gh_available", return_value=True),
+            patch("tescmd.deploy.github_pages.is_gh_authenticated", return_value=True),
+            patch("builtins.input", side_effect=EOFError),
+            patch("tescmd.deploy.github_pages.deploy_public_key") as mock_deploy,
+        ):
+            _deploy_key_github(formatter, settings, Path("/tmp/keys"), "user.github.io")
+
+        mock_deploy.assert_not_called()
+
+    def test_no_remote_key_deploys_normally(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When remote key not accessible, deploy without confirmation."""
+        settings = self._make_settings(monkeypatch)
+        formatter = _make_formatter()
+        from pathlib import Path
+
+        with (
+            patch("tescmd.crypto.keys.load_public_key_pem", return_value=LOCAL_PEM),
+            patch("tescmd.deploy.github_pages.fetch_key_pem", return_value=None),
+            patch("tescmd.deploy.github_pages.is_gh_available", return_value=True),
+            patch("tescmd.deploy.github_pages.is_gh_authenticated", return_value=True),
+            patch("tescmd.deploy.github_pages.deploy_public_key") as mock_deploy,
+            patch("tescmd.deploy.github_pages.wait_for_pages_deployment", return_value=True),
+        ):
+            _deploy_key_github(formatter, settings, Path("/tmp/keys"), "user.github.io")
+
+        mock_deploy.assert_called_once()
+        calls = [str(c) for c in formatter.rich.info.call_args_list]
+        assert any("Deploying public key" in c for c in calls)
 
 
 # ---------------------------------------------------------------------------
