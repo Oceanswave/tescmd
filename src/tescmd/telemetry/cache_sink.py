@@ -81,7 +81,7 @@ class CacheSink:
         self._flush_interval = flush_interval
         self._telemetry_ttl = telemetry_ttl
         self._pending: dict[str, Any] = {}
-        self._last_flush: float = 0.0
+        self._last_flush: float = float("-inf")
         self._frame_count: int = 0
         self._field_count: int = 0
 
