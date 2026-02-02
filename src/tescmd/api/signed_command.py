@@ -167,15 +167,18 @@ class SignedCommandAPI:
             # etc.) propagate so callers like auto_wake() can handle them.
             raise
 
-        result = self._parse_signed_response(data, vin, command, domain)
+        result, fault = self._parse_signed_response(data, vin, command, domain)
         if result is not None:
             return result
 
         # Stale session — _parse_signed_response already invalidated the cache.
         # Retry once with a fresh handshake.
         if _retried:
+            fault_name = fault.name if fault else "unknown"
+            desc = FAULT_DESCRIPTIONS.get(fault, fault_name) if fault else fault_name
             raise SessionError(
-                f"Signed command '{command}' failed for {vin} after session refresh"
+                f"Signed command '{command}' failed for {vin} after session refresh "
+                f"(vehicle fault: {desc})"
             )
         logger.debug(
             "Stale session for %s (%s), retrying with fresh handshake",
@@ -194,15 +197,15 @@ class SignedCommandAPI:
         vin: str,
         command: str,
         domain: Domain,
-    ) -> CommandResponse | None:
+    ) -> tuple[CommandResponse | None, MessageFault | None]:
         """Parse a signed_command endpoint response.
 
         The endpoint returns ``{"response": "<base64-encoded RoutableMessage>"}``.
         Decodes the protobuf, checks for vehicle-side fault codes, and returns
-        a ``CommandResponse`` on success.
+        ``(CommandResponse, None)`` on success.
 
-        Returns ``None`` if the fault indicates a stale session — the caller
-        should invalidate the session and retry with a fresh handshake.
+        Returns ``(None, fault)`` if the fault indicates a stale session — the
+        caller should invalidate the session and retry with a fresh handshake.
         """
         response_b64: str = data.get("response", "")
         if not response_b64:
@@ -243,13 +246,16 @@ class SignedCommandAPI:
                     fault.name,
                     vin,
                 )
-                return None
+                return None, fault
 
             # All other faults — raise with descriptive message.
-            raise SessionError(f"Vehicle rejected command '{command}' for {vin}: {desc}")
+            raise SessionError(
+                f"Vehicle rejected command '{command}' for {vin}: {desc} "
+                f"(fault: {fault.name})"
+            )
 
         logger.debug("Signed command '%s' succeeded for %s", command, vin)
-        return CommandResponse(response=CommandResult(result=True))
+        return CommandResponse(response=CommandResult(result=True)), None
 
     # ------------------------------------------------------------------
     # Named method delegation

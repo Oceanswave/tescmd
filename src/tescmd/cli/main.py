@@ -577,14 +577,20 @@ def _handle_session_error(
     formatter.rich.error(message)
     formatter.rich.info("")
     formatter.rich.info("Possible causes:")
-    formatter.rich.info("  - Vehicle is temporarily unreachable")
-    formatter.rich.info("  - Local key pair is corrupted")
-    formatter.rich.info("  - Key was re-generated but not re-enrolled")
+    formatter.rich.info("  - Vehicle is temporarily unreachable or asleep")
+    formatter.rich.info("  - Session expired — retry once and a fresh handshake will occur")
+    formatter.rich.info(
+        "  - Local key pair is corrupted or was re-generated without re-enrollment"
+    )
     formatter.rich.info("")
-    formatter.rich.info("Try again, or if the problem persists:")
-    formatter.rich.info("  [cyan]tescmd key generate --force[/cyan]  (regenerate key pair)")
-    formatter.rich.info("  [cyan]tescmd key deploy[/cyan]            (re-deploy public key)")
-    formatter.rich.info("  [cyan]tescmd key enroll[/cyan]            (re-enroll on vehicle)")
+    formatter.rich.info("Try:")
+    formatter.rich.info("  1. Re-run the command (sessions auto-refresh)")
+    formatter.rich.info("  2. Use [cyan]--verbose[/cyan] to see fault codes and signing details")
+    formatter.rich.info("  3. If repeated failures, re-enroll:")
+    formatter.rich.info(
+        "     [cyan]tescmd key generate --force && tescmd key deploy"
+        " && tescmd key enroll[/cyan]"
+    )
 
 
 def _handle_keyring_error(
