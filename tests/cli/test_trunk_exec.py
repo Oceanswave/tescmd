@@ -277,16 +277,14 @@ class TestTrunkWindowClose:
         assert body["lat"] == pytest.approx(37.77)
         assert body["lon"] == pytest.approx(-122.42)
 
-    def test_window_close_fetches_location_when_no_coords(
+    def test_window_close_without_coords_sends_command_directly(
         self, httpx_mock: HTTPXMock, cli_env: dict[str, str]
     ) -> None:
-        """--close without --lat/--lon fetches vehicle_data for drive_state coords."""
-        # First request: vehicle_data to get drive_state location
-        httpx_mock.add_response(
-            url=f"{FLEET}/api/1/vehicles/{VIN}/vehicle_data?endpoints=drive_state%3Blocation_data",
-            json=VEHICLE_DATA_WITH_DRIVE_STATE,
-        )
-        # Second request: window_control command
+        """--close without --lat/--lon sends window_control without fetching location.
+
+        The signed protocol's VehicleControlWindowAction does not require
+        coordinates (field 1 is reserved), so no vehicle_data GET is needed.
+        """
         httpx_mock.add_response(
             url=f"{FLEET}/api/1/vehicles/{VIN}/command/window_control",
             json=CMD_OK,
@@ -298,22 +296,11 @@ class TestTrunkWindowClose:
 
         assert result.exit_code == 0, result.output
 
-        # Verify two requests were made
+        # Only one request: the POST command (no location fetch)
         requests = httpx_mock.get_requests()
-        assert len(requests) == 2
-
-        # First request should be the vehicle_data GET
-        assert requests[0].method == "GET"
-        assert "vehicle_data" in str(requests[0].url)
-        assert "drive_state" in str(requests[0].url)
-
-        # Second request should be the window_control POST
-        assert requests[1].method == "POST"
-        assert "window_control" in str(requests[1].url)
-        body = json.loads(requests[1].content)
-        assert body["command"] == "close"
-        assert body["lat"] == pytest.approx(37.7749)
-        assert body["lon"] == pytest.approx(-122.4194)
+        assert len(requests) == 1
+        assert requests[0].method == "POST"
+        assert "window_control" in str(requests[0].url)
 
     def test_window_close_hits_correct_endpoint(
         self, httpx_mock: HTTPXMock, cli_env: dict[str, str]

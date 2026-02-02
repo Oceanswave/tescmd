@@ -510,9 +510,28 @@ def calendar_cmd(
     Pass calendar JSON as an argument, via --file, or piped through stdin.
 
     \b
-    Examples:
-      tescmd vehicle calendar '{"entries": [...]}'
+    Example JSON:
+      {
+        "calendars": [{
+          "name": "Work",
+          "color": "#4285F4",
+          "events": [{
+            "name": "Team Standup",
+            "location": "1 Market St, San Francisco, CA",
+            "start": 1738573200000,
+            "end": 1738576800000,
+            "all_day": false,
+            "organizer": "alice@example.com"
+          }]
+        }],
+        "phone_name": "My Phone",
+        "uuid": "abc-123"
+      }
+
+    \b
+    Usage:
       tescmd vehicle calendar --file cal.json
+      tescmd vehicle calendar '{"calendars": [...]}'
       cat cal.json | tescmd vehicle calendar --file -
     """
     import sys
@@ -527,9 +546,10 @@ def calendar_cmd(
         raise click.UsageError(
             "No calendar data provided.\n\n"
             "Usage:\n"
-            "  tescmd vehicle calendar '{\"entries\": [...]}'\n"
             "  tescmd vehicle calendar --file cal.json\n"
-            "  cat cal.json | tescmd vehicle calendar --file -"
+            "  tescmd vehicle calendar '{\"calendars\": [...]}'\n"
+            "  cat cal.json | tescmd vehicle calendar --file -\n\n"
+            "Run --help for a full JSON example."
         )
 
     run_async(

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -203,24 +203,13 @@ async def _cmd_window(
     try:
 
         async def _execute_window() -> CommandResponse:
-            if vent:
-                cmd_str = "vent"
-                use_lat = lat if lat is not None else 0.0
-                use_lon = lon if lon is not None else 0.0
-            else:
-                cmd_str = "close"
-                if lat is not None and lon is not None:
-                    use_lat, use_lon = lat, lon
-                else:
-                    vdata = await vehicle_api.get_vehicle_data(
-                        vin, endpoints=["drive_state", "location_data"]
-                    )
-                    ds = vdata.drive_state
-                    if ds and ds.latitude is not None and ds.longitude is not None:
-                        use_lat, use_lon = ds.latitude, ds.longitude
-                    else:
-                        use_lat, use_lon = 0.0, 0.0
-            return await cmd_api.window_control(vin, command=cmd_str, lat=use_lat, lon=use_lon)
+            cmd_str = "vent" if vent else "close"
+            kwargs: dict[str, Any] = {"command": cmd_str}
+            if lat is not None:
+                kwargs["lat"] = lat
+            if lon is not None:
+                kwargs["lon"] = lon
+            return await cmd_api.window_control(vin, **kwargs)
 
         result = await auto_wake(
             formatter,

@@ -144,7 +144,17 @@ async def _cmd_features(app_ctx: AppContext) -> None:
     else:
         dumped = data.model_dump(exclude_none=True) if hasattr(data, "model_dump") else data
         if dumped:
+            from rich.table import Table
+
+            table = Table(title="Feature Flags")
+            table.add_column("Feature", style="bold")
+            table.add_column("Value")
             for key, val in sorted(dumped.items()):
-                formatter.rich.info(f"  {key}: {val}")
+                if isinstance(val, dict):
+                    parts = [f"{k}={v}" for k, v in val.items()]
+                    table.add_row(key, ", ".join(parts))
+                else:
+                    table.add_row(key, str(val))
+            formatter.rich._con.print(table)
         else:
             formatter.rich.info("[dim]No feature flags available.[/dim]")

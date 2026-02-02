@@ -491,7 +491,7 @@ class CommandAPI:
         return await self._command(vin, "actuate_trunk", {"which_trunk": which_trunk})
 
     async def window_control(
-        self, vin: str, *, command: str, lat: float, lon: float
+        self, vin: str, *, command: str, lat: float = 0.0, lon: float = 0.0
     ) -> CommandResponse:
         return await self._command(
             vin, "window_control", {"command": command, "lat": lat, "lon": lon}

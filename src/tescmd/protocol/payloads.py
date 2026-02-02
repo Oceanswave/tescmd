@@ -145,6 +145,7 @@ _VA_BOOMBOX = 64  # VehicleControlRemoteBoomboxAction
 _VA_BATCH_REMOVE_PRECONDITION = 107
 _VA_BATCH_REMOVE_CHARGE = 108
 _VA_SET_LOW_POWER_MODE = 130
+_VA_KEEP_ACCESSORY_POWER = 138
 
 
 # ---------------------------------------------------------------------------
@@ -427,17 +428,14 @@ def _bioweapon_mode(body: dict[str, Any]) -> bytes:
 
 
 def _window_control(body: dict[str, Any]) -> bytes:
-    """VehicleControlWindowAction — vent or close."""
-    command = body.get("command", "vent")
-    field = 2 if command == "close" else 1
-    inner = _encode_varint_field(field, 1)
-    # lat/lon may be required for window control
-    if "lat" in body and "lon" in body:
-        import struct
+    """VehicleControlWindowAction — vent (field 3) or close (field 4).
 
-        location = _encode_tag_raw(3, 5) + struct.pack("<f", float(body["lat"]))
-        location += _encode_tag_raw(4, 5) + struct.pack("<f", float(body["lon"]))
-        inner += location
+    Per Tesla's proto, field 1 is reserved (location removed) and the
+    action is a oneof of Void fields: vent=3, close=4.
+    """
+    command = body.get("command", "vent")
+    field = 4 if command == "close" else 3
+    inner = _encode_length_delimited(field, _VOID)
     return _wrap_vehicle_action(_VA_WINDOW_CONTROL, inner)
 
 
@@ -535,6 +533,13 @@ def _set_low_power_mode(body: dict[str, Any]) -> bytes:
     return _wrap_vehicle_action(_VA_SET_LOW_POWER_MODE, inner)
 
 
+def _keep_accessory_power_mode(body: dict[str, Any]) -> bytes:
+    """SetKeepAccessoryPowerModeAction: keep_accessory_power_mode (field 1, bool)."""
+    on = body.get("enable", True)
+    inner = _encode_varint_field(1, 1 if on else 0)
+    return _wrap_vehicle_action(_VA_KEEP_ACCESSORY_POWER, inner)
+
+
 # ---------------------------------------------------------------------------
 # Builder registry — maps REST command names to payload builder functions
 # ---------------------------------------------------------------------------
@@ -620,6 +625,7 @@ _BUILDERS: dict[str, _PayloadBuilder] = {
     "window_control": _window_control,
     # Power management
     "set_low_power_mode": _set_low_power_mode,
+    "keep_accessory_power_mode": _keep_accessory_power_mode,
 }
 
 
