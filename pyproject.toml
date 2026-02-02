@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tescmd"
-version = "0.3.1"
+version = "0.3.2"
 description = "A Python CLI for querying and controlling Tesla vehicles via the Fleet API"
 readme = "README.md"
 license = "MIT"
