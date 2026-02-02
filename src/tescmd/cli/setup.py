@@ -182,6 +182,11 @@ def _developer_portal_setup(
     info("[bold]Phase 2: Tesla Developer Portal Setup[/bold]")
     info("")
 
+    # Detect Tailscale hostname if domain was set to Tailscale in Phase 1
+    ts_hostname = ""
+    if settings.hosting_method == "tailscale" and settings.domain:
+        ts_hostname = settings.domain
+
     # Delegate to the existing interactive setup wizard, passing the domain
     # so the portal instructions show the correct Allowed Origin URL
     from tescmd.models.auth import DEFAULT_PORT
@@ -190,7 +195,9 @@ def _developer_portal_setup(
     redirect_uri = f"http://localhost:{port}/callback"
     from tescmd.cli.auth import _interactive_setup
 
-    return _interactive_setup(formatter, port, redirect_uri, domain=domain)
+    return _interactive_setup(
+        formatter, port, redirect_uri, domain=domain, tailscale_hostname=ts_hostname
+    )
 
 
 # ---------------------------------------------------------------------------

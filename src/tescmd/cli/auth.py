@@ -468,12 +468,17 @@ def _interactive_setup(
     redirect_uri: str,
     *,
     domain: str = "",
+    tailscale_hostname: str = "",
 ) -> tuple[str, str]:
     """Walk the user through first-time Tesla API credential setup.
 
     When *domain* is provided (e.g. from the setup wizard), the developer
     portal instructions show ``https://{domain}`` as the Allowed Origin URL.
     Tesla's Fleet API requires the origin to match the registration domain.
+
+    When *tailscale_hostname* is provided (or auto-detected), the user is
+    offered the chance to start a Tailscale Funnel so Tesla can verify the
+    origin URL when the portal app config is saved.
     """
     info = formatter.rich.info
     origin_url = f"https://{domain}" if domain else f"http://localhost:{port}"
@@ -520,6 +525,47 @@ def _interactive_setup(
     info("  Click Next.")
     info("")
 
+    # Detect Tailscale and offer to start Funnel for origin URL verification
+    ts_hostname = tailscale_hostname
+    ts_funnel_started = False
+    if not ts_hostname:
+        try:
+            from tescmd.deploy.tailscale_serve import is_tailscale_serve_ready
+
+            if run_async(is_tailscale_serve_ready()):
+                from tescmd.telemetry.tailscale import TailscaleManager
+
+                ts_hostname = run_async(TailscaleManager().get_hostname())
+        except Exception:
+            pass
+
+    if ts_hostname:
+        ts_origin = f"https://{ts_hostname}"
+        info("")
+        info(f"[green]Tailscale detected:[/green] {ts_hostname}")
+        info("")
+        info(f"  Adding [cyan]{ts_origin}[/cyan] as an Allowed Origin URL")
+        info("  will let [cyan]tescmd serve[/cyan] stream telemetry without")
+        info("  extra portal changes later.")
+        info("")
+        try:
+            answer = input("Start Tailscale Funnel so Tesla can verify the URL? [Y/n] ").strip()
+        except (EOFError, KeyboardInterrupt):
+            answer = "n"
+
+        if answer.lower() != "n":
+            info("Starting Tailscale Funnel...")
+            try:
+                from tescmd.telemetry.tailscale import TailscaleManager as _TsMgr
+
+                run_async(_TsMgr().enable_funnel())
+                ts_funnel_started = True
+                info(f"[green]Funnel active — {ts_origin} is reachable.[/green]")
+            except Exception as exc:
+                info(f"[yellow]Could not start Funnel: {exc}[/yellow]")
+                info("[dim]You can add the origin URL manually later.[/dim]")
+                ts_hostname = ""
+
     # Step 3 — Client Details
     info("[bold]Step 3 — Client Details[/bold]")
     info(
@@ -527,14 +573,17 @@ def _interactive_setup(
         " Machine-to-Machine[/cyan]  (the default)"
     )
     info(f"  Allowed Origin URL:  [cyan]{origin_url}[/cyan]")
+    if ts_hostname:
+        info(f"  [bold]Also add:[/bold]          [cyan]https://{ts_hostname}[/cyan]")
     info(f"  Allowed Redirect URI: [cyan]{redirect_uri}[/cyan]")
     info("  Allowed Returned URL: (leave empty)")
     info("")
-    info(
-        "  [dim]For telemetry streaming, add your Tailscale hostname"
-        " as an additional origin:[/dim]"
-    )
-    info("  [dim]  https://<machine>.tailnet.ts.net[/dim]")
+    if not ts_hostname:
+        info(
+            "  [dim]For telemetry streaming, add your Tailscale hostname"
+            " as an additional origin:[/dim]"
+        )
+        info("  [dim]  https://<machine>.tailnet.ts.net[/dim]")
     info("  Click Next.")
     info("")
 
@@ -594,6 +643,16 @@ def _interactive_setup(
     if save.strip().lower() != "n":
         _write_env_file(client_id, client_secret)
         info("[green]Credentials saved to .env[/green]")
+
+    # Clean up Tailscale Funnel if we started it during this session
+    if ts_funnel_started:
+        try:
+            from tescmd.telemetry.tailscale import TailscaleManager as _TsMgr
+
+            run_async(_TsMgr._run("tailscale", "funnel", "--bg", "off"))
+        except Exception as exc:
+            info(f"[yellow]Warning: Failed to stop Tailscale Funnel: {exc}[/yellow]")
+            info("[dim]You may need to run 'tailscale funnel --bg off' manually.[/dim]")
 
     info("")
     return (client_id, client_secret)

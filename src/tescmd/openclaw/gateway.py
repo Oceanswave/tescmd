@@ -137,7 +137,9 @@ def _ensure_device_key() -> Ed25519PrivateKey:
         encryption_algorithm=serialization.NoEncryption(),
     )
     key_path.write_bytes(pem)
-    key_path.chmod(0o600)
+    from tescmd._internal.permissions import secure_file
+
+    secure_file(key_path)
     logger.info("Generated OpenClaw device key: %s", key_path)
     return private_key
 

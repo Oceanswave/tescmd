@@ -1,12 +1,26 @@
+<p align="center">
+  <img src="images/tescmd_header.jpeg" alt="tescmd — Python CLI for Tesla Fleet API" width="100%">
+</p>
+
 # tescmd
 
-[![PyPI](https://img.shields.io/pypi/v/tescmd)](https://pypi.org/project/tescmd/)
-[![Python](https://img.shields.io/pypi/pyversions/tescmd)](https://pypi.org/project/tescmd/)
-[![Build](https://img.shields.io/github/actions/workflow/status/oceanswave/tescmd/test.yml?branch=main&label=build)](https://github.com/oceanswave/tescmd/actions/workflows/test.yml)
-[![License](https://img.shields.io/github/license/oceanswave/tescmd)](LICENSE)
-[![GitHub Release](https://img.shields.io/github/v/release/oceanswave/tescmd)](https://github.com/oceanswave/tescmd/releases)
+<p align="center">
+  <img src="images/tescmd_logo.jpeg" alt="tescmd logo" width="180">
+</p>
+
+<p align="center">
+  <a href="https://pypi.org/project/tescmd/"><img src="https://img.shields.io/pypi/v/tescmd" alt="PyPI"></a>
+  <a href="https://pypi.org/project/tescmd/"><img src="https://img.shields.io/pypi/pyversions/tescmd" alt="Python"></a>
+  <a href="https://github.com/oceanswave/tescmd/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/oceanswave/tescmd/test.yml?branch=main&label=build" alt="Build"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/oceanswave/tescmd" alt="License"></a>
+  <a href="https://github.com/oceanswave/tescmd/releases"><img src="https://img.shields.io/github/v/release/oceanswave/tescmd" alt="GitHub Release"></a>
+</p>
 
 A Python CLI for querying and controlling Tesla vehicles via the Fleet API — built for both human operators and AI agents.
+
+## What It Does
+
+tescmd gives you full command-line access to Tesla's Fleet API: check battery and charge status, lock or unlock doors, control climate, open trunks, send navigation waypoints, manage Powerwalls, stream live telemetry, and more. It handles OAuth2 authentication, token refresh, key enrollment, command signing, and response caching so you don't have to. Every command works in both interactive (Rich tables) and scripted (JSON) modes, and an MCP server lets AI agents call any command as a tool.
 
 ## Why tescmd?
 
@@ -64,13 +78,14 @@ Every read command is cached — repeat calls within the TTL window are instant 
 
 ## Prerequisites
 
-The following tools should be installed and authenticated before running `tescmd setup`:
-
-| Tool | Required | Purpose | Auth |
-|------|----------|---------|------|
-| **Git** | Yes | Version control, repo management | N/A |
-| **GitHub CLI** (`gh`) | Recommended | Auto-creates `*.github.io` domain for key hosting | `gh auth login` |
-| **Tailscale** | Recommended | Self-hosted key hosting + Fleet Telemetry streaming — no domain needed | `tailscale login` |
+| Requirement | Required | What it is | Why tescmd needs it |
+|---|---|---|---|
+| **Python 3.11+** | Yes | The programming language runtime that runs tescmd | tescmd is a Python package — you need Python installed to use it |
+| **pip** | Yes | Python's package installer (ships with Python) | Used to install tescmd and its dependencies via `pip install tescmd` |
+| **Tesla account** | Yes | A [tesla.com](https://www.tesla.com) account linked to a vehicle or energy product | tescmd authenticates via OAuth2 against your Tesla account to access the Fleet API |
+| **Git** | Yes | Version control tool ([git-scm.com](https://git-scm.com)) | Used during setup for key hosting via GitHub Pages |
+| **GitHub CLI** (`gh`) | Recommended | GitHub's command-line tool ([cli.github.com](https://cli.github.com)) — authenticate with `gh auth login` | Auto-creates a `*.github.io` site to host your public key at the `.well-known` path Tesla requires |
+| **Tailscale** | Recommended | Mesh VPN with public tunneling ([tailscale.com](https://tailscale.com)) — authenticate with `tailscale login` | Provides a public HTTPS URL for key hosting and Fleet Telemetry streaming with zero infrastructure setup |
 
 ### Self-Hosting with Tailscale (No Domain Required)
 
