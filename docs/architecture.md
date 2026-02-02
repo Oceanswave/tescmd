@@ -44,12 +44,17 @@ tescmd follows a layered architecture with strict separation of concerns. Each l
 │              OpenClaw Layer                       │
 │  openclaw/config.py ─ openclaw/filters.py        │
 │  openclaw/emitter.py ─ openclaw/gateway.py       │
-│  openclaw/bridge.py                              │
-│  (delta+throttle filter, event transform, WS)    │
+│  openclaw/dispatcher.py ─ openclaw/bridge.py     │
+│  openclaw/telemetry_store.py                     │
+│  (filter, emit, gateway, command dispatch, store) │
+├─────────────────────────────────────────────────┤
+│              Triggers Layer                       │
+│  triggers/models.py ─ triggers/manager.py        │
+│  (condition models, evaluation engine, cooldown)  │
 ├─────────────────────────────────────────────────┤
 │                 MCP Layer                        │
 │  mcp/server.py                                   │
-│  (FastMCP server, CliRunner-based tool invoke)   │
+│  (FastMCP server, CliRunner + custom tool invoke) │
 ├─────────────────────────────────────────────────┤
 │               Infrastructure                     │
 │  output/ ─ crypto/ ─ models/ ─ _internal/        │
@@ -179,7 +184,8 @@ CLI modules do **not** construct HTTP requests or handle auth tokens directly.
 - `mcp` — serve (stdio + streamable-http transports, OAuth 2.1, Tailscale Funnel)
 - `media` — play-pause, next/prev track, next/prev fav, volume
 - `nav` — send, gps, supercharger, homelink, waypoints
-- `openclaw` — bridge (filtered telemetry → OpenClaw Gateway)
+- `openclaw` — bridge (filtered telemetry → OpenClaw Gateway, bidirectional command dispatch)
+- `serve` — unified MCP + telemetry + OpenClaw TUI dashboard with trigger subscriptions
 - `partner` — public-key lookup, account endpoints
 - `raw` — get, post
 - `security` — status, lock, unlock, sentry, valet, remote-start, flash, honk, speed-limit, pin management
@@ -278,14 +284,21 @@ See [vehicle-command-protocol.md](vehicle-command-protocol.md) for the full prot
 - **`config.py`** (`BridgeConfig`, `FieldFilter`) — Pydantic models for bridge configuration with per-field delta threshold and throttle interval settings. Loadable from JSON files with CLI override merging.
 - **`filters.py`** (`DualGateFilter`) — Dual-gate emission filter: both delta threshold (value change) AND throttle interval (minimum time) must pass for a field to be emitted. Location fields use haversine distance; numeric fields use absolute difference; zero-granularity fields emit on any value change.
 - **`emitter.py`** (`EventEmitter`) — Transforms telemetry field data into OpenClaw `req:agent` event payloads. Maps telemetry fields to event types (location, battery, temperature, speed, charge state transitions, security changes).
-- **`gateway.py`** (`GatewayClient`) — WebSocket client implementing the OpenClaw operator protocol (challenge → connect → hello-ok handshake). Includes exponential backoff reconnection (1s base → 60s max with jitter).
-- **`bridge.py`** (`TelemetryBridge`) — Orchestrator wiring: `TelemetryServer.on_frame` → `DualGateFilter` → `EventEmitter` → `GatewayClient`. Supports dry-run mode (JSONL to stdout).
+- **`gateway.py`** (`GatewayClient`) — WebSocket client implementing the OpenClaw operator protocol (challenge → connect → hello-ok handshake) with Ed25519 device key signing. Includes exponential backoff reconnection (1s base → 60s max with up to 10% jitter per interval).
+- **`dispatcher.py`** (`CommandDispatcher`) — Bidirectional command dispatch over the gateway. Routes inbound `node.invoke.request` messages to read handlers (in-memory telemetry store), write handlers (Fleet API with tier + VCSEC guards), trigger handlers, and `system.run` meta-dispatch with API-style alias mapping.
+- **`telemetry_store.py`** (`TelemetryStore`) — In-memory latest-value cache for telemetry fields. Populated by `TelemetryBridge.on_frame()`, queried by dispatcher read handlers (e.g. `location.get`, `battery.get`).
+- **`bridge.py`** (`TelemetryBridge`, `build_openclaw_pipeline()`) — Orchestrator wiring: `TelemetryServer.on_frame` → telemetry store update → trigger evaluation → `DualGateFilter` → `EventEmitter` → `GatewayClient`. Factory function `build_openclaw_pipeline()` constructs the full pipeline. Supports dry-run mode (JSONL to stdout).
 
 **Dependency:** `websockets>=14.0` (core dependency, shared with telemetry layer).
 
+### `triggers/` — Trigger Subscription System
+
+- **`models.py`** (`TriggerOperator`, `TriggerCondition`, `TriggerDefinition`, `TriggerNotification`) — Pydantic v2 models for trigger conditions (9 operators: lt, gt, lte, gte, eq, neq, changed, enter, leave), definitions (one-shot vs persistent with cooldown), and notification payloads. Model validators enforce operator-specific value requirements (geofence needs lat/lon/radius dict, changed needs no value).
+- **`manager.py`** (`TriggerManager`) — Evaluation engine with field-indexed lookup, cooldown tracking, dual-channel notification delivery (pending deque for MCP polling + async callbacks for OpenClaw push), and one-shot auto-deletion. Geofence operators use haversine distance for boundary-crossing detection. Limits: 100 triggers, 500 pending notifications.
+
 ### `mcp/` — MCP Server
 
-- **`server.py`** (`MCPServer`, `_InMemoryOAuthProvider`, `_PermissiveClient`) — Registers all tescmd CLI commands as MCP tools using Click's `CliRunner` for invocation (with `env=os.environ.copy()` to propagate auth tokens). Guarantees behavioral parity with the CLI (caching, wake, auth all work). Read tools annotated with `readOnlyHint: true`; write tools with `readOnlyHint: false`. Supports stdio and streamable-http transports via FastMCP.
+- **`server.py`** (`MCPServer`, `_InMemoryOAuthProvider`, `_PermissiveClient`) — Registers all tescmd CLI commands as MCP tools using Click's `CliRunner` for invocation (with `env=os.environ.copy()` to propagate auth tokens). Guarantees behavioral parity with the CLI (caching, wake, auth all work). Read tools annotated with `readOnlyHint: true`; write tools with `readOnlyHint: false`. Supports stdio and streamable-http transports via FastMCP. Custom tool registry (`register_custom_tool()`) enables runtime-registered non-CLI tools (used by trigger system).
 
   **OAuth 2.1:** The HTTP transport implements the full MCP OAuth 2.1 specification via `_InMemoryOAuthProvider`. Clients authenticate through an authorization code flow with PKCE — the server auto-approves and returns tokens. `_PermissiveClient` wraps `OAuthClientInformationFull` to accept any redirect URI and scope, supporting clients that skip dynamic registration (e.g. Claude.ai). DNS rebinding protection via `TransportSecuritySettings` allows Tailscale Funnel hostnames alongside localhost.
 
@@ -358,9 +371,11 @@ Tesla Vehicle (Fleet Telemetry push)
         → TelemetryDecoder (protobuf → TelemetryFrame)
             → FrameFanout.on_frame()
                 ├→ CacheSink (warms ResponseCache from telemetry)
-                ├→ TelemetryDashboard (Rich Live TUI, TTY only)
+                ├→ TelemetryDashboard (Textual TUI, TTY only)
                 ├→ JSONL stdout sink (piped/JSON mode)
+                ├→ TriggerManager.evaluate() (when no OpenClaw)
                 └→ TelemetryBridge → OpenClaw Gateway (optional)
+                     └→ includes trigger evaluation internally
     ┊
     └→ MCP Server (HTTP or stdio, reads from warmed cache)
 ```

@@ -426,7 +426,18 @@ tescmd openclaw bridge --dry-run
 
 The MCP server exposes all tescmd commands as MCP tools for AI agents. See [mcp.md](mcp.md) for full documentation.
 
+**Recommended:** Use `tescmd serve` instead of `tescmd mcp serve`. The combined server includes telemetry-driven cache warming, so agent reads are free while telemetry is active:
+
 ```bash
+# Recommended: MCP + telemetry cache warming
+tescmd serve VIN
+
+# MCP-only (no telemetry, no VIN required)
+tescmd serve --no-telemetry
+
+# stdio transport for Claude Desktop / Claude Code config
+tescmd serve --transport stdio
+
+# Legacy: standalone MCP server
 tescmd mcp serve
-tescmd mcp serve --transport stdio  # for Claude Desktop / Claude Code config
 ```

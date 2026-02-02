@@ -327,6 +327,8 @@ Register conditions on telemetry fields. Available via MCP tools (`trigger_creat
 
 ### MCP trigger tools
 
+> **Param format:** Trigger tools use flat parameters — pass `field`, `operator`, `value` directly in `arguments`. This differs from CLI-based MCP tools which use `{vin, args}`.
+
 **`trigger_create`** — Create a trigger.
 
 ```json

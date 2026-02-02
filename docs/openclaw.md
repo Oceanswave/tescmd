@@ -151,7 +151,7 @@ The bridge connects to the OpenClaw Gateway using the **node protocol** with Ed2
     "maxProtocol": 3,
     "client": {
       "id": "node-host",
-      "version": "tescmd/0.6.0",
+      "version": "tescmd/0.3.0",
       "platform": "tescmd",
       "deviceFamily": "darwin",
       "modelIdentifier": "tescmd",
@@ -200,7 +200,7 @@ After the handshake, events are sent as `req:agent` messages:
 If the gateway connection drops, reconnection uses exponential backoff at two levels:
 
 **Gateway level** (receive loop reconnect — handles WebSocket close/error):
-- Base delay: 1 second, max: 60 seconds, factor: 2x, jitter: 10%
+- Base delay: 1 second, max: 60 seconds, factor: 2x, jitter: up to 10% of current interval
 
 **Bridge level** (on_frame reconnect — handles disconnection during event sends):
 - Base delay: 5 seconds, max: 120 seconds, factor: 2x

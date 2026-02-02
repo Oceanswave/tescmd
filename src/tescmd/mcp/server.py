@@ -107,7 +107,7 @@ _WRITE_TOOLS: dict[str, tuple[list[str], str]] = {
     "media_play_pause": (["media", "play-pause"], "Toggle media play/pause"),
     "media_next_track": (["media", "next-track"], "Skip to next track"),
     "media_prev_track": (["media", "prev-track"], "Go to previous track"),
-    "media_volume": (["media", "volume"], "Set media volume"),
+    "media_adjust_volume": (["media", "adjust-volume"], "Set media volume level"),
     "nav_send": (["nav", "send"], "Send a destination to the vehicle"),
     "nav_supercharger": (["nav", "supercharger"], "Navigate to nearest Supercharger"),
     "software_schedule": (["software", "schedule"], "Schedule software update"),

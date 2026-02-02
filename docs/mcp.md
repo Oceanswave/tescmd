@@ -163,7 +163,7 @@ This design guarantees behavioral parity -- there is no separate API client or c
 
 ## Available Tools
 
-### Read Tools (~30)
+### Read Tools (28)
 
 Read tools are annotated with `readOnlyHint: true`. They query vehicle and account state without side effects.
 
@@ -175,8 +175,13 @@ Read tools are annotated with `readOnlyHint: true`. They query vehicle and accou
 | `vehicle_location` | `vehicle location` | Get vehicle location |
 | `vehicle_alerts` | `vehicle alerts` | Get vehicle alerts |
 | `vehicle_nearby_chargers` | `vehicle nearby-chargers` | Find nearby chargers |
+| `vehicle_release_notes` | `vehicle release-notes` | Get software release notes |
+| `vehicle_service` | `vehicle service` | Get service status |
+| `vehicle_drivers` | `vehicle drivers` | List authorized drivers |
 | `vehicle_specs` | `vehicle specs` | Get vehicle specifications |
+| `vehicle_warranty` | `vehicle warranty` | Get warranty information |
 | `vehicle_fleet_status` | `vehicle fleet-status` | Get fleet telemetry status |
+| `vehicle_subscriptions` | `vehicle subscriptions` | List subscriptions |
 | `charge_status` | `charge status` | Get charge status |
 | `climate_status` | `climate status` | Get climate status |
 | `security_status` | `security status` | Get security/lock status |
@@ -184,34 +189,57 @@ Read tools are annotated with `readOnlyHint: true`. They query vehicle and accou
 | `energy_list` | `energy list` | List energy products (Powerwall) |
 | `energy_status` | `energy status` | Get energy site status |
 | `energy_live` | `energy live` | Get live power flow data |
+| `energy_history` | `energy history` | Get energy history |
 | `billing_history` | `billing history` | Get Supercharger billing history |
+| `billing_sessions` | `billing sessions` | Get charging sessions |
 | `user_me` | `user me` | Get account info |
+| `user_region` | `user region` | Get account region |
+| `user_orders` | `user orders` | Get vehicle orders |
+| `user_features` | `user features` | Get feature flags |
 | `cache_status` | `cache status` | Get cache status |
 | `auth_status` | `auth status` | Get auth/token status |
 
-### Write Tools (~40)
+### Write Tools (37)
 
 Write tools send commands to the vehicle. They are annotated with `readOnlyHint: false`.
 
 | Tool | Command | Description |
 |------|---------|-------------|
 | `vehicle_wake` | `vehicle wake` | Wake the vehicle |
+| `vehicle_rename` | `vehicle rename` | Rename the vehicle |
 | `charge_start` | `charge start` | Start charging |
 | `charge_stop` | `charge stop` | Stop charging |
 | `charge_limit` | `charge limit` | Set charge limit (percentage) |
+| `charge_limit_max` | `charge limit-max` | Set charge limit to maximum |
+| `charge_limit_std` | `charge limit-std` | Set charge limit to standard |
+| `charge_amps` | `charge amps` | Set charge amperage |
+| `charge_port_open` | `charge port-open` | Open charge port |
+| `charge_port_close` | `charge port-close` | Close charge port |
 | `climate_on` | `climate on` | Turn on climate control |
 | `climate_off` | `climate off` | Turn off climate control |
 | `climate_set` | `climate set` | Set climate temperature |
+| `climate_precondition` | `climate precondition` | Precondition cabin |
+| `climate_seat` | `climate seat` | Set seat heater level |
+| `climate_wheel_heater` | `climate wheel-heater` | Toggle steering wheel heater |
+| `climate_bioweapon` | `climate bioweapon` | Toggle bioweapon defense mode |
 | `security_lock` | `security lock` | Lock the vehicle |
 | `security_unlock` | `security unlock` | Unlock the vehicle |
 | `security_sentry` | `security sentry` | Toggle sentry mode |
 | `security_flash` | `security flash` | Flash the lights |
 | `security_honk` | `security honk` | Honk the horn |
+| `security_remote_start` | `security remote-start` | Enable remote start |
 | `trunk_open` | `trunk open` | Open the trunk |
+| `trunk_close` | `trunk close` | Close the trunk |
 | `trunk_frunk` | `trunk frunk` | Open the frunk |
-| `nav_send` | `nav send` | Send destination to vehicle |
+| `trunk_window` | `trunk window` | Vent or close windows |
 | `media_play_pause` | `media play-pause` | Toggle media play/pause |
+| `media_next_track` | `media next-track` | Skip to next track |
+| `media_prev_track` | `media prev-track` | Go to previous track |
+| `media_adjust_volume` | `media adjust-volume` | Set media volume level |
+| `nav_send` | `nav send` | Send destination to vehicle |
+| `nav_supercharger` | `nav supercharger` | Navigate to nearest Supercharger |
 | `software_schedule` | `software schedule` | Schedule software update |
+| `software_cancel` | `software cancel` | Cancel pending software update |
 | `cache_clear` | `cache clear` | Clear response cache |
 
 ### Trigger Tools (telemetry mode only)
@@ -235,10 +263,15 @@ See [openclaw.md](openclaw.md#trigger-subscription-system) for full trigger docu
 {
   "name": "trigger_create",
   "arguments": {
-    "params": "{\"field\": \"BatteryLevel\", \"operator\": \"lt\", \"value\": 20, \"once\": true}"
+    "field": "BatteryLevel",
+    "operator": "lt",
+    "value": 20,
+    "once": true
   }
 }
 ```
+
+> **Note:** Trigger tools use flat parameters (not the `vin`/`args` format of CLI-based tools). Each parameter is a top-level key in `arguments`.
 
 **Example: Poll for notifications**
 
