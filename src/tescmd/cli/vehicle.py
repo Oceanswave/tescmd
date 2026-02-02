@@ -535,7 +535,7 @@ def calendar_cmd(
     import sys
 
     if calendar_file is not None:
-        data = calendar_file.read()  # type: ignore[union-attr]
+        data = calendar_file.read()
     elif calendar_data is not None:
         data = calendar_data
     elif not sys.stdin.isatty():

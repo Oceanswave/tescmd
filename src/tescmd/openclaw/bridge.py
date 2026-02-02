@@ -179,9 +179,9 @@ class TelemetryBridge:
         if not self._first_frame_received:
             self._first_frame_received = True
             if not self._dry_run and self._gateway.is_connected:
-                event = self._build_lifecycle_event("node.connected")
+                lifecycle_event = self._build_lifecycle_event("node.connected")
                 try:
-                    await self._gateway.send_event(event)
+                    await self._gateway.send_event(lifecycle_event)
                     logger.info("Sent node.connected event")
                 except Exception:
                     logger.warning("Failed to send connected event", exc_info=True)

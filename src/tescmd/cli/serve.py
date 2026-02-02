@@ -663,7 +663,7 @@ def _register_trigger_tools(mcp_server: Any, trigger_manager: Any) -> None:
             cooldown_seconds=params.get("cooldown_seconds", 60.0),
         )
         created = trigger_manager.create(trigger)
-        return created.model_dump(mode="json")
+        return dict(created.model_dump(mode="json"))
 
     def _handle_delete(params: dict[str, Any]) -> dict[str, Any]:
         trigger_id = params.get("id")

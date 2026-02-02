@@ -458,7 +458,7 @@ class RichOutput:
             "speed",
             "power",
         }
-        for key, value in sorted(ds.model_extra.items()):
+        for key, value in sorted((ds.model_extra or {}).items()):
             if key not in _known and value is not None:
                 label = key.replace("_", " ").title()
                 table.add_row(label, str(value))

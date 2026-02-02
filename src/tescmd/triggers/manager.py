@@ -138,7 +138,7 @@ class TriggerManager:
             notification = TriggerNotification(
                 trigger_id=tid,
                 field=field,
-                operator=trigger.condition.operator.value,
+                operator=trigger.condition.operator,
                 threshold=trigger.condition.value,
                 value=value,
                 previous_value=previous_value,
@@ -174,13 +174,13 @@ def _matches(condition: TriggerCondition, value: Any, previous_value: Any) -> bo
     op = condition.operator
 
     if op == TriggerOperator.CHANGED:
-        return value != previous_value
+        return bool(value != previous_value)
 
     if op == TriggerOperator.EQ:
-        return value == condition.value
+        return bool(value == condition.value)
 
     if op == TriggerOperator.NEQ:
-        return value != condition.value
+        return bool(value != condition.value)
 
     if op in (TriggerOperator.ENTER, TriggerOperator.LEAVE):
         return _matches_geofence(condition, value, previous_value)
