@@ -103,7 +103,7 @@ class SignedCommandAPI:
 
         # Metadata + HMAC
         counter = session.next_counter()
-        expires_at = default_expiry(clock_offset=session.clock_offset)
+        expires_at = default_expiry(time_zero=session.time_zero)
         metadata_bytes = encode_metadata(
             epoch=session.epoch,
             expires_at=expires_at,
@@ -115,17 +115,16 @@ class SignedCommandAPI:
             session.signing_key,
             metadata_bytes,
             payload,
-            domain=domain,
         )
 
         logger.debug(
             "Signed command '%s' for %s: counter=%d, expires_at=%d "
-            "(clock_offset=%d), payload=%s, metadata=%s, hmac_tag=%s",
+            "(time_zero=%.1f), payload=%s, metadata=%s, hmac_tag=%s",
             command,
             vin,
             counter,
             expires_at,
-            session.clock_offset,
+            session.time_zero,
             payload.hex(),
             metadata_bytes.hex(),
             hmac_tag.hex(),
@@ -168,15 +167,18 @@ class SignedCommandAPI:
             # etc.) propagate so callers like auto_wake() can handle them.
             raise
 
-        result = self._parse_signed_response(data, vin, command)
+        result, fault = self._parse_signed_response(data, vin, command, domain)
         if result is not None:
             return result
 
         # Stale session — _parse_signed_response already invalidated the cache.
         # Retry once with a fresh handshake.
         if _retried:
+            fault_name = fault.name if fault else "unknown"
+            desc = FAULT_DESCRIPTIONS.get(fault, fault_name) if fault else fault_name
             raise SessionError(
-                f"Signed command '{command}' failed for {vin} after session refresh"
+                f"Signed command '{command}' failed for {vin} after session refresh "
+                f"(vehicle fault: {desc})"
             )
         logger.debug(
             "Stale session for %s (%s), retrying with fresh handshake",
@@ -194,15 +196,16 @@ class SignedCommandAPI:
         data: dict[str, Any],
         vin: str,
         command: str,
-    ) -> CommandResponse | None:
+        domain: Domain,
+    ) -> tuple[CommandResponse | None, MessageFault | None]:
         """Parse a signed_command endpoint response.
 
         The endpoint returns ``{"response": "<base64-encoded RoutableMessage>"}``.
         Decodes the protobuf, checks for vehicle-side fault codes, and returns
-        a ``CommandResponse`` on success.
+        ``(CommandResponse, None)`` on success.
 
-        Returns ``None`` if the fault indicates a stale session — the caller
-        should invalidate the session and retry with a fresh handshake.
+        Returns ``(None, fault)`` if the fault indicates a stale session — the
+        caller should invalidate the session and retry with a fresh handshake.
         """
         response_b64: str = data.get("response", "")
         if not response_b64:
@@ -237,19 +240,21 @@ class SignedCommandAPI:
 
             # Stale session — invalidate and signal caller to retry.
             if fault in _STALE_SESSION_FAULTS:
-                self._session_mgr.invalidate(vin)
+                self._session_mgr.invalidate(vin, domain)
                 logger.debug(
                     "Stale session fault %s for %s, invalidated cache",
                     fault.name,
                     vin,
                 )
-                return None
+                return None, fault
 
             # All other faults — raise with descriptive message.
-            raise SessionError(f"Vehicle rejected command '{command}' for {vin}: {desc}")
+            raise SessionError(
+                f"Vehicle rejected command '{command}' for {vin}: {desc} (fault: {fault.name})"
+            )
 
         logger.debug("Signed command '%s' succeeded for %s", command, vin)
-        return CommandResponse(response=CommandResult(result=True))
+        return CommandResponse(response=CommandResult(result=True)), None
 
     # ------------------------------------------------------------------
     # Named method delegation

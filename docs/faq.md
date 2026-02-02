@@ -18,6 +18,10 @@ No. The public key is a *public* key by design -- it's meant to be freely distri
 
 Yes. GitHub Pages is the recommended hosting method because it's always-on and free, but you can also use Tailscale Funnel or host the key on your own domain. Run `tescmd setup` and it will detect available methods.
 
+### What's the easiest way to get started?
+
+Run `tescmd setup`. The interactive wizard handles everything from zero to a working CLI: creating a Tesla Developer app, generating an EC key pair, hosting the public key (via GitHub Pages or Tailscale Funnel), registering with the Fleet API, authenticating via OAuth2, and enrolling your key on a vehicle. Each step checks prerequisites and offers remediation if something is missing. The wizard is safe to re-run — it skips completed steps and lets you upgrade from read-only to full control.
+
 ### What Python version do I need?
 
 Python 3.11 or newer. tescmd uses `tomllib`, `StrEnum`, and modern typing features that require 3.11+.
@@ -32,7 +36,7 @@ Tesla charges for every API call that returns a status code below 500, including
 
 Tesla's Fleet API is pay-per-use with no free tier. Pricing varies by endpoint category. Wake requests are the most expensive, followed by vehicle commands, then data queries. See [Tesla Fleet API Billing and Limits](https://developer.tesla.com/docs/fleet-api/billing-and-limits) for current pricing.
 
-tescmd reduces costs through universal response caching, smart wake state tracking, and wake confirmation prompts. A typical check that would cost 4+ API calls without caching costs 1 call (or 0 on cache hit) with tescmd.
+tescmd reduces costs through universal response caching, smart wake state tracking, and wake confirmation prompts. A typical battery check that would cost 4+ API calls without protections costs 2 calls with tescmd's interactive prompt (the initial 408 is unavoidable, plus the successful retry after waking via the Tesla app for free). Subsequent checks within the cache TTL cost 0 calls. See [docs/api-costs.md](api-costs.md) for detailed cost breakdowns.
 
 ## Vehicles
 
@@ -74,7 +78,23 @@ Write commands are never cached but automatically invalidate the relevant cache 
 
 ### Can AI agents use tescmd?
 
-Yes. tescmd is designed for agent use. Piped/non-TTY mode emits structured JSON, exit codes are meaningful, and the `--wake` flag controls billing. The cache means agents can query as often as needed without cost concerns. See [docs/bot-integration.md](bot-integration.md) for the full JSON schema and headless auth setup.
+Yes. tescmd is designed for agent use in two ways:
+
+1. **Direct CLI invocation** — agents call `tescmd` commands with `--format json` and parse the structured JSON output. Piped/non-TTY mode automatically emits JSON. Exit codes are meaningful, and the `--wake` flag controls billing. See [docs/bot-integration.md](bot-integration.md) for the full JSON schema and headless auth setup.
+
+2. **MCP server** — `tescmd mcp serve` exposes all commands as MCP tools. Claude.ai, Claude Desktop, Claude Code, and other MCP-compatible agents connect directly and call tools without parsing CLI output. The HTTP transport supports OAuth 2.1 (auto-approved), and stdio transport works as a subprocess. See [docs/mcp.md](mcp.md) for setup instructions.
+
+In both modes, the cache means agents can query as often as needed without cost concerns.
+
+### What is the MCP server and how do I use it?
+
+The MCP (Model Context Protocol) server lets AI agents interact with your Tesla through standardized tools instead of invoking CLI commands. Start it with `tescmd mcp serve`. The server exposes ~70 tools (read + write) that mirror every CLI command, with structured JSON responses.
+
+For Claude Desktop or Claude Code, add tescmd to your MCP server config using stdio transport. For Claude.ai or remote agents, use the HTTP transport (optionally exposed via Tailscale Funnel). The server handles OAuth 2.1 authentication automatically. See [docs/mcp.md](mcp.md) for full configuration examples.
+
+### What is the OpenClaw bridge?
+
+The OpenClaw bridge (`tescmd openclaw bridge`) streams filtered vehicle telemetry to an [OpenClaw](https://openclaw.ai/) Gateway for real-time agent consumption. Unlike raw telemetry streaming, the bridge applies dual-gate filtering — each field must exceed both a delta threshold (value change) AND a throttle interval (minimum time between emissions) — to reduce noise and control event volume. This means agents receive only meaningful state changes rather than a firehose of raw data. See [docs/openclaw.md](openclaw.md) for configuration details.
 
 ## Hosting & Deployment
 

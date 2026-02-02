@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
+import sys
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -30,11 +32,14 @@ from tescmd.models.vehicle import VehicleData
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from pydantic import BaseModel
     from rich.status import Status
 
     from tescmd.api.signed_command import SignedCommandAPI
     from tescmd.cli.main import AppContext
     from tescmd.output.formatter import OutputFormatter
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -52,20 +57,32 @@ _WAKE_BACKOFF_FACTOR = 1.5
 def _make_token_refresher(
     store: TokenStore, settings: AppSettings
 ) -> Callable[[], Awaitable[str | None]] | None:
-    """Return an async callback that refreshes the access token, or *None*."""
+    """Return an async callback that refreshes the access token, or *None*.
+
+    When the refresh token is expired/revoked (``login_required``),
+    prompts the user to re-authenticate via the browser on TTY.
+    In non-TTY mode, raises with guidance to run ``tescmd auth login``.
+    """
     refresh_token = store.refresh_token
     client_id = settings.client_id
     if not refresh_token or not client_id:
         return None
 
     async def _refresh() -> str | None:
+        from tescmd.api.errors import AuthError
         from tescmd.auth.oauth import refresh_access_token
 
-        token_data = await refresh_access_token(
-            refresh_token=refresh_token,
-            client_id=client_id,
-            client_secret=settings.client_secret,
-        )
+        try:
+            token_data = await refresh_access_token(
+                refresh_token=refresh_token,
+                client_id=client_id,
+                client_secret=settings.client_secret,
+            )
+        except AuthError as exc:
+            if "login_required" in str(exc):
+                return await reauth_on_expired_refresh(store, settings)
+            raise
+
         meta = store.metadata or {}
         store.save(
             access_token=token_data.access_token,
@@ -77,6 +94,66 @@ def _make_token_refresher(
         return token_data.access_token
 
     return _refresh
+
+
+async def reauth_on_expired_refresh(store: TokenStore, settings: AppSettings) -> str:
+    """Handle an expired/revoked refresh token by prompting for re-auth.
+
+    On TTY: asks the user to re-authenticate via the browser.
+    Non-TTY: raises with guidance to run ``tescmd auth login``.
+
+    Returns the new access token on success.
+    """
+    from tescmd.api.errors import AuthError
+    from tescmd.models.auth import DEFAULT_SCOPES
+
+    client_id = settings.client_id
+    if not client_id:
+        raise AuthError(
+            "Refresh token expired and TESLA_CLIENT_ID is not set. "
+            "Run 'tescmd auth login' to re-authenticate.",
+            status_code=401,
+        )
+
+    if not sys.stdin.isatty():
+        raise AuthError(
+            "Refresh token is invalid or expired. Run 'tescmd auth login' to re-authenticate.",
+            status_code=401,
+        )
+
+    click.echo("")
+    click.echo("Your refresh token has expired or been revoked.")
+    if not click.confirm("Re-authenticate via browser?", default=True):
+        raise AuthError(
+            "Re-authentication cancelled. Run 'tescmd auth login' to authenticate manually.",
+            status_code=401,
+        )
+
+    from tescmd.auth.oauth import login_flow
+
+    meta = store.metadata or {}
+    region = meta.get("region", "na")
+    scopes = meta.get("scopes", DEFAULT_SCOPES)
+    from tescmd.models.auth import DEFAULT_PORT
+
+    port = DEFAULT_PORT
+
+    click.echo("")
+    click.echo("Opening your browser to sign in to Tesla...")
+    click.echo("When prompted, click 'Select All' and then 'Allow'.")
+
+    token_data = await login_flow(
+        client_id=client_id,
+        client_secret=settings.client_secret,
+        redirect_uri=f"http://localhost:{port}/callback",
+        scopes=scopes,
+        port=port,
+        token_store=store,
+        region=region,
+    )
+
+    click.echo("Re-authenticated successfully.")
+    return token_data.access_token
 
 
 def _make_rate_limit_handler(
@@ -278,15 +355,17 @@ async def cached_api_call(
     fetch: Callable[[], Awaitable[Any]],
     ttl: int | None = None,
     params: dict[str, str] | None = None,
+    model_class: type[BaseModel] | None = None,
 ) -> Any:
     """Fetch API data with transparent caching.
 
     1. Compute cache key via :func:`generic_cache_key`.
-    2. On hit → emit cache metadata, return cached dict.
-    3. On miss → call *fetch()*, serialise, store, return result.
+    2. On hit → reconstruct via *model_class* (if given), else return dict.
+    3. On miss → call *fetch()*, serialise to dict for cache, return original.
 
-    The caller's ``formatter.output()`` handles both Pydantic models (miss)
-    and plain dicts (hit).
+    When *model_class* is provided, cache hits are reconstructed with
+    ``model_class.model_validate(cached_dict)`` so callers always receive
+    Pydantic models regardless of hit/miss.
     """
     formatter = app_ctx.formatter
     cache = get_cache(app_ctx)
@@ -306,7 +385,7 @@ async def cached_api_call(
                 f" (TTL {cached.ttl_seconds}s)."
                 f" Use --fresh for live data.[/dim]"
             )
-        return cached.data
+        return _reconstruct(cached.data, model_class)
 
     result = await fetch()
 
@@ -323,6 +402,37 @@ async def cached_api_call(
 
     cache.put_generic(key, data, ttl)
     return result
+
+
+def _reconstruct(data: Any, model_class: type[BaseModel] | None) -> Any:
+    """Rebuild a Pydantic model from cached dict data.
+
+    * *model_class* provided + dict → ``model_class.model_validate(data)``
+    * *model_class* provided + list → validate each element
+    * *model_class* provided + ``{"_value": x}`` wrapper → unwrap scalar
+    * *model_class* is ``None`` → return raw cached data (dict / list)
+
+    If validation fails (e.g. cache corruption, schema change after upgrade),
+    falls back to returning the raw cached data with a warning log.
+    """
+    if model_class is None:
+        return data
+    if isinstance(data, dict) and "_value" in data and len(data) == 1:
+        return data["_value"]
+    try:
+        if isinstance(data, list):
+            return [
+                model_class.model_validate(item) if isinstance(item, dict) else item
+                for item in data
+            ]
+        if isinstance(data, dict):
+            return model_class.model_validate(data)
+    except Exception:
+        logger.warning(
+            "Cache reconstruction failed for %s — returning raw dict",
+            model_class.__name__,
+        )
+    return data
 
 
 async def cached_vehicle_data(
@@ -424,6 +534,23 @@ def _check_signing_requirement(
         )
 
 
+def check_command_guards(
+    cmd_api: CommandAPI | SignedCommandAPI,
+    method_name: str,
+) -> None:
+    """Enforce tier + VCSEC signing guards before executing a write command.
+
+    Raises :class:`TierError`, :class:`ConfigError`, or
+    :class:`KeyNotEnrolledError` on violation.
+
+    Called by both CLI :func:`execute_command` and the OpenClaw dispatcher.
+    """
+    settings = AppSettings()
+    if settings.setup_tier == "readonly":
+        raise TierError("This command requires 'full' tier setup. Run 'tescmd setup' to upgrade.")
+    _check_signing_requirement(cmd_api, method_name, settings)
+
+
 async def execute_command(
     app_ctx: AppContext,
     vin_positional: str | None,
@@ -438,17 +565,12 @@ async def execute_command(
     Resolves the VIN, obtains a :class:`CommandAPI`, calls *method_name* with
     ``auto_wake``, invalidates the cache, and outputs the result.
     """
-    # Tier enforcement — readonly tier cannot execute write commands
-    settings = AppSettings()
-    if settings.setup_tier == "readonly":
-        raise TierError("This command requires 'full' tier setup. Run 'tescmd setup' to upgrade.")
-
     formatter = app_ctx.formatter
     vin = require_vin(vin_positional, app_ctx.vin)
     client, vehicle_api, cmd_api = get_command_api(app_ctx)
 
-    # Guard: VCSEC commands require signed channel — don't silently fall back
-    _check_signing_requirement(cmd_api, method_name, settings)
+    # Guard: tier + VCSEC signing — fail fast before waking the vehicle
+    check_command_guards(cmd_api, method_name)
 
     try:
         method = getattr(cmd_api, method_name)
@@ -513,7 +635,7 @@ async def auto_wake(
 
     # Vehicle is asleep — decide whether to wake.
     if not auto:
-        if formatter.format not in ("json",):
+        if formatter.format not in ("json",) and sys.stdin.isatty():
             # Interactive TTY prompt with retry loop
             while True:
                 formatter.rich.info("")
@@ -552,7 +674,7 @@ async def auto_wake(
             )
 
     # Proceed with wake.
-    if formatter.format not in ("json",):
+    if formatter.format not in ("json",) and sys.stdin.isatty():
         with formatter.console.status("", spinner="dots") as status:
             await _wake_and_wait(vehicle_api, vin, timeout, status=status)
         formatter.rich.info("[green]Vehicle is awake.[/green]")

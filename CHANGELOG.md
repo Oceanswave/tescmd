@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-02-02
+
+### Added
+
+- **README overhaul** — header banner, logo, new "What It Does" summary section, expanded Prerequisites table with Python 3.11+, pip, Tesla account, and helpful links
+- **Tailscale Funnel auto-detection in auth setup** — `_interactive_setup` now detects Tailscale and offers to start Funnel so Tesla can verify the origin URL during Developer Portal configuration; cleans up Funnel on exit
+- **Tailscale hostname passthrough** — setup wizard forwards detected Tailscale hostname to auth flow, showing a concrete "Also add" origin URL instead of the generic placeholder
+- **Comprehensive agent skill documentation** — expanded skill covering all command groups, triggers, and OpenClaw dispatch
+
+### Fixed
+
+- **Cross-platform file permissions** — OpenClaw gateway key file now uses `secure_file()` from `_internal.permissions` instead of raw `chmod(0o600)`, adding proper Windows support via `icacls`
+- **12-factor app compliance** — config, disposability, and concurrency improvements across the codebase
+- **Documentation accuracy** — corrected `media_adjust_volume` tool name in MCP docs; emphasized MCP/OpenClaw over direct CLI for cost savings in agent skill
+
+## [0.3.0] - 2026-02-01
+
+### Added
+
+- **Unified `tescmd serve`** — single command combining MCP server, Fleet Telemetry streaming, cache warming, and optional OpenClaw bridge; full-screen TUI dashboard shows live telemetry, MCP status, tunnel URL, sink count, and connection health
+- **TUI dashboard** — 8-panel Textual layout with telemetry field table, server info sidebar, activity log, request log, and filter status; command palette (`ctrl+p`), keybindings (`q` to quit, `f` to toggle filters), clean graceful shutdown
+- **OpenClaw Bridge** — `tescmd openclaw bridge [VIN]` streams Fleet Telemetry to an OpenClaw Gateway with configurable delta+throttle filtering per field; supports `--dry-run` for JSONL output without a gateway connection
+- **OpenClaw node role** — bidirectional command dispatch over the gateway WebSocket; bots send commands via the gateway that are forwarded as `node.invoke.request` events, routed through `CommandDispatcher` with read/write separation, tier enforcement, and VCSEC signing guards
+- **Trigger subscription system** — `trigger.create`, `trigger.delete`, `trigger.list`, `trigger.poll` commands let bots register conditions on any telemetry field; supports operators `lt`, `gt`, `lte`, `gte`, `eq`, `neq`, `changed`, `enter`, `leave`; one-shot and persistent modes with configurable cooldown; max 100 triggers, 500 pending notifications
+- **Geofence triggers** — `enter`/`leave` operators on Location field detect boundary crossings using haversine distance; fires only on actual crossing (not "already inside"), requires previous position for comparison
+- **Trigger convenience aliases** — `cabin_temp.trigger`, `outside_temp.trigger`, `battery.trigger`, `location.trigger` pre-fill the field name so bots don't need to know raw telemetry field names
+- **Trigger notification delivery** — dual-channel: OpenClaw push events (`trigger.fired`) for connected bots, and MCP polling via `trigger_poll` tool for agent frameworks
+- **`system.run` meta-dispatch** — allows bots to invoke any registered handler by name with alias mapping (e.g., `door_lock` → `door.lock`, `auto_conditioning_start` → `climate.on`); guards against recursive self-dispatch
+- **MCP Server** — `tescmd mcp serve` exposes all tescmd commands as MCP tools for Claude Desktop/Code and other agent frameworks; supports stdio and streamable-http transports with OAuth 2.1 authentication
+- **MCP custom tool registry** — `MCPServer.register_custom_tool()` allows runtime registration of non-CLI tools (used by trigger system); custom tools appear alongside CLI-backed tools with proper schemas
+- **Agent skill** — `skills/tescmd/SKILL.md` teaches AI agents how to use every tescmd command group with examples, parameter types, and common patterns
+- **Reusable telemetry session** — extracted shared telemetry lifecycle (server → tunnel → partner registration → fleet config → cleanup) into `telemetry/setup.py` for use by serve, stream, and bridge commands
+- **Dual-gate telemetry filter** — `openclaw/filters.py` combines delta threshold (value change) and throttle interval (minimum time between emissions) to reduce noise in telemetry streams; includes haversine distance for location fields
+- **OpenClaw event emitter** — maps telemetry fields to OpenClaw `req:agent` event payloads (location, battery, temperature, speed, charge state transitions, security changes)
+- **Gateway WebSocket client** — implements the OpenClaw operator protocol (challenge → connect → hello-ok handshake) with Ed25519 device key signing and exponential backoff reconnection
+- **Bridge configuration** — `BridgeConfig` pydantic model with per-field filter settings, loadable from JSON file or CLI flags
+- **CSV telemetry logging** — wide-format CSV log with one row per frame and one column per subscribed field; written to `~/.config/tescmd/logs/` by default, disable with `--no-log`
+- **Cache sink** — telemetry-driven cache warming keeps read-command cache fresh while telemetry is active, making agent reads free
+- **Frame fanout** — `FrameFanout` distributes decoded telemetry frames to multiple sinks (dashboard, CSV, cache, OpenClaw bridge, triggers) in parallel
+- **Telemetry field mapper** — `telemetry/mapper.py` maps protobuf field names to tescmd model field names with unit conversion
+- **Command guards in dispatcher** — extracted `check_command_guards()` (tier check + VCSEC signing requirement) into a shared function called by both CLI and OpenClaw dispatcher paths
+- **Standard dependencies** — `websockets>=14.0`, `mcp>=1.0`, and `textual>=1.0` now included in default install
+
+### Changed
+
+- Refactored `_cmd_telemetry_stream` in `cli/vehicle.py` to use the shared `telemetry_session()` context manager (no behavioral change)
+- Proto-aligned telemetry field definitions with proper `interval_seconds` for delta fields
+- Separated JSON serialization errors from WebSocket connection errors in gateway send path for clearer diagnostics
+- Raised trigger push notification and lifecycle event failures from debug to warning level for observability
+
+### Fixed
+
+- Fixed prompt for re-authentication when refresh token is expired or revoked (was failing silently)
+- Fixed delta fields requiring `interval_seconds` configuration
+- Fixed log file paths not shown on quit
+- Added `exc_info` to MCP custom tool error logging for full stack traces
+- Added JSON parse guards and explicit parameter validation in MCP tool wrappers
+- Added `system.run` recursive self-dispatch guard
+
 ## [0.2.0] - 2026-01-31
 
 ### Added
@@ -18,7 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tailscale Funnel integration** — automatic Funnel start/stop with cert retrieval for Fleet Telemetry HTTPS requirement
 - **JSONL output** — piped mode emits one JSON line per telemetry frame for scripting and log ingestion
 - **TunnelError hierarchy** — `TunnelError` parent with `TailscaleError` subtype; actionable install/setup guidance
-- **Optional dependency group** — `pip install tescmd[telemetry]` adds `websockets>=14.0`
+- **websockets dependency** — `websockets>=14.0` now included in default install
 - **Tailscale key hosting** — `tescmd key deploy --method tailscale` hosts the public key via Tailscale Funnel at `https://<machine>.tailnet.ts.net/.well-known/appspecific/com.tesla.3p.public-key.pem`; auto-detected as second priority after GitHub Pages
 - **Key hosting priority chain** — setup wizard and `key deploy` auto-detect the best hosting method: GitHub Pages → Tailscale Funnel → manual; `--method` flag overrides auto-detection
 - **`TESLA_HOSTING_METHOD` setting** — persists the chosen key hosting method (`github`, `tailscale`) across sessions

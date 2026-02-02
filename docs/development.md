@@ -23,9 +23,10 @@ pip install -e ".[dev]"
 ```
 
 The `[dev]` extra installs:
-- `pytest`, `pytest-asyncio`, `pytest-httpx` — testing
+- `pytest`, `pytest-asyncio`, `pytest-httpx`, `pytest-xdist`, `pytest-cov` — testing (parallel + coverage)
 - `ruff` — linting and formatting
-- `mypy` — static type checking
+- `mypy`, `mypy-protobuf` — static type checking
+- `grpcio-tools` — protobuf compilation
 - `build` — package building
 
 ## Project Layout
@@ -41,10 +42,13 @@ tescmd/
 │   ├── protocol/        # Vehicle Command Protocol (ECDH, signing, protobuf)
 │   ├── output/          # Rich + JSON formatters, display units
 │   ├── cache/           # Response caching (file-based JSON with TTL)
-│   ├── deploy/          # Key deployment (GitHub Pages)
+│   ├── telemetry/       # Fleet Telemetry streaming (WebSocket server, decoder, dashboard)
+│   ├── openclaw/        # OpenClaw bridge (filters, emitter, gateway client)
+│   ├── mcp/             # MCP server (FastMCP, OAuth 2.1, CliRunner-based tool invoke)
+│   ├── deploy/          # Key deployment (GitHub Pages, Tailscale Funnel)
 │   ├── config/          # Configuration (stub)
 │   ├── ble/             # BLE key enrollment (stub)
-│   └── _internal/       # Shared utilities
+│   └── _internal/       # Shared utilities (VIN resolution, async helpers, permissions)
 ├── tests/               # Test files (mirrors src/ structure)
 │   ├── cli/
 │   ├── api/
@@ -55,8 +59,11 @@ tescmd/
 │   ├── cache/
 │   ├── deploy/
 │   ├── protocol/        # Vehicle Command Protocol tests
+│   ├── telemetry/       # Telemetry server, decoder, dashboard tests
+│   ├── openclaw/        # OpenClaw bridge, filter, emitter tests
+│   ├── mcp/             # MCP server tool listing and invocation tests
+│   ├── _internal/       # VIN resolution, permissions tests
 │   └── conftest.py      # Shared fixtures
-├── scripts/             # Developer scripts
 ├── docs/                # Documentation
 ├── pyproject.toml       # Build config, deps, tool config
 ├── CLAUDE.md            # Claude Code context
@@ -155,6 +162,7 @@ Configuration:
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "-n auto -m 'not e2e'"    # parallel by default, skip live API tests
 ```
 
 ## Writing Tests

@@ -182,13 +182,22 @@ def _developer_portal_setup(
     info("[bold]Phase 2: Tesla Developer Portal Setup[/bold]")
     info("")
 
+    # Detect Tailscale hostname if domain was set to Tailscale in Phase 1
+    ts_hostname = ""
+    if settings.hosting_method == "tailscale" and settings.domain:
+        ts_hostname = settings.domain
+
     # Delegate to the existing interactive setup wizard, passing the domain
     # so the portal instructions show the correct Allowed Origin URL
-    port = 8085
+    from tescmd.models.auth import DEFAULT_PORT
+
+    port = DEFAULT_PORT
     redirect_uri = f"http://localhost:{port}/callback"
     from tescmd.cli.auth import _interactive_setup
 
-    return _interactive_setup(formatter, port, redirect_uri, domain=domain)
+    return _interactive_setup(
+        formatter, port, redirect_uri, domain=domain, tailscale_hostname=ts_hostname
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -247,10 +256,10 @@ def _automated_domain_setup(formatter: OutputFormatter, settings: AppSettings) -
     info(f"GitHub CLI detected. Logged in as [cyan]{username}[/cyan].")
     info(f"Suggested domain: [cyan]{suggested_domain}[/cyan]")
     info("")
-    info("[dim]Note: GitHub Pages provides always-on key hosting but cannot")
-    info("serve as a Fleet Telemetry server. If you plan to use telemetry")
-    info("streaming, choose Tailscale instead (install Tailscale, then")
-    info("re-run setup).[/dim]")
+    info("[dim]Note: GitHub Pages provides always-on key hosting but cannot[/dim]")
+    info("[dim]serve as a Fleet Telemetry server. If you plan to use telemetry[/dim]")
+    info("[dim]streaming, choose Tailscale instead (install Tailscale, then[/dim]")
+    info("[dim]re-run setup).[/dim]")
     info("")
 
     try:
@@ -924,7 +933,9 @@ async def _oauth_login_step(
         info("[bold]Phase 5: OAuth Login[/bold]")
         info("")
 
-    port = 8085
+    from tescmd.models.auth import DEFAULT_PORT as _DEFAULT_PORT
+
+    port = _DEFAULT_PORT
     redirect_uri = f"http://localhost:{port}/callback"
 
     info("Opening your browser to sign in to Tesla...")

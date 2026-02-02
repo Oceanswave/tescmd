@@ -12,6 +12,7 @@ from tescmd.cli.setup import (
     TIER_FULL,
     TIER_READONLY,
     _cmd_setup,
+    _developer_portal_setup,
     _domain_setup,
     _precheck_public_key,
     _print_next_steps,
@@ -815,3 +816,78 @@ class TestKeySetupTailscale:
             _key_setup(formatter, settings, "user.github.io")
 
         mock_gh_deploy.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: Developer portal — Tailscale hostname passthrough
+# ---------------------------------------------------------------------------
+
+
+class TestDeveloperPortalSetupTailscale:
+    """Verify _developer_portal_setup passes Tailscale hostname to _interactive_setup."""
+
+    def test_passes_tailscale_hostname_from_settings(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When hosting_method=tailscale and domain is set, ts hostname is forwarded."""
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("TESLA_HOSTING_METHOD", "tailscale")
+        monkeypatch.setenv("TESLA_DOMAIN", "mybox.tail99.ts.net")
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        app_ctx = _make_app_ctx()
+        formatter = app_ctx.formatter
+
+        with patch("tescmd.cli.auth._interactive_setup", return_value=("id", "secret")) as mock_is:
+            _developer_portal_setup(formatter, app_ctx, settings, domain="mybox.tail99.ts.net")
+
+        _args, kwargs = mock_is.call_args
+        assert kwargs.get("tailscale_hostname") == "mybox.tail99.ts.net"
+
+    def test_no_tailscale_hostname_when_github_hosting(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When hosting_method is not tailscale, no ts hostname is passed."""
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("TESLA_DOMAIN", "user.github.io")
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        app_ctx = _make_app_ctx()
+        formatter = app_ctx.formatter
+
+        with patch("tescmd.cli.auth._interactive_setup", return_value=("id", "secret")) as mock_is:
+            _developer_portal_setup(formatter, app_ctx, settings, domain="user.github.io")
+
+        _args, kwargs = mock_is.call_args
+        assert kwargs.get("tailscale_hostname") == ""
+
+    def test_skips_when_already_configured(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When client_id is already set, returns early without calling _interactive_setup."""
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("TESLA_CLIENT_ID", "existing-id")
+        monkeypatch.setenv("TESLA_CLIENT_SECRET", "existing-secret")
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        app_ctx = _make_app_ctx()
+        formatter = app_ctx.formatter
+
+        with patch("tescmd.cli.auth._interactive_setup") as mock_is:
+            cid, cs = _developer_portal_setup(
+                formatter, app_ctx, settings, domain="user.github.io"
+            )
+
+        assert cid == "existing-id"
+        assert cs == "existing-secret"
+        mock_is.assert_not_called()

@@ -58,25 +58,26 @@ With tescmd:
 
 | Step | What happens | Billable? |
 |---|---|---|
-| 1 | Check cache → miss | No |
+| 1 | Check response cache → miss | No |
 | 2 | Check wake state cache → miss | No |
-| 3 | Prompt user: "Vehicle is asleep. Wake via API?" | No |
-| 4 | User wakes via Tesla app (free) and hits [R] Retry | No |
-| 5 | `GET vehicle_data` → success, cached | Yes (1 request) |
+| 3 | `GET vehicle_data` → 408 (vehicle asleep) | Yes (1 request) |
+| 4 | Prompt: `[W] Wake via API  [R] Retry  [C] Cancel` | No |
+| 5 | User wakes via Tesla app (free), presses [R] | No |
+| 6 | `GET vehicle_data` → success, cached | Yes (1 request) |
 
-**Result:** 1 billable request. Subsequent checks within 60s: 0 requests.
+**Result:** 2 billable requests (the initial 408 is unavoidable — tescmd can't know the vehicle is asleep without asking the API). Subsequent checks within 60s: 0 requests (cache hit).
 
 ### Example 2: Monitoring script (every 5 minutes)
 
 Without tescmd: 288 checks/day × 4-5 requests each = **1,000-1,400 billable requests/day**.
 
-With tescmd (`--wake` flag, vehicle stays awake):
-- First check: 1 wake + 1 data = 2 requests
+With tescmd (`--wake` flag, vehicle stays awake after first wake):
+- First check (vehicle asleep): 1 data attempt (408) + 1 wake + 1-2 wake polls + 1 data (success) = 4-5 requests
 - Subsequent checks within 60s TTL: 0 requests (cache hit)
-- Checks after TTL but vehicle still awake: 1 request each (wake state cached)
-- **Result: ~250 requests/day** (70-80% reduction)
+- Checks after TTL, vehicle still awake: 1 request each (`auto_wake` tries the data call first — if the vehicle is awake, it succeeds immediately)
+- **Result: ~290 requests/day** (~75% reduction)
 
-With tescmd + cache TTL tuned to 300s: **~50 requests/day** (95% reduction).
+Increasing `TESLA_CACHE_TTL` reduces costs further when multiple queries occur within a TTL window (e.g. an agent checking charge, climate, and location in quick succession — only the first hits the API). For continuous monitoring, Fleet Telemetry streaming eliminates polling entirely (see below).
 
 ### Example 3: Fleet Telemetry vs. Polling
 
@@ -85,7 +86,7 @@ For continuous vehicle monitoring, Tesla's Fleet Telemetry streaming is dramatic
 | Approach | Daily Cost (approx.) | Requests/day |
 |---|---|---|
 | Poll `vehicle_data` every minute (naive) | High | ~1,400+ |
-| tescmd with cache (5-min TTL, `--wake`) | Moderate | ~250 |
+| tescmd with cache (5-min TTL, `--wake`) | Moderate | ~290 |
 | Fleet Telemetry streaming | Very low | 0 (streaming) |
 
 Fleet Telemetry pushes data to your server over a persistent connection — no polling needed. The setup wizard (`tescmd setup`) highlights this option and links to Tesla's Fleet Telemetry documentation.
@@ -198,6 +199,20 @@ The `--wake` flag is an explicit opt-in. Scripts and agents that include it are 
 | Agent checks status, then starts charging | 2 data calls + 2 wakes | 1 data call + 1 command (wake cached) |
 | Script runs charge status in a loop | Unbounded API calls | 1 call per TTL window |
 | Vehicle is asleep, user just wants to check | Billable wake sent silently | Prompt first, suggest free Tesla app wake |
+
+## Cache Warming via Telemetry
+
+`tescmd serve` eliminates polling costs entirely by using Fleet Telemetry to push data into the response cache. While telemetry is active, MCP tool reads and CLI queries hit the warmed cache with zero API calls.
+
+| Approach | Polling Requests/day | Cost |
+|---|---|---|
+| Naive `vehicle_data` polling (1/min) | ~1,400+ | High |
+| tescmd with response cache (60s TTL) | ~290 | Moderate |
+| `tescmd serve` with telemetry cache warming | 0 (streaming) | Very low |
+
+The `CacheSink` translates telemetry field updates into VehicleData paths and merges them into the disk cache with a generous TTL (120s by default). As long as telemetry frames arrive, the cache stays warm and reads are free.
+
+This is particularly effective for agent workflows where an MCP client makes frequent read requests — charge status, location, climate — while the vehicle is streaming telemetry.
 
 ## Recommendations for Users
 

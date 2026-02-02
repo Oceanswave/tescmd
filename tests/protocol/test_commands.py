@@ -160,3 +160,18 @@ def test_managed_charge_current_is_unsigned() -> None:
 def test_navigation_request_removed() -> None:
     """navigation_request was removed from the registry (stale entry)."""
     assert "navigation_request" not in COMMAND_REGISTRY
+
+
+# -- navigation commands (infotainment, signed) ------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["share", "navigation_gps_request", "navigation_sc_request", "navigation_waypoints_request"],
+)
+def test_navigation_commands_are_signed_infotainment(command: str) -> None:
+    """Navigation commands are infotainment domain with requires_signing=True."""
+    spec = get_command_spec(command)
+    assert spec is not None
+    assert spec.domain is Domain.DOMAIN_INFOTAINMENT
+    assert spec.requires_signing is True

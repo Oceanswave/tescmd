@@ -47,9 +47,9 @@ class TestBuildSessionInfoRequest:
         assert msg.to_destination is not None
         assert msg.to_destination.domain == Domain.DOMAIN_VEHICLE_SECURITY
 
-        # from_destination carries the client public key as routing_address
+        # from_destination uses a 16-byte random routing address (not the public key)
         assert msg.from_destination is not None
-        assert msg.from_destination.routing_address == FAKE_PUBLIC_KEY
+        assert len(msg.from_destination.routing_address) == 16
 
         # session_info_request contains the public key
         assert msg.session_info_request is not None
@@ -84,9 +84,9 @@ class TestBuildSignedCommand:
         assert msg.to_destination is not None
         assert msg.to_destination.domain == Domain.DOMAIN_INFOTAINMENT
 
-        # from_destination carries the client public key
+        # from_destination uses a 16-byte random routing address (not the public key)
         assert msg.from_destination is not None
-        assert msg.from_destination.routing_address == FAKE_PUBLIC_KEY
+        assert len(msg.from_destination.routing_address) == 16
 
         # payload is stored verbatim
         assert msg.protobuf_message_as_bytes == FAKE_PAYLOAD
@@ -154,8 +154,8 @@ class TestEncodeRoutableMessage:
 
 
 class TestDefaultExpiry:
-    def test_default_expiry_zero_offset(self) -> None:
-        """With zero clock_offset, expiry is still based on wall clock + TTL."""
+    def test_default_expiry_zero_time_zero(self) -> None:
+        """With time_zero=0 (epoch at unix epoch), expiry ≈ now + TTL."""
         now = int(time.time())
         expiry = default_expiry()
         assert abs(expiry - (now + 15)) <= 2
@@ -167,29 +167,32 @@ class TestDefaultExpiry:
         expected = now + ttl
         assert abs(expiry - expected) <= 2
 
-    def test_default_expiry_with_clock_offset(self) -> None:
-        """A negative clock_offset converts wall-clock time to epoch-relative.
+    def test_default_expiry_with_time_zero(self) -> None:
+        """ExpiresAt is vehicle-relative: (now + TTL - time_zero).
 
-        The Go SDK computes ExpiresAt = clockTime + elapsed + TTL.
-        Our clock_offset = clockTime - handshake_time, so:
-            now + clock_offset + TTL ≈ clockTime + TTL.
+        The Go SDK computes: ExpiresAt = (now + TTL - timeZero) / second
+        where timeZero = handshake_time - clockTime.
+
+        If clock_time=300 and handshake happened at now:
+            time_zero = now - 300
+            expires_at = (now + 15 - (now - 300)) = 315
         """
         # Simulate: vehicle clock_time=300, handshake happened at now
         clock_time = 300
-        local_time = int(time.time())
-        clock_offset = clock_time - local_time  # large negative number
+        time_zero = time.time() - clock_time
 
-        expiry = default_expiry(clock_offset=clock_offset, ttl_seconds=15)
+        expiry = default_expiry(time_zero=time_zero, ttl_seconds=15)
 
         # Result should be close to clock_time + TTL (small positive number)
         expected = clock_time + 15
         assert abs(expiry - expected) <= 2
 
-    def test_default_expiry_positive_offset(self) -> None:
-        """Positive clock_offset (vehicle clock ahead of local) still works."""
-        now = int(time.time())
-        expiry = default_expiry(clock_offset=100, ttl_seconds=15)
-        expected = now + 100 + 15
+    def test_default_expiry_recent_boot(self) -> None:
+        """Vehicle that just booted (clock_time=5) produces small expiry."""
+        clock_time = 5
+        time_zero = time.time() - clock_time
+        expiry = default_expiry(time_zero=time_zero, ttl_seconds=15)
+        expected = clock_time + 15  # = 20
         assert abs(expiry - expected) <= 2
 
 

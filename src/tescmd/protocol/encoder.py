@@ -38,7 +38,7 @@ def build_session_info_request(
     """
     return RoutableMessage(
         to_destination=Destination(domain=domain),
-        from_destination=Destination(routing_address=client_public_key),
+        from_destination=Destination(routing_address=os.urandom(16)),
         session_info_request=SessionInfoRequest(public_key=client_public_key),
         uuid=os.urandom(16),
     )
@@ -80,7 +80,7 @@ def build_signed_command(
     """
     return RoutableMessage(
         to_destination=Destination(domain=domain),
-        from_destination=Destination(routing_address=client_public_key),
+        from_destination=Destination(routing_address=os.urandom(16)),
         protobuf_message_as_bytes=payload,
         signature_data=SignatureData(
             signer_identity=KeyIdentity(public_key=client_public_key),
@@ -100,23 +100,26 @@ def encode_routable_message(msg: RoutableMessage) -> str:
     return base64.b64encode(msg.serialize()).decode("ascii")
 
 
-def default_expiry(clock_offset: int = 0, ttl_seconds: int = 15) -> int:
+def default_expiry(time_zero: float = 0.0, ttl_seconds: int = 15) -> int:
     """Return a command expiry timestamp in the vehicle's epoch-relative time.
 
-    The Go SDK computes ``ExpiresAt = clockTime + elapsed + TTL`` where
-    ``clockTime`` comes from the vehicle's SessionInfo.  Our Session stores
-    ``clock_offset = clockTime - local_time_at_handshake``, so::
+    The Go SDK computes::
 
-        expires_at = now + clock_offset + TTL
-                   = now + (clockTime - handshake_time) + TTL
-                   ≈ clockTime + TTL   (when sent shortly after handshake)
+        ExpiresAt = uint32(time.Now().Add(expiresIn).Sub(s.timeZero) / time.Second)
+
+    Where ``timeZero`` is the wall-clock instant when the vehicle's epoch
+    counter was zero (``now - clockTime`` at handshake time).  So::
+
+        expires_at = (now + TTL - time_zero)
+                   = (now + TTL - (handshake_time - clockTime))
+                   ≈ clockTime + TTL   (vehicle-relative seconds)
 
     Parameters
     ----------
-    clock_offset:
-        ``session.clock_offset`` — the difference between the vehicle's
-        epoch clock and the local wall clock at handshake time.
+    time_zero:
+        ``session.time_zero`` — the wall-clock time corresponding to epoch
+        counter 0 on the vehicle.
     ttl_seconds:
         Time-to-live in seconds (default 15).
     """
-    return int(time.time()) + clock_offset + ttl_seconds
+    return int(time.time() + ttl_seconds - time_zero)

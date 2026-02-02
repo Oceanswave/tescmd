@@ -64,6 +64,7 @@ _CLOSURE_CLOSE = 4
 _CLOSURE_REAR_TRUNK = 5
 _CLOSURE_FRONT_TRUNK = 6
 _CLOSURE_CHARGE_PORT = 7
+_CLOSURE_TONNEAU = 8
 
 
 def _vcsec_rke(action: int) -> bytes:
@@ -141,8 +142,18 @@ _VA_ADD_CHARGE_SCHEDULE = 97
 _VA_REMOVE_CHARGE_SCHEDULE = 98
 _VA_ADD_PRECONDITION_SCHEDULE = 99
 _VA_REMOVE_PRECONDITION_SCHEDULE = 100
+_VA_BOOMBOX = 64  # VehicleControlRemoteBoomboxAction
 _VA_BATCH_REMOVE_PRECONDITION = 107
 _VA_BATCH_REMOVE_CHARGE = 108
+_VA_SET_LOW_POWER_MODE = 130
+_VA_KEEP_ACCESSORY_POWER = 138
+
+# Navigation (from Teslemetry's extended proto — not in Tesla's published proto)
+# https://github.com/Teslemetry/python-tesla-fleet-api/blob/main/proto/car_server.proto
+_VA_NAVIGATION_REQUEST = 21
+_VA_NAVIGATION_SC_REQUEST = 22
+_VA_NAVIGATION_GPS_REQUEST = 53
+_VA_NAVIGATION_WAYPOINTS_REQUEST = 90
 
 
 # ---------------------------------------------------------------------------
@@ -425,17 +436,14 @@ def _bioweapon_mode(body: dict[str, Any]) -> bytes:
 
 
 def _window_control(body: dict[str, Any]) -> bytes:
-    """VehicleControlWindowAction — vent or close."""
-    command = body.get("command", "vent")
-    field = 2 if command == "close" else 1
-    inner = _encode_varint_field(field, 1)
-    # lat/lon may be required for window control
-    if "lat" in body and "lon" in body:
-        import struct
+    """VehicleControlWindowAction — vent (field 3) or close (field 4).
 
-        location = _encode_tag_raw(3, 5) + struct.pack("<f", float(body["lat"]))
-        location += _encode_tag_raw(4, 5) + struct.pack("<f", float(body["lon"]))
-        inner += location
+    Per Tesla's proto, field 1 is reserved (location removed) and the
+    action is a oneof of Void fields: vent=3, close=4.
+    """
+    command = body.get("command", "vent")
+    field = 4 if command == "close" else 3
+    inner = _encode_length_delimited(field, _VOID)
     return _wrap_vehicle_action(_VA_WINDOW_CONTROL, inner)
 
 
@@ -456,6 +464,14 @@ def _guest_mode(body: dict[str, Any]) -> bytes:
 def _erase_user_data(_body: dict[str, Any]) -> bytes:
     """EraseUserDataAction: reason (field 1, string)."""
     return _void_vehicle_action(_VA_ERASE_USER_DATA)
+
+
+def _remote_boombox(body: dict[str, Any]) -> bytes:
+    """VehicleControlRemoteBoomboxAction: action (field 1, uint32)."""
+    # CLI sends {"sound": id}, protobuf field is "action"
+    action = body.get("sound", body.get("action", 0))
+    inner = _encode_varint_field(1, int(action))
+    return _wrap_vehicle_action(_VA_BOOMBOX, inner)
 
 
 def _scheduled_charging(body: dict[str, Any]) -> bytes:
@@ -518,6 +534,98 @@ def _steering_wheel_heat_level(body: dict[str, Any]) -> bytes:
     return _wrap_vehicle_action(_VA_HVAC_STEERING_WHEEL_HEATER, inner)
 
 
+def _set_low_power_mode(body: dict[str, Any]) -> bytes:
+    """SetLowPowerModeAction: low_power_mode (field 1, bool)."""
+    on = body.get("enable", True)
+    inner = _encode_varint_field(1, 1 if on else 0)
+    return _wrap_vehicle_action(_VA_SET_LOW_POWER_MODE, inner)
+
+
+def _keep_accessory_power_mode(body: dict[str, Any]) -> bytes:
+    """SetKeepAccessoryPowerModeAction: keep_accessory_power_mode (field 1, bool)."""
+    on = body.get("enable", True)
+    inner = _encode_varint_field(1, 1 if on else 0)
+    return _wrap_vehicle_action(_VA_KEEP_ACCESSORY_POWER, inner)
+
+
+def _batch_remove_precondition_schedules(body: dict[str, Any]) -> bytes:
+    """BatchRemovePreconditionSchedulesAction: home(1), work(2), other(3)."""
+    inner = b""
+    if body.get("home"):
+        inner += _encode_varint_field(1, 1)
+    if body.get("work"):
+        inner += _encode_varint_field(2, 1)
+    if body.get("other"):
+        inner += _encode_varint_field(3, 1)
+    return _wrap_vehicle_action(_VA_BATCH_REMOVE_PRECONDITION, inner)
+
+
+def _batch_remove_charge_schedules(body: dict[str, Any]) -> bytes:
+    """BatchRemoveChargeSchedulesAction: home(1), work(2), other(3)."""
+    inner = b""
+    if body.get("home"):
+        inner += _encode_varint_field(1, 1)
+    if body.get("work"):
+        inner += _encode_varint_field(2, 1)
+    if body.get("other"):
+        inner += _encode_varint_field(3, 1)
+    return _wrap_vehicle_action(_VA_BATCH_REMOVE_CHARGE, inner)
+
+
+# ---------------------------------------------------------------------------
+# Navigation payload builders
+# ---------------------------------------------------------------------------
+
+
+def _navigation_request(body: dict[str, Any]) -> bytes:
+    """NavigationRequest: destination (field 1, string), order (field 2, int32).
+
+    The CLI ``nav send`` command passes ``{"address": "..."}``.  The REST
+    ``share`` endpoint wraps this in an Android intent JSON, but the VCP
+    proto only needs the destination string.
+    """
+    inner = b""
+    destination = body.get("address", body.get("destination", ""))
+    if destination:
+        inner += _encode_length_delimited(1, str(destination).encode())
+    order = body.get("order")
+    if order is not None:
+        inner += _encode_varint_field(2, int(order))
+    return _wrap_vehicle_action(_VA_NAVIGATION_REQUEST, inner)
+
+
+def _navigation_sc_request(body: dict[str, Any]) -> bytes:
+    """NavigationSuperchargerRequest: order (field 1, int32)."""
+    order = body.get("order", 1)
+    inner = _encode_varint_field(1, int(order))
+    return _wrap_vehicle_action(_VA_NAVIGATION_SC_REQUEST, inner)
+
+
+def _navigation_gps_request(body: dict[str, Any]) -> bytes:
+    """NavigationGpsRequest: lat (1, double), lon (2, double), order (3, enum)."""
+    import struct
+
+    inner = b""
+    lat = body.get("lat", 0.0)
+    lon = body.get("lon", 0.0)
+    # Protobuf double = wire type 1 (fixed 64-bit)
+    inner += _encode_tag_raw(1, 1) + struct.pack("<d", float(lat))
+    inner += _encode_tag_raw(2, 1) + struct.pack("<d", float(lon))
+    order = body.get("order")
+    if order is not None:
+        inner += _encode_varint_field(3, int(order))
+    return _wrap_vehicle_action(_VA_NAVIGATION_GPS_REQUEST, inner)
+
+
+def _navigation_waypoints_request(body: dict[str, Any]) -> bytes:
+    """NavigationWaypointsRequest: waypoints (field 1, string)."""
+    inner = b""
+    waypoints = body.get("waypoints", "")
+    if waypoints:
+        inner += _encode_length_delimited(1, str(waypoints).encode())
+    return _wrap_vehicle_action(_VA_NAVIGATION_WAYPOINTS_REQUEST, inner)
+
+
 # ---------------------------------------------------------------------------
 # Builder registry — maps REST command names to payload builder functions
 # ---------------------------------------------------------------------------
@@ -529,7 +637,11 @@ _BUILDERS: dict[str, _PayloadBuilder] = {
     "door_lock": lambda _: _vcsec_rke(_RKE_LOCK),
     "door_unlock": lambda _: _vcsec_rke(_RKE_UNLOCK),
     "remote_start_drive": lambda _: _vcsec_rke(_RKE_REMOTE_DRIVE),
+    "auto_secure_vehicle": lambda _: _vcsec_rke(_RKE_AUTO_SECURE),
     "actuate_trunk": lambda body: _build_trunk_payload(body),
+    "open_tonneau": lambda _: _vcsec_closure_move(**{str(_CLOSURE_TONNEAU): _CLOSURE_OPEN}),
+    "close_tonneau": lambda _: _vcsec_closure_move(**{str(_CLOSURE_TONNEAU): _CLOSURE_CLOSE}),
+    "stop_tonneau": lambda _: _vcsec_closure_move(**{str(_CLOSURE_TONNEAU): _CLOSURE_STOP}),
     # Infotainment commands → Action { VehicleAction } payloads
     "charge_start": _charging_start,
     "charge_stop": _charging_stop,
@@ -545,6 +657,8 @@ _BUILDERS: dict[str, _PayloadBuilder] = {
     "remove_charge_schedule": _remove_charge_schedule,
     "add_precondition_schedule": _add_precondition_schedule,
     "remove_precondition_schedule": _remove_precondition_schedule,
+    "batch_remove_precondition_schedules": _batch_remove_precondition_schedules,
+    "batch_remove_charge_schedules": _batch_remove_charge_schedules,
     # Climate
     "auto_conditioning_start": _hvac_auto_start,
     "auto_conditioning_stop": _hvac_auto_stop,
@@ -576,7 +690,7 @@ _BUILDERS: dict[str, _PayloadBuilder] = {
     "set_pin_to_drive": _set_pin_to_drive,
     "guest_mode": _guest_mode,
     "erase_user_data": _erase_user_data,
-    "remote_boombox": lambda _: _void_vehicle_action(_VA_HONK_HORN),  # Maps to honk
+    "remote_boombox": _remote_boombox,
     # Media
     "media_toggle_playback": lambda _: _void_vehicle_action(_VA_MEDIA_PLAY),
     "media_next_track": lambda _: _void_vehicle_action(_VA_MEDIA_NEXT_TRACK),
@@ -591,6 +705,10 @@ _BUILDERS: dict[str, _PayloadBuilder] = {
     ),
     "adjust_volume": _media_volume,
     # Navigation
+    "share": _navigation_request,
+    "navigation_gps_request": _navigation_gps_request,
+    "navigation_sc_request": _navigation_sc_request,
+    "navigation_waypoints_request": _navigation_waypoints_request,
     "trigger_homelink": _trigger_homelink,
     # Software
     "schedule_software_update": _schedule_software_update,
@@ -601,6 +719,9 @@ _BUILDERS: dict[str, _PayloadBuilder] = {
     "sun_roof_control": _sunroof,
     # Window (infotainment path)
     "window_control": _window_control,
+    # Power management
+    "set_low_power_mode": _set_low_power_mode,
+    "keep_accessory_power_mode": _keep_accessory_power_mode,
 }
 
 

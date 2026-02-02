@@ -16,6 +16,8 @@ class TestStreamHelp:
         assert "--port" in result.output
         assert "--fields" in result.output
         assert "--interval" in result.output
+        assert "--no-log" in result.output
+        assert "--legacy-dashboard" in result.output
 
 
 class TestStreamTailscaleNotInstalled:

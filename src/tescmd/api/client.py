@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os as _os
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -18,12 +19,17 @@ from tescmd.api.errors import (
     RateLimitError,
     RegistrationRequiredError,
     TeslaAPIError,
+    VCPRequiredError,
     VehicleAsleepError,
 )
 
 # ---------------------------------------------------------------------------
 # Region -> base URL mapping
 # ---------------------------------------------------------------------------
+
+# Allow a full override via TESLA_API_BASE_URL (e.g. for proxies / staging).
+# When set the region parameter is ignored and all requests go to this URL.
+_API_BASE_OVERRIDE: str | None = _os.environ.get("TESLA_API_BASE_URL")
 
 REGION_BASE_URLS: dict[str, str] = {
     "na": "https://fleet-api.prd.na.vn.cloud.tesla.com",
@@ -56,7 +62,7 @@ class TeslaFleetClient:
         on_token_refresh: Callable[[], Awaitable[str | None]] | None = None,
         on_rate_limit_wait: Callable[[int, int, int], Awaitable[None]] | None = None,
     ) -> None:
-        base_url = REGION_BASE_URLS.get(region)
+        base_url = _API_BASE_OVERRIDE or REGION_BASE_URLS.get(region)
         if base_url is None:
             msg = f"Unknown region {region!r}; expected one of {sorted(REGION_BASE_URLS)}"
             raise ValueError(msg)
@@ -160,11 +166,30 @@ class TeslaFleetClient:
         """Translate HTTP status codes to domain exceptions and return JSON."""
         if response.status_code == 429:
             raw = response.headers.get("retry-after")
-            retry_after: int | None = int(raw) if raw is not None else None
+            retry_after: int | None = None
+            if raw is not None:
+                try:
+                    retry_after = int(raw)
+                except ValueError:
+                    retry_after = 30  # Fallback for HTTP-date strings
             raise RateLimitError(retry_after=retry_after)
 
         if response.status_code == 408:
-            raise VehicleAsleepError("Vehicle is asleep", status_code=408)
+            # Tesla returns HTTP 408 for both "vehicle is asleep" and general
+            # request timeouts.  Inspect the body to distinguish the two.
+            body_text = response.text[:300]
+            body_lower = body_text.lower()
+            if "asleep" in body_lower or "offline" in body_lower or "unavailable" in body_lower:
+                raise VehicleAsleepError("Vehicle is asleep", status_code=408)
+            # No explicit sleep indicator — still raise VehicleAsleepError for
+            # backwards compatibility (most 408s *are* sleep), but include the
+            # raw body so callers can see what actually happened.
+            msg = (
+                f"Vehicle request timed out (HTTP 408): {body_text}"
+                if body_text
+                else "Vehicle is asleep"
+            )
+            raise VehicleAsleepError(msg, status_code=408)
 
         if response.status_code == 412:
             raise RegistrationRequiredError(
@@ -175,8 +200,16 @@ class TeslaFleetClient:
 
         if response.status_code == 403:
             text = response.text[:200]
-            if "missing scopes" in text.lower():
+            text_lower = text.lower()
+            if "missing scopes" in text_lower:
                 raise MissingScopesError(text, status_code=403)
+            if "vehicle command protocol required" in text_lower:
+                raise VCPRequiredError(
+                    "This command is not available via the Fleet API when "
+                    "Vehicle Command Protocol is enabled. Use the Tesla app "
+                    "or run tescmd behind a tesla-http-proxy.",
+                    status_code=403,
+                )
             raise AuthError(f"HTTP 403: {text}", status_code=403)
 
         if response.status_code >= 400:
@@ -185,6 +218,10 @@ class TeslaFleetClient:
                 f"HTTP {response.status_code}: {text}",
                 status_code=response.status_code,
             )
+
+        # 204 No Content — return empty dict (no body to parse)
+        if response.status_code == 204:
+            return {}
 
         try:
             result: dict[str, Any] = response.json()

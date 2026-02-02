@@ -100,7 +100,7 @@ _INFOTAINMENT_COMMANDS: dict[str, CommandSpec] = {
     "set_pin_to_drive": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "guest_mode": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "erase_user_data": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
-    "remote_boombox": CommandSpec(Domain.DOMAIN_INFOTAINMENT, requires_signing=False),
+    "remote_boombox": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     # Media
     "media_toggle_playback": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "media_next_track": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
@@ -121,7 +121,7 @@ _INFOTAINMENT_COMMANDS: dict[str, CommandSpec] = {
     "cancel_software_update": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     # Vehicle name / calendar
     "set_vehicle_name": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
-    "upcoming_calendar_entries": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
+    "upcoming_calendar_entries": CommandSpec(Domain.DOMAIN_INFOTAINMENT, requires_signing=False),
     # Windows / sunroof
     "window_control": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "sun_roof_control": CommandSpec(Domain.DOMAIN_INFOTAINMENT),

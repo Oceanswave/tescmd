@@ -10,6 +10,7 @@ tescmd follows a layered architecture with strict separation of concerns. Each l
 │  cli/main.py ─ cli/auth.py ─ cli/vehicle.py     │
 │  cli/charge.py ─ cli/climate.py ─ cli/key.py    │
 │  cli/security.py ─ cli/setup.py ─ cli/trunk.py  │
+│  cli/openclaw.py ─ cli/mcp_cmd.py ─ cli/serve.py │
 │        (Click groups, dispatch, output)          │
 ├─────────────────────────────────────────────────┤
 │                   API Layer                      │
@@ -35,7 +36,25 @@ tescmd follows a layered architecture with strict separation of concerns. Each l
 │  telemetry/server.py ─ telemetry/decoder.py      │
 │  telemetry/dashboard.py ─ telemetry/fields.py    │
 │  telemetry/tailscale.py ─ telemetry/flatbuf.py   │
-│  (WebSocket server, protobuf decode, Rich TUI)   │
+│  telemetry/fanout.py ─ telemetry/mapper.py       │
+│  telemetry/cache_sink.py                         │
+│  (WebSocket server, protobuf decode, Rich TUI,   │
+│   frame fan-out, cache warming, field mapping)    │
+├─────────────────────────────────────────────────┤
+│              OpenClaw Layer                       │
+│  openclaw/config.py ─ openclaw/filters.py        │
+│  openclaw/emitter.py ─ openclaw/gateway.py       │
+│  openclaw/dispatcher.py ─ openclaw/bridge.py     │
+│  openclaw/telemetry_store.py                     │
+│  (filter, emit, gateway, command dispatch, store) │
+├─────────────────────────────────────────────────┤
+│              Triggers Layer                       │
+│  triggers/models.py ─ triggers/manager.py        │
+│  (condition models, evaluation engine, cooldown)  │
+├─────────────────────────────────────────────────┤
+│                 MCP Layer                        │
+│  mcp/server.py                                   │
+│  (FastMCP server, CliRunner + custom tool invoke) │
 ├─────────────────────────────────────────────────┤
 │               Infrastructure                     │
 │  output/ ─ crypto/ ─ models/ ─ _internal/        │
@@ -44,6 +63,39 @@ tescmd follows a layered architecture with strict separation of concerns. Each l
 ```
 
 ## Data Flow
+
+### First-Run Setup
+
+```
+User runs: tescmd setup
+
+  Phase 0: Tier Selection
+     └── Read-only (data only) or Full control (data + commands + telemetry)
+
+  Phase 1: Domain Setup
+     ├── Detects GitHub CLI → auto-creates GitHub Pages site
+     └── Or: manual domain entry
+
+  Phase 2: Developer Portal Walkthrough
+     ├── Guides Tesla Developer app creation
+     └── Persists Client ID / Client Secret to .env
+
+  Phase 3: Key Generation & Deployment (full tier only)
+     ├── Generates EC P-256 key pair (crypto/keys.py)
+     └── Deploys public key to GitHub Pages or Tailscale Funnel
+
+  Phase 3.5: Key Enrollment (full tier only)
+     └── Opens enrollment URL → user approves in Tesla app
+
+  Phase 4: Fleet API Partner Registration
+     └── Calls partner registration endpoint (api/partner.py)
+
+  Phase 5: OAuth Login
+     ├── auth/oauth.py → PKCE flow → browser → callback
+     └── auth/token_store.py → keyring storage
+
+  Phase 6: Summary + next steps
+```
 
 ### Typical Data Query Execution
 
@@ -84,6 +136,8 @@ User runs: tescmd vehicle data
 
 ### Authentication Flow
 
+The recommended entry point is `tescmd setup`, which handles domain provisioning, Developer Portal credentials, key generation, Fleet API registration, and OAuth login in one guided wizard (see First-Run Setup above). For standalone auth:
+
 ```
 User runs: tescmd auth login
 
@@ -121,21 +175,27 @@ CLI modules do **not** construct HTTP requests or handle auth tokens directly.
 
 **Currently implemented command groups:**
 - `auth` — login (`--reconsent`), logout, status, refresh, register, export, import
-- `vehicle` — list, info, data, location, wake, alerts, release-notes, service, drivers, telemetry (config, create, delete, errors, stream)
+- `billing` — Supercharger billing history and invoices
+- `cache` — status, clear
 - `charge` — status, start, stop, limit, amps, schedule, departure, precondition
 - `climate` — status, on, off, set, seat, keeper, cop-temp, auto-seat, auto-wheel, wheel-level
-- `security` — status, lock, unlock, sentry, valet, remote-start, flash, honk, speed-limit, pin management
-- `trunk` — open, close, frunk, window
+- `energy` — list, status, live, backup, mode, storm, tou, history, off-grid, grid-config, calendar
+- `key` — generate, deploy, validate, show, enroll, unenroll
+- `mcp` — serve (stdio + streamable-http transports, OAuth 2.1, Tailscale Funnel)
 - `media` — play-pause, next/prev track, next/prev fav, volume
 - `nav` — send, gps, supercharger, homelink, waypoints
-- `software` — status, schedule, cancel
-- `energy` — list, status, live, backup, mode, storm, tou, history, off-grid, grid-config, calendar
-- `user` — me, region, orders, features
-- `sharing` — add/remove driver, create/redeem/revoke/list invites
-- `key` — generate, deploy, validate, show, enroll, unenroll
-- `cache` — status, clear
+- `openclaw` — bridge (filtered telemetry → OpenClaw Gateway, bidirectional command dispatch)
+- `serve` — unified MCP + telemetry + OpenClaw TUI dashboard with trigger subscriptions
+- `partner` — public-key lookup, account endpoints
 - `raw` — get, post
-- `setup` — interactive first-run configuration wizard with key enrollment
+- `security` — status, lock, unlock, sentry, valet, remote-start, flash, honk, speed-limit, pin management
+- `setup` — interactive first-run configuration wizard (see First-Run Setup)
+- `sharing` — add/remove driver, create/redeem/revoke/list invites
+- `software` — status, schedule, cancel
+- `status` — single-command overview of config, auth, and cache state
+- `trunk` — open, close, frunk, window
+- `user` — me, region, orders, features
+- `vehicle` — list, info, data, location, wake, alerts, release-notes, service, drivers, telemetry (config, create, delete, errors, stream)
 
 ### `api/` — API Client
 
@@ -144,6 +204,8 @@ CLI modules do **not** construct HTTP requests or handle auth tokens directly.
 - **`command.py`** (`CommandAPI`) — Vehicle command endpoints (~50 commands via POST).
 - **`signed_command.py`** (`SignedCommandAPI`) — Vehicle Command Protocol wrapper. Routes signed commands through ECDH session + HMAC path; delegates unsigned commands to `CommandAPI`.
 - **`energy.py`** (`EnergyAPI`) — Energy product endpoints (Powerwall, solar).
+- **`charging.py`** (`ChargingAPI`) — Supercharger billing and charging session endpoints.
+- **`partner.py`** (`PartnerAPI`) — Partner account registration and public key lookup.
 - **`sharing.py`** (`SharingAPI`) — Driver and invite management.
 - **`user.py`** (`UserAPI`) — Account info, region, orders, features.
 - **`errors.py`** — Typed exceptions: `AuthError`, `MissingScopesError`, `VehicleAsleepError`, `SessionError`, `KeyNotEnrolledError`, `TierError`, `RateLimitError`, `TunnelError`, `TailscaleError`, etc.
@@ -209,9 +271,38 @@ See [vehicle-command-protocol.md](vehicle-command-protocol.md) for the full prot
 - **`flatbuf.py`** — FlatBuffer parser for Tesla's alternative telemetry encoding format.
 - **`fields.py`** — Field name registry (120+ fields) with preset configs (`default`, `driving`, `charging`, `climate`, `all`). Maps field names to protobuf field numbers.
 - **`dashboard.py`** (`TelemetryDashboard`) — Rich Live TUI with field name, value, and last-update columns. Supports unit conversion via `DisplayUnits`, connection status, frame counter, and uptime display.
+- **`setup.py`** (`telemetry_session()`) — Async context manager encapsulating the full telemetry lifecycle: server start → Tailscale tunnel → partner domain re-registration → fleet config → yield → cleanup. Shared by both `cli/vehicle.py` (stream) and `cli/openclaw.py` (bridge).
 - **`tailscale.py`** (`TailscaleManager`) — Subprocess-based Tailscale management: check installation, start/stop Funnel, retrieve TLS certs, serve files at specific paths.
+- **`fanout.py`** (`FrameFanout`) — Multiplexes a single `on_frame` callback to N sinks. Each sink is error-isolated; one failing sink does not affect others.
+- **`mapper.py`** (`TelemetryMapper`) — Maps Fleet Telemetry field names (e.g. `Soc`, `Location`) to VehicleData JSON paths (e.g. `charge_state.usable_battery_level`). Includes type-safe transforms for each field.
+- **`cache_sink.py`** (`CacheSink`) — Telemetry sink that warms the `ResponseCache` by translating incoming frames via `TelemetryMapper` and merging them into the disk cache. Buffered writes with configurable flush interval.
 
-**Optional dependency:** `pip install tescmd[telemetry]` adds `websockets>=14.0`.
+**Dependency:** `websockets>=14.0` (core dependency).
+
+### `openclaw/` — OpenClaw Bridge
+
+- **`config.py`** (`BridgeConfig`, `FieldFilter`) — Pydantic models for bridge configuration with per-field delta threshold and throttle interval settings. Loadable from JSON files with CLI override merging.
+- **`filters.py`** (`DualGateFilter`) — Dual-gate emission filter: both delta threshold (value change) AND throttle interval (minimum time) must pass for a field to be emitted. Location fields use haversine distance; numeric fields use absolute difference; zero-granularity fields emit on any value change.
+- **`emitter.py`** (`EventEmitter`) — Transforms telemetry field data into OpenClaw `req:agent` event payloads. Maps telemetry fields to event types (location, battery, temperature, speed, charge state transitions, security changes).
+- **`gateway.py`** (`GatewayClient`) — WebSocket client implementing the OpenClaw operator protocol (challenge → connect → hello-ok handshake) with Ed25519 device key signing. Includes exponential backoff reconnection (1s base → 60s max with up to 10% jitter per interval).
+- **`dispatcher.py`** (`CommandDispatcher`) — Bidirectional command dispatch over the gateway. Routes inbound `node.invoke.request` messages to read handlers (in-memory telemetry store), write handlers (Fleet API with tier + VCSEC guards), trigger handlers, and `system.run` meta-dispatch with API-style alias mapping.
+- **`telemetry_store.py`** (`TelemetryStore`) — In-memory latest-value cache for telemetry fields. Populated by `TelemetryBridge.on_frame()`, queried by dispatcher read handlers (e.g. `location.get`, `battery.get`).
+- **`bridge.py`** (`TelemetryBridge`, `build_openclaw_pipeline()`) — Orchestrator wiring: `TelemetryServer.on_frame` → telemetry store update → trigger evaluation → `DualGateFilter` → `EventEmitter` → `GatewayClient`. Factory function `build_openclaw_pipeline()` constructs the full pipeline. Supports dry-run mode (JSONL to stdout).
+
+**Dependency:** `websockets>=14.0` (core dependency, shared with telemetry layer).
+
+### `triggers/` — Trigger Subscription System
+
+- **`models.py`** (`TriggerOperator`, `TriggerCondition`, `TriggerDefinition`, `TriggerNotification`) — Pydantic v2 models for trigger conditions (9 operators: lt, gt, lte, gte, eq, neq, changed, enter, leave), definitions (one-shot vs persistent with cooldown), and notification payloads. Model validators enforce operator-specific value requirements (geofence needs lat/lon/radius dict, changed needs no value).
+- **`manager.py`** (`TriggerManager`) — Evaluation engine with field-indexed lookup, cooldown tracking, dual-channel notification delivery (pending deque for MCP polling + async callbacks for OpenClaw push), and one-shot auto-deletion. Geofence operators use haversine distance for boundary-crossing detection. Limits: 100 triggers, 500 pending notifications.
+
+### `mcp/` — MCP Server
+
+- **`server.py`** (`MCPServer`, `_InMemoryOAuthProvider`, `_PermissiveClient`) — Registers all tescmd CLI commands as MCP tools using Click's `CliRunner` for invocation (with `env=os.environ.copy()` to propagate auth tokens). Guarantees behavioral parity with the CLI (caching, wake, auth all work). Read tools annotated with `readOnlyHint: true`; write tools with `readOnlyHint: false`. Supports stdio and streamable-http transports via FastMCP. Custom tool registry (`register_custom_tool()`) enables runtime-registered non-CLI tools (used by trigger system).
+
+  **OAuth 2.1:** The HTTP transport implements the full MCP OAuth 2.1 specification via `_InMemoryOAuthProvider`. Clients authenticate through an authorization code flow with PKCE — the server auto-approves and returns tokens. `_PermissiveClient` wraps `OAuthClientInformationFull` to accept any redirect URI and scope, supporting clients that skip dynamic registration (e.g. Claude.ai). DNS rebinding protection via `TransportSecuritySettings` allows Tailscale Funnel hostnames alongside localhost.
+
+**Dependency:** `mcp>=1.0` (core dependency).
 
 ### `deploy/` — Key Deployment
 
@@ -269,6 +360,33 @@ The Tesla API returns temperatures in Celsius, distances in miles, and tire pres
 ### Why Keyring for Token Storage
 
 OS-level credential storage (macOS Keychain, GNOME Keyring, Windows Credential Locker) is more secure than plaintext files. The `keyring` library provides a cross-platform interface with graceful fallback to file-based storage.
+
+### Why a Unified Serve Pipeline
+
+`tescmd serve` consolidates MCP server, telemetry streaming, cache warming, and OpenClaw bridging into a single command. The key abstraction is `FrameFanout` — a multiplexer that delivers each telemetry frame to N sinks independently:
+
+```
+Tesla Vehicle (Fleet Telemetry push)
+    → TelemetryServer (WebSocket, exposed via Tailscale Funnel)
+        → TelemetryDecoder (protobuf → TelemetryFrame)
+            → FrameFanout.on_frame()
+                ├→ CacheSink (warms ResponseCache from telemetry)
+                ├→ TelemetryDashboard (Textual TUI, TTY only)
+                ├→ JSONL stdout sink (piped/JSON mode)
+                ├→ TriggerManager.evaluate() (when no OpenClaw)
+                └→ TelemetryBridge → OpenClaw Gateway (optional)
+                     └→ includes trigger evaluation internally
+    ┊
+    └→ MCP Server (HTTP or stdio, reads from warmed cache)
+```
+
+Each sink is error-isolated: one failing sink does not affect others. The `CacheSink` translates telemetry field names to VehicleData paths via `TelemetryMapper`, merging updates into the `ResponseCache` so MCP tool reads are free while telemetry is active.
+
+Mode selection:
+- **Default** (`serve VIN`): MCP + telemetry + cache warming + dashboard (TTY) or JSONL (piped)
+- **MCP-only** (`serve --no-telemetry`): Lightweight MCP server, no telemetry
+- **Telemetry-only** (`serve VIN --no-mcp`): Dashboard/JSONL without MCP
+- **Combined** (`serve VIN --openclaw ws://...`): All of the above + OpenClaw bridge
 
 ### Why python-dotenv
 

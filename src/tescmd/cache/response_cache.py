@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -11,6 +12,8 @@ from tescmd.cache.keys import cache_key
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -202,7 +205,10 @@ class ResponseCache:
             "created_at": now,
             "expires_at": now + ttl,
         }
-        path.write_text(json.dumps(entry), encoding="utf-8")
+        # Atomic write: temp file + rename avoids torn reads.
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(entry), encoding="utf-8")
+        tmp.rename(path)
 
     @staticmethod
     def _read_json(path: Path) -> dict[str, Any] | None:
@@ -211,4 +217,5 @@ class ResponseCache:
         try:
             return json.loads(path.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
         except (json.JSONDecodeError, OSError):
+            logger.warning("Corrupt or unreadable cache file: %s", path)
             return None

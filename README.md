@@ -1,16 +1,28 @@
+<p align="center">
+  <img src="images/tescmd_header.jpeg" alt="tescmd — Python CLI for Tesla Fleet API" width="100%">
+</p>
+
 # tescmd
 
-[![PyPI](https://img.shields.io/pypi/v/tescmd)](https://pypi.org/project/tescmd/)
-[![Python](https://img.shields.io/pypi/pyversions/tescmd)](https://pypi.org/project/tescmd/)
-[![Build](https://img.shields.io/github/actions/workflow/status/oceanswave/tescmd/test.yml?branch=main&label=build)](https://github.com/oceanswave/tescmd/actions/workflows/test.yml)
-[![License](https://img.shields.io/github/license/oceanswave/tescmd)](LICENSE)
-[![GitHub Release](https://img.shields.io/github/v/release/oceanswave/tescmd)](https://github.com/oceanswave/tescmd/releases)
+<p align="center">
+  <a href="https://pypi.org/project/tescmd/"><img src="https://img.shields.io/pypi/v/tescmd" alt="PyPI"></a>
+  <a href="https://pypi.org/project/tescmd/"><img src="https://img.shields.io/pypi/pyversions/tescmd" alt="Python"></a>
+  <a href="https://github.com/oceanswave/tescmd/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/oceanswave/tescmd/test.yml?branch=main&label=build" alt="Build"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/oceanswave/tescmd" alt="License"></a>
+  <a href="https://github.com/oceanswave/tescmd/releases"><img src="https://img.shields.io/github/v/release/oceanswave/tescmd" alt="GitHub Release"></a>
+</p>
 
 A Python CLI for querying and controlling Tesla vehicles via the Fleet API — built for both human operators and AI agents.
 
+## What It Does
+
+tescmd gives you full command-line access to Tesla's Fleet API: check battery and charge status, lock or unlock doors, control climate, open trunks, send navigation waypoints, manage Powerwalls, stream live telemetry, and more. It handles OAuth2 authentication, token refresh, key enrollment, command signing, and response caching so you don't have to. Every command works in both interactive (Rich tables) and scripted (JSON) modes, and an MCP server lets AI agents call any command as a tool.
+
 ## Why tescmd?
 
-Tesla's Fleet API gives developers full access to vehicle data and commands, but working with it directly means juggling OAuth2 PKCE flows, token refresh, regional endpoints, key enrollment, and raw JSON responses. tescmd wraps all of that into a single command-line tool that handles authentication, token management, and output formatting so you can focus on what you actually want to do — check your battery, find your car, or control your vehicle.
+Tesla's Fleet API gives developers full access to vehicle data and commands, but working with it directly means juggling OAuth2 PKCE flows, token refresh, regional endpoints, key enrollment, and raw JSON responses.
+
+tescmd wraps all of that into a single command-line tool that handles authentication, token management, and output formatting so you can focus on what you actually want to do — check your battery, find your car, or control your vehicle.
 
 tescmd is designed to work as a tool that AI agents can invoke directly. Platforms like [OpenClaw](https://openclaw.ai/), [Claude Desktop](https://claude.ai), and other agent frameworks can call tescmd commands, parse the structured JSON output, and take actions on your behalf — "lock my car", "what's my battery at?", "start climate control". The deterministic JSON output, meaningful exit codes, cost-aware wake confirmation, and `--wake` opt-in flag make it safe for autonomous agent use without surprise billing.
 
@@ -23,7 +35,11 @@ tescmd is designed to work as a tool that AI agents can invoke directly. Platfor
 - **Tier enforcement** — readonly tier blocks write commands with clear guidance to upgrade
 - **Energy products** — Powerwall live status, site info, backup reserve, operation mode, storm mode, time-of-use settings, charging history, calendar history, grid import/export
 - **User & sharing** — account info, region, orders, feature flags, driver management, vehicle sharing invites
-- **Fleet Telemetry streaming** — `tescmd vehicle telemetry stream` starts a real-time dashboard with push-based data from your vehicle via Tailscale Funnel — no polling, 99%+ cost reduction
+- **Live Dashboard** — `tescmd serve` launches a full-screen TUI showing live telemetry data, MCP server info, tunnel URL, sink count, and cache stats — all in a scrollable, interactive terminal UI powered by Textual
+- **Fleet Telemetry streaming** — `tescmd serve` (or `tescmd vehicle telemetry stream`) receives push-based data from your vehicle via Tailscale Funnel — no polling, 99%+ cost reduction. Telemetry sessions produce a wide-format CSV log by default
+- **OpenClaw Bridge** — `tescmd serve --openclaw ws://...` streams filtered telemetry to an OpenClaw Gateway with configurable delta+throttle filtering per field; supports bidirectional command dispatch so bots can send vehicle commands back through the gateway
+- **Trigger subscriptions** — register conditions on any telemetry field (battery < 20%, speed > 80, location enters geofence) and get notified via OpenClaw push events or MCP polling; supports one-shot and persistent modes with cooldown
+- **MCP Server** — `tescmd serve` (or `tescmd mcp serve`) exposes all commands as MCP tools for Claude.ai, Claude Desktop, Claude Code, and other agent frameworks via OAuth 2.1
 - **Universal response caching** — all read commands are cached with tiered TTLs (1h for specs/warranty, 5m for fleet lists, 1m standard, 30s for location-dependent); bots can call tescmd as often as needed — within the TTL window, responses are instant and free
 - **Cost-aware wake** — prompts before sending billable wake API calls; `--wake` flag for scripts that accept the cost
 - **Guided OAuth2 setup** — `tescmd auth login` walks you through browser-based authentication with PKCE
@@ -50,24 +66,35 @@ tescmd charge status               # Check battery and charging state
 tescmd vehicle info                 # Full vehicle data snapshot
 tescmd climate on --wake            # Turn on climate (wakes vehicle if asleep)
 tescmd security lock --wake         # Lock the car
-tescmd vehicle telemetry stream     # Real-time telemetry dashboard
+tescmd serve 5YJ3...               # MCP + telemetry TUI dashboard + CSV log
+tescmd serve --no-mcp              # Telemetry-only TUI dashboard
 ```
 
 Every read command is cached — repeat calls within the TTL window are instant and free.
 
 ## Prerequisites
 
-The following tools should be installed and authenticated before running `tescmd setup`:
+| Requirement | Required | What it is | Why tescmd needs it |
+|---|---|---|---|
+| **Python 3.11+** | Yes | The programming language runtime that runs tescmd | tescmd is a Python package — you need Python installed to use it |
+| **pip** | Yes | Python's package installer (ships with Python) | Used to install tescmd and its dependencies via `pip install tescmd` |
+| **Tesla account** | Yes | A [tesla.com](https://www.tesla.com) account linked to a vehicle or energy product | tescmd authenticates via OAuth2 against your Tesla account to access the Fleet API |
+| **Git** | Yes | Version control tool ([git-scm.com](https://git-scm.com)) | Used during setup for key hosting via GitHub Pages |
+| **GitHub CLI** (`gh`) | Recommended | GitHub's command-line tool ([cli.github.com](https://cli.github.com)) — authenticate with `gh auth login` | Auto-creates a `*.github.io` site to host your public key at the `.well-known` path Tesla requires |
+| **Tailscale** | Recommended | Mesh VPN with public tunneling ([tailscale.com](https://tailscale.com)) — authenticate with `tailscale login` | Provides a public HTTPS URL for key hosting and Fleet Telemetry streaming with zero infrastructure setup |
 
-| Tool | Required | Purpose | Auth |
-|------|----------|---------|------|
-| **Git** | Yes | Version control, repo management | N/A |
-| **GitHub CLI** (`gh`) | Recommended | Auto-creates `*.github.io` domain for key hosting | `gh auth login` |
-| **Tailscale** | Optional | Key hosting via Funnel + Fleet Telemetry streaming | `tailscale login` |
+### Self-Hosting with Tailscale (No Domain Required)
 
-Without the GitHub CLI, `tescmd setup` will try Tailscale Funnel for key hosting (requires Funnel enabled in your tailnet ACL). Without either, you'll need to manually host your public key at the Tesla-required `.well-known` path on your own domain.
+If you have **Tailscale** installed with Funnel enabled, you don't need a custom domain or GitHub Pages at all. Tailscale Funnel gives you a public HTTPS URL (`<machine>.tailnet.ts.net`) that serves both your public key and (optionally) Fleet Telemetry streaming — all from your local machine with zero infrastructure setup.
 
-For telemetry streaming, you need **Tailscale** with Funnel enabled.
+```bash
+# Install Tailscale, enable Funnel in your tailnet ACL, then:
+tescmd setup   # wizard auto-detects Tailscale and offers it as the hosting method
+```
+
+This is the fastest path to a working setup: Tailscale handles TLS certificates, NAT traversal, and public DNS automatically. The tradeoff is that your machine needs to be running for Tesla to reach your key and for telemetry streaming to work. For always-on key hosting with offline machines, use GitHub Pages instead.
+
+Without either GitHub CLI or Tailscale, you'll need to manually host your public key at the Tesla-required `.well-known` path on your own domain.
 
 ## Installation
 
@@ -164,6 +191,9 @@ Check which backend is active with `tescmd status` — the output includes a `To
 | `sharing` | `add-driver`, `remove-driver`, `create-invite`, `redeem-invite`, `revoke-invite`, `list-invites` | Vehicle sharing and driver management |
 | `key` | `generate`, `deploy`, `validate`, `show`, `enroll`, `unenroll` | Key management and enrollment |
 | `partner` | `public-key`, `telemetry-error-vins`, `telemetry-errors` | Partner account endpoints (require client credentials) |
+| `serve` | *(unified server)* | Combined MCP + telemetry + OpenClaw TUI dashboard with trigger subscriptions |
+| `openclaw` | `bridge` | Standalone OpenClaw bridge with bidirectional command dispatch |
+| `mcp` | `serve` | Standalone MCP server exposing all commands as agent tools |
 | `cache` | `status`, `clear` | Response cache management |
 | `raw` | `get`, `post` | Arbitrary Fleet API endpoint access |
 
@@ -245,7 +275,7 @@ A naive script that polls `vehicle_data` every 5 minutes generates **4-5 billabl
 
 | | Without tescmd | With tescmd |
 |---|---|---|
-| Vehicle asleep, check battery | 408 error (billable) + wake (billable) + poll (billable) + data (billable) = **4+ requests** | Cache miss → prompt user → user wakes via Tesla app (free) → retry → data (billable) = **1 request** |
+| Vehicle asleep, check battery | 408 error (billable) + wake (billable) + poll (billable) + data (billable) = **4+ requests** | Data attempt → 408 (billable) → prompt user → user wakes via Tesla app (free) → retry → data (billable) = **2 requests** |
 | Check battery again 30s later | Another 4+ requests | **0 requests** (cache hit) |
 | 10 checks in 1 minute | **40+ billable requests** | **1 billable request** + 9 cache hits |
 
@@ -300,26 +330,35 @@ Configure via environment variables:
 Tesla's Fleet Telemetry lets your vehicle push real-time data directly to your server — no polling, no per-request charges. tescmd handles all the setup:
 
 ```bash
-# Install telemetry dependencies
-pip install tescmd[telemetry]
+# Full-screen TUI with live telemetry + MCP server
+tescmd serve 5YJ3...
 
-# Stream real-time data (Rich dashboard in TTY, JSONL when piped)
-tescmd vehicle telemetry stream
+# Telemetry-only mode (full-screen TUI, no MCP)
+tescmd serve 5YJ3... --no-mcp
 
 # Select field presets
-tescmd vehicle telemetry stream --fields driving     # Speed, location, power
-tescmd vehicle telemetry stream --fields charging    # Battery, voltage, current
-tescmd vehicle telemetry stream --fields climate     # Temps, HVAC state
-tescmd vehicle telemetry stream --fields all         # Everything (120+ fields)
+tescmd serve 5YJ3... --fields driving     # Speed, location, power
+tescmd serve 5YJ3... --fields charging    # Battery, voltage, current
+tescmd serve 5YJ3... --fields all         # Everything (120+ fields)
 
 # Override polling interval
-tescmd vehicle telemetry stream --interval 5         # Every 5 seconds
+tescmd serve 5YJ3... --interval 5         # Every 5 seconds
 
-# JSONL output for scripting
-tescmd vehicle telemetry stream --format json | jq .
+# JSONL output for scripting (non-TTY / piped)
+tescmd serve 5YJ3... --no-mcp --format json | jq .
+
+# Disable CSV log
+tescmd serve 5YJ3... --no-log
+
+# Legacy Rich Live dashboard
+tescmd serve 5YJ3... --legacy-dashboard
 ```
 
-**Requires Tailscale** with Funnel enabled. The stream command starts a local WebSocket server, exposes it via Tailscale Funnel (handles TLS + NAT traversal), configures Tesla to push data to it, and renders an interactive dashboard with live uptime counter, unit conversion, and connection status. Press `q` to stop — cleanup messages show each step (removing telemetry config, restoring partner domain, stopping tunnel).
+**Requires Tailscale** with Funnel enabled. The serve command starts a local WebSocket server, exposes it via Tailscale Funnel (handles TLS + NAT traversal), configures Tesla to push data to it, and renders a full-screen TUI with live telemetry data, server info (MCP URL, tunnel, sinks), unit conversion, and connection status. Press `q` to quit.
+
+By default, telemetry sessions write a wide-format CSV log to `~/.config/tescmd/logs/` with one row per frame and one column per subscribed field. Disable with `--no-log`.
+
+`tescmd vehicle telemetry stream` is an alias for `tescmd serve --no-mcp`.
 
 ### Telemetry vs Polling Costs
 
@@ -431,6 +470,8 @@ See [docs/development.md](docs/development.md) for detailed contribution guideli
 - [Command Reference](docs/commands.md) — detailed usage for every command
 - [API Costs](docs/api-costs.md) — detailed cost breakdown and savings calculations
 - [Bot Integration](docs/bot-integration.md) — JSON schema, exit codes, telemetry streaming, headless auth
+- [OpenClaw Bridge](docs/openclaw.md) — gateway protocol, bidirectional commands, trigger subscriptions, geofencing
+- [MCP Server](docs/mcp.md) — tool reference, authentication, custom tools, trigger polling
 - [Architecture](docs/architecture.md) — layered design, module responsibilities, design decisions
 - [Vehicle Command Protocol](docs/vehicle-command-protocol.md) — ECDH sessions and signed commands
 - [Authentication](docs/authentication.md) — OAuth2 PKCE flow, token storage, scopes
@@ -443,3 +484,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 ## License
 
 MIT
+
+<p align="center">
+  <img src="images/tescmd_logo.jpeg" alt="tescmd logo" width="180">
+</p>

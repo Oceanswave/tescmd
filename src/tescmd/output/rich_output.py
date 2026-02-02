@@ -214,11 +214,29 @@ class RichOutput:
 
     def vehicle_release_notes(self, data: dict[str, Any]) -> None:
         """Display firmware release notes."""
-        self._dict_table(
-            "Release Notes",
-            data,
-            empty_msg="[dim]No release notes available.[/dim]",
-        )
+        version = data.get("deployed_version") or data.get("release_notes_version", "")
+        notes = data.get("release_notes", [])
+
+        if not notes:
+            self._con.print("[dim]No release notes available.[/dim]")
+            return
+
+        if version:
+            self._con.print(f"[bold]Release Notes — {version}[/bold]")
+            self._con.print()
+
+        for note in notes:
+            if not isinstance(note, dict):
+                self._con.print(f"  {note}")
+                continue
+            title = note.get("title", "")
+            desc = note.get("description", "")
+            if title:
+                self._con.print(f"[bold cyan]{title}[/bold cyan]")
+            if desc:
+                for line in desc.strip().splitlines():
+                    self._con.print(f"  {line.strip()}")
+                self._con.print()
 
     # ------------------------------------------------------------------
     # Vehicle list
@@ -339,10 +357,14 @@ class RichOutput:
         ):
             rows.append(("Time to full", f"{cs.time_to_full_charge:.1f}h"))
         if cs.scheduled_charging_start_time is not None:
+            from datetime import UTC
+
             rows.append(
                 (
                     "Scheduled start",
-                    datetime.fromtimestamp(cs.scheduled_charging_start_time).strftime("%I:%M %p"),
+                    datetime.fromtimestamp(cs.scheduled_charging_start_time, tz=UTC)
+                    .astimezone()
+                    .strftime("%I:%M %p"),
                 )
             )
         if cs.scheduled_departure_time_minutes is not None:
@@ -410,26 +432,36 @@ class RichOutput:
     # ------------------------------------------------------------------
 
     def location(self, ds: DriveState) -> None:
-        """Print a table of drive-state / location fields."""
+        """Print a table of GPS location fields."""
         table = Table(title="Location")
         table.add_column("Field", style="bold")
         table.add_column("Value")
 
         if ds.latitude is not None and ds.longitude is not None:
-            table.add_row("Coordinates", f"{ds.latitude}, {ds.longitude}")
+            table.add_row("Latitude", str(ds.latitude))
+            table.add_row("Longitude", str(ds.longitude))
         if ds.heading is not None:
             table.add_row("Heading", f"{ds.heading}\u00b0")
-        if ds.shift_state:
-            table.add_row("Gear", ds.shift_state)
-        if ds.speed is not None:
-            table.add_row("Speed", self._fmt_speed(ds.speed))
-        if ds.power is not None:
-            table.add_row("Power", f"{ds.power} kW")
         if ds.timestamp is not None:
             table.add_row(
                 "Updated",
                 datetime.fromtimestamp(ds.timestamp / 1000).strftime("%Y-%m-%d %H:%M:%S"),
             )
+
+        # Show any additional location fields from the API (extra="allow")
+        _known = {
+            "latitude",
+            "longitude",
+            "heading",
+            "timestamp",
+            "shift_state",
+            "speed",
+            "power",
+        }
+        for key, value in sorted((ds.model_extra or {}).items()):
+            if key not in _known and value is not None:
+                label = key.replace("_", " ").title()
+                table.add_row(label, str(value))
 
         self._con.print(table)
 

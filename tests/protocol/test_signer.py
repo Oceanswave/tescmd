@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 
-from tescmd.protocol.protobuf.messages import Domain
 from tescmd.protocol.signer import (
     compute_hmac_tag,
     derive_session_info_key,
@@ -59,22 +58,13 @@ def test_derive_session_info_key_different_from_signing() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_compute_hmac_tag_infotainment_full_length() -> None:
-    """Infotainment domain must return a full 32-byte HMAC tag."""
+def test_compute_hmac_tag_full_length() -> None:
+    """HMAC tag must always be the full 32-byte SHA-256 output."""
     signing_key = derive_signing_key(b"test-session")
     metadata = b"\x01\x02\x03"
     payload = b"\x0a\x0b\x0c"
-    tag = compute_hmac_tag(signing_key, metadata, payload, domain=Domain.DOMAIN_INFOTAINMENT)
+    tag = compute_hmac_tag(signing_key, metadata, payload)
     assert len(tag) == 32
-
-
-def test_compute_hmac_tag_vcsec_truncated() -> None:
-    """VCSEC domain must return a truncated 17-byte HMAC tag."""
-    signing_key = derive_signing_key(b"test-session")
-    metadata = b"\x01\x02\x03"
-    payload = b"\x0a\x0b\x0c"
-    tag = compute_hmac_tag(signing_key, metadata, payload, domain=Domain.DOMAIN_VEHICLE_SECURITY)
-    assert len(tag) == 17
 
 
 def test_compute_hmac_tag_deterministic() -> None:

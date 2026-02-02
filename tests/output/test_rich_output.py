@@ -108,14 +108,13 @@ class TestLocation:
         console, buf = _make_console()
         ro = RichOutput(console)
 
-        ds = DriveState(latitude=37.394, longitude=-122.150, heading=270, speed=65)
+        ds = DriveState(latitude=37.394, longitude=-122.150, heading=270)
         ro.location(ds)
         output = buf.getvalue()
 
         assert "37.394" in output
         assert "-122.15" in output
         assert "270" in output
-        assert "65" in output
 
     def test_renders_timestamp(self) -> None:
         console, buf = _make_console()
@@ -396,17 +395,18 @@ class TestMetricUnits:
         assert "km" in output
         assert "48.3" in output
 
-    def test_speed_in_kmh(self) -> None:
+    def test_location_does_not_show_speed(self) -> None:
+        """Location display shows GPS fields only, not drive dynamics."""
         console, buf = _make_console()
         ro = RichOutput(console, units=self._METRIC)
 
-        ds = DriveState(speed=60)
+        ds = DriveState(latitude=37.394, longitude=-122.150, speed=60)
         ro.location(ds)
         output = buf.getvalue()
 
-        # 60 mph → 97 km/h
-        assert "97" in output
-        assert "km/h" in output
+        assert "37.394" in output
+        # Speed is a drive_state field, not shown in location
+        assert "km/h" not in output
 
     def test_pressure_in_bar(self) -> None:
         console, buf = _make_console()

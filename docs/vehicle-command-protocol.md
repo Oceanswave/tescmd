@@ -89,9 +89,9 @@ Expired sessions trigger an automatic re-handshake.
 
 For each command:
 
-1. **Serialize metadata** as TLV (tag-length-value): epoch, expiry timestamp, counter
-2. **Build payload** — the command body as JSON-encoded bytes
-3. **Compute HMAC tag**: `HMAC-SHA256(signing_key, metadata || payload)`
+1. **Serialize metadata** as TLV (tag-length-value): signature type, domain, VIN (personalization), epoch, expiry timestamp, counter, and optional flags — tags must appear in ascending order (see [TLV tag table](#tlv-metadata-encoding) below)
+2. **Build payload** — the command body as serialized protobuf bytes (VCSEC commands use `UnsignedMessage`, Infotainment commands use `Action { VehicleAction { ... } }`)
+3. **Compute HMAC tag**: `HMAC-SHA256(signing_key, metadata || 0xFF || payload)` — the `0xFF` byte (TAG_END) separates metadata from payload in the HMAC input
    - VCSEC domain: truncate to 17 bytes
    - Infotainment domain: full 32 bytes
 4. **Assemble RoutableMessage** with the payload, signature data (epoch, counter, expiry, tag), and signer identity (public key)
@@ -104,9 +104,9 @@ tescmd maintains a registry of all known commands with their domain and signing 
 
 | Category | Count | Domain | Signed |
 |---|---|---|---|
-| VCSEC commands | 7 | `DOMAIN_VEHICLE_SECURITY` | Yes |
-| Infotainment commands | ~45 | `DOMAIN_INFOTAINMENT` | Yes |
-| Unsigned commands | 1 (`wake_up`) | `DOMAIN_BROADCAST` | No |
+| VCSEC commands | 8 | `DOMAIN_VEHICLE_SECURITY` | Yes |
+| Infotainment commands | 67 | `DOMAIN_INFOTAINMENT` | Yes |
+| Unsigned commands | 4 | `DOMAIN_BROADCAST` | No (`wake_up` + 3 managed charging) |
 
 The `command_protocol` setting controls how commands are routed:
 
@@ -130,14 +130,16 @@ src/tescmd/protocol/
 │   ├── __init__.py
 │   └── messages.py       # Hand-written protobuf: RoutableMessage, SessionInfo, Domain, etc.
 ├── session.py            # SessionManager — ECDH handshake, caching, counter management
-├── signer.py             # HMAC-SHA256 signing and verification
-├── metadata.py           # TLV serialization for command metadata
+├── signer.py             # HMAC-SHA256 signing, session info tag verification
+├── metadata.py           # TLV serialization for command metadata (all 8 tags + end sentinel)
+├── payloads.py           # Protobuf payload builders for each command (VCSEC UnsignedMessage, Infotainment Action)
 ├── commands.py           # Command registry: name → (domain, signing requirement)
 └── encoder.py            # RoutableMessage assembly + base64 encoding
 
 src/tescmd/crypto/
 ├── keys.py               # EC key generation, PEM load/save
-└── ecdh.py               # ECDH key exchange, uncompressed public key extraction
+├── ecdh.py               # ECDH key exchange, uncompressed public key extraction
+└── schnorr.py            # Schnorr signatures (Tesla.SS256) for fleet telemetry JWS tokens
 
 src/tescmd/api/
 └── signed_command.py     # SignedCommandAPI — routes signed/unsigned commands
@@ -149,7 +151,21 @@ The Vehicle Command Protocol has several subtleties that aren't documented in Te
 
 ### TLV Metadata Encoding
 
-The metadata TLV (tag-length-value) format uses single-byte tags. The domain tag (`TAG_DOMAIN = 0x05`) must be encoded as a single byte value (e.g., `0x01` for Infotainment), not as a string. The end sentinel (`TAG_END = 0xFF`) is a bare byte — not a full TLV triple.
+The metadata block is a sequence of TLV (tag-length-value) entries: `tag(1B) || length(1B) || value`. Tags must appear in ascending order. The complete tag table (from Tesla's `signatures.proto` Tag enum):
+
+| Tag | Name | Size | Description |
+|---|---|---|---|
+| `0x00` | `TAG_SIGNATURE_TYPE` | 1 byte | SignatureType enum (8 = HMAC_PERSONALIZED) |
+| `0x01` | `TAG_DOMAIN` | 1 byte | Numeric Domain enum value (e.g., 2 = VCSEC, 3 = Infotainment) |
+| `0x02` | `TAG_PERSONALIZATION` | variable | VIN string (17 chars) |
+| `0x03` | `TAG_EPOCH` | variable | Session epoch identifier from vehicle |
+| `0x04` | `TAG_EXPIRES_AT` | 4 bytes | Big-endian uint32 — seconds since Unix epoch |
+| `0x05` | `TAG_COUNTER` | 4 bytes | Big-endian uint32 — monotonic anti-replay counter |
+| `0x06` | `TAG_CHALLENGE` | variable | BLE challenge (not used for REST path) |
+| `0x07` | `TAG_FLAGS` | 4 bytes | Big-endian uint32 — optional flags |
+| `0xFF` | `TAG_END` | 0 bytes | Bare byte — terminates metadata (no length byte) |
+
+The domain tag value is a numeric enum, not a string. The end sentinel (`TAG_END = 0xFF`) is a bare byte with no length field — it serves as the separator between metadata and payload in the HMAC input (see below).
 
 ### Expiry Timestamps
 
@@ -164,11 +180,26 @@ This yields a small value (typically thousands of seconds) relative to the vehic
 
 ### HMAC Input
 
-The HMAC tag is computed over `metadata_bytes || payload_bytes`. For VCSEC commands, the tag is truncated to 17 bytes; for Infotainment commands, the full 32-byte tag is used.
+The HMAC tag is computed over `metadata_bytes || 0xFF || payload_bytes`. The `0xFF` byte (TAG_END) is a bare separator between the TLV metadata block and the protobuf payload — it has no length byte. This matches the Go SDK's `Checksum()` method which writes `byte(signatures.Tag_TAG_END)` between streaming the metadata entries and the message bytes.
+
+For VCSEC commands, the resulting tag is truncated to 17 bytes; for Infotainment commands, the full 32-byte tag is used.
+
+### Session Info Verification
+
+After receiving a `SessionInfo` response, the client verifies the HMAC tag attached to the response using a derived session info key: `HMAC-SHA256(K, "session info")`. This prevents man-in-the-middle injection of fake session parameters. The `verify_session_info_tag()` function in `signer.py` handles this check.
 
 ### Session Handshake
 
-The handshake exchanges uncompressed 65-byte EC P-256 public keys (prefix byte `0x04`). The client sends its key in a `SessionInfoRequest`; the vehicle responds with a `SessionInfo` containing the vehicle's public key, epoch, counter, and clock time.
+The handshake exchanges uncompressed 65-byte EC P-256 public keys (prefix byte `0x04`). The client sends its key in a `SessionInfoRequest`; the vehicle responds with a `SessionInfo` containing the vehicle's public key, epoch, counter, and clock time. If a cached session becomes stale (e.g., the vehicle reboots and assigns a new epoch), the command will fail with a signature error. The `SessionManager` detects this and automatically triggers a re-handshake before retrying.
+
+### Payload Building
+
+Command payloads are serialized as protobuf, not JSON. The `payloads.py` module contains builders for each command:
+
+- **VCSEC commands** produce a serialized `UnsignedMessage` (e.g., `RKEAction` for lock/unlock, `ClosureMoveRequest` for trunk)
+- **Infotainment commands** produce a serialized `Action { VehicleAction { ... } }` wrapping command-specific sub-messages
+
+Field numbers match Tesla's `car_server.proto` and `vcsec.proto` definitions. The `build_command_payload()` function dispatches to the correct builder based on the REST command name.
 
 ## Troubleshooting
 

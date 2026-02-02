@@ -9,6 +9,7 @@ import click
 from tescmd._internal.async_utils import run_async
 from tescmd.cli._client import TTL_DEFAULT, TTL_STATIC, cached_api_call, get_user_api
 from tescmd.cli._options import global_options
+from tescmd.models.user import FeatureConfig, UserInfo, UserRegion, VehicleOrder
 
 if TYPE_CHECKING:
     from tescmd.cli.main import AppContext
@@ -34,6 +35,7 @@ async def _cmd_me(app_ctx: AppContext) -> None:
             endpoint="user.me",
             fetch=lambda: api.me(),
             ttl=TTL_STATIC,
+            model_class=UserInfo,
         )
     finally:
         await client.close()
@@ -62,6 +64,7 @@ async def _cmd_region(app_ctx: AppContext) -> None:
             endpoint="user.region",
             fetch=lambda: api.region(),
             ttl=TTL_STATIC,
+            model_class=UserRegion,
         )
     finally:
         await client.close()
@@ -90,6 +93,7 @@ async def _cmd_orders(app_ctx: AppContext) -> None:
             endpoint="user.orders",
             fetch=lambda: api.orders(),
             ttl=TTL_DEFAULT,
+            model_class=VehicleOrder,
         )
     finally:
         await client.close()
@@ -130,6 +134,7 @@ async def _cmd_features(app_ctx: AppContext) -> None:
             endpoint="user.features",
             fetch=lambda: api.feature_config(),
             ttl=TTL_STATIC,
+            model_class=FeatureConfig,
         )
     finally:
         await client.close()
@@ -139,7 +144,17 @@ async def _cmd_features(app_ctx: AppContext) -> None:
     else:
         dumped = data.model_dump(exclude_none=True) if hasattr(data, "model_dump") else data
         if dumped:
+            from rich.table import Table
+
+            table = Table(title="Feature Flags")
+            table.add_column("Feature", style="bold")
+            table.add_column("Value")
             for key, val in sorted(dumped.items()):
-                formatter.rich.info(f"  {key}: {val}")
+                if isinstance(val, dict):
+                    parts = [f"{k}={v}" for k, v in val.items()]
+                    table.add_row(key, ", ".join(parts))
+                else:
+                    table.add_row(key, str(val))
+            formatter.rich._con.print(table)
         else:
             formatter.rich.info("[dim]No feature flags available.[/dim]")

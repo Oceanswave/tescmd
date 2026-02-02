@@ -133,7 +133,13 @@ def valet_reset_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
 @click.argument("vin_positional", required=False, default=None, metavar="VIN")
 @global_options
 def remote_start_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
-    """Enable remote start."""
+    """Enable keyless driving for 2 minutes.
+
+    \b
+    Allows starting the vehicle without a key card or phone key present.
+    The driver must press the brake pedal and shift into gear within 2
+    minutes or keyless driving is disabled again.
+    """
     run_async(
         execute_command(
             app_ctx,

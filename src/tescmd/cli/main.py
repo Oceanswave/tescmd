@@ -6,6 +6,7 @@ import dataclasses
 import logging
 
 import click
+from dotenv import load_dotenv
 
 from tescmd._internal.async_utils import run_async
 from tescmd.api.errors import (
@@ -61,6 +62,13 @@ class AppContext:
             self._formatter = OutputFormatter(force_format=force, units=units)
         return self._formatter
 
+
+# ---------------------------------------------------------------------------
+# Load .env into os.environ before Click resolves any envvar= options.
+# This ensures TESLA_VIN, TESCMD_MCP_CLIENT_ID, etc. from .env files
+# are visible to Click's envvar resolution.
+# ---------------------------------------------------------------------------
+load_dotenv(override=False)
 
 # ---------------------------------------------------------------------------
 # Root Click group
@@ -160,11 +168,14 @@ def _register_commands() -> None:
     from tescmd.cli.climate import climate_group
     from tescmd.cli.energy import energy_group
     from tescmd.cli.key import key_group
+    from tescmd.cli.mcp_cmd import mcp_group
     from tescmd.cli.media import media_group
     from tescmd.cli.nav import nav_group
+    from tescmd.cli.openclaw import openclaw_group
     from tescmd.cli.partner import partner_group
     from tescmd.cli.raw import raw_group
     from tescmd.cli.security import security_group
+    from tescmd.cli.serve import serve_cmd
     from tescmd.cli.setup import setup_cmd
     from tescmd.cli.sharing import sharing_group
     from tescmd.cli.software import software_group
@@ -180,11 +191,14 @@ def _register_commands() -> None:
     cli.add_command(climate_group)
     cli.add_command(energy_group)
     cli.add_command(key_group)
+    cli.add_command(mcp_group)
     cli.add_command(media_group)
     cli.add_command(nav_group)
+    cli.add_command(openclaw_group)
     cli.add_command(partner_group)
     cli.add_command(raw_group)
     cli.add_command(security_group)
+    cli.add_command(serve_cmd)
     cli.add_command(setup_cmd)
     cli.add_command(sharing_group)
     cli.add_command(status_cmd)
@@ -563,14 +577,19 @@ def _handle_session_error(
     formatter.rich.error(message)
     formatter.rich.info("")
     formatter.rich.info("Possible causes:")
-    formatter.rich.info("  - Vehicle is temporarily unreachable")
-    formatter.rich.info("  - Local key pair is corrupted")
-    formatter.rich.info("  - Key was re-generated but not re-enrolled")
+    formatter.rich.info("  - Vehicle is temporarily unreachable or asleep")
+    formatter.rich.info("  - Session expired — retry once and a fresh handshake will occur")
+    formatter.rich.info(
+        "  - Local key pair is corrupted or was re-generated without re-enrollment"
+    )
     formatter.rich.info("")
-    formatter.rich.info("Try again, or if the problem persists:")
-    formatter.rich.info("  [cyan]tescmd key generate --force[/cyan]  (regenerate key pair)")
-    formatter.rich.info("  [cyan]tescmd key deploy[/cyan]            (re-deploy public key)")
-    formatter.rich.info("  [cyan]tescmd key enroll[/cyan]            (re-enroll on vehicle)")
+    formatter.rich.info("Try:")
+    formatter.rich.info("  1. Re-run the command (sessions auto-refresh)")
+    formatter.rich.info("  2. Use [cyan]--verbose[/cyan] to see fault codes and signing details")
+    formatter.rich.info("  3. If repeated failures, re-enroll:")
+    formatter.rich.info(
+        "     [cyan]tescmd key generate --force && tescmd key deploy && tescmd key enroll[/cyan]"
+    )
 
 
 def _handle_keyring_error(
@@ -642,4 +661,4 @@ def _handle_tunnel_error(
         " [cyan]https://login.tailscale.com/admin/acls[/cyan]"
     )
     formatter.rich.info("")
-    formatter.rich.info("Install telemetry deps: [cyan]pip install tescmd[telemetry][/cyan]")
+    formatter.rich.info("Telemetry deps are included with tescmd.")
