@@ -256,10 +256,10 @@ def _automated_domain_setup(formatter: OutputFormatter, settings: AppSettings) -
     info(f"GitHub CLI detected. Logged in as [cyan]{username}[/cyan].")
     info(f"Suggested domain: [cyan]{suggested_domain}[/cyan]")
     info("")
-    info("[dim]Note: GitHub Pages provides always-on key hosting but cannot")
-    info("serve as a Fleet Telemetry server. If you plan to use telemetry")
-    info("streaming, choose Tailscale instead (install Tailscale, then")
-    info("re-run setup).[/dim]")
+    info("[dim]Note: GitHub Pages provides always-on key hosting but cannot[/dim]")
+    info("[dim]serve as a Fleet Telemetry server. If you plan to use telemetry[/dim]")
+    info("[dim]streaming, choose Tailscale instead (install Tailscale, then[/dim]")
+    info("[dim]re-run setup).[/dim]")
     info("")
 
     try:

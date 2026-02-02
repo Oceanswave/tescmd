@@ -144,6 +144,7 @@ _VA_REMOVE_PRECONDITION_SCHEDULE = 100
 _VA_BOOMBOX = 64  # VehicleControlRemoteBoomboxAction
 _VA_BATCH_REMOVE_PRECONDITION = 107
 _VA_BATCH_REMOVE_CHARGE = 108
+_VA_SET_LOW_POWER_MODE = 130
 
 
 # ---------------------------------------------------------------------------
@@ -527,6 +528,13 @@ def _steering_wheel_heat_level(body: dict[str, Any]) -> bytes:
     return _wrap_vehicle_action(_VA_HVAC_STEERING_WHEEL_HEATER, inner)
 
 
+def _set_low_power_mode(body: dict[str, Any]) -> bytes:
+    """SetLowPowerModeAction: low_power_mode (field 1, bool)."""
+    on = body.get("enable", True)
+    inner = _encode_varint_field(1, 1 if on else 0)
+    return _wrap_vehicle_action(_VA_SET_LOW_POWER_MODE, inner)
+
+
 # ---------------------------------------------------------------------------
 # Builder registry — maps REST command names to payload builder functions
 # ---------------------------------------------------------------------------
@@ -610,6 +618,8 @@ _BUILDERS: dict[str, _PayloadBuilder] = {
     "sun_roof_control": _sunroof,
     # Window (infotainment path)
     "window_control": _window_control,
+    # Power management
+    "set_low_power_mode": _set_low_power_mode,
 }
 
 

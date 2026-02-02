@@ -55,7 +55,7 @@ def mock_session() -> Session:
         session_info_key=b"\xcc" * 32,
         epoch=b"\x01\x02\x03\x04",
         counter=0,
-        clock_offset=0,
+        time_zero=time.time(),
         created_at=time.monotonic(),
     )
 
@@ -254,7 +254,7 @@ class TestSignedResponseParsing:
         # Should have been called twice: original + retry
         assert mock_client.post.await_count == 2
         # Session should have been invalidated after the first (stale) response
-        mock_session_mgr.invalidate.assert_called_once_with(VIN)
+        mock_session_mgr.invalidate.assert_called_once_with(VIN, Domain.DOMAIN_VEHICLE_SECURITY)
 
     @pytest.mark.asyncio
     async def test_stale_session_gives_up_after_one_retry(

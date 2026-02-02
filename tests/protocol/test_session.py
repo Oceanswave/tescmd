@@ -297,7 +297,7 @@ class TestSessionExpiry:
             session_info_key=b"\xcc" * 32,
             epoch=b"\x01\x02\x03\x04",
             counter=0,
-            clock_offset=0,
+            time_zero=time.time(),
             created_at=time.monotonic(),
         )
         assert not session.is_expired
@@ -311,7 +311,7 @@ class TestSessionExpiry:
             session_info_key=b"\xcc" * 32,
             epoch=b"\x01\x02\x03\x04",
             counter=0,
-            clock_offset=0,
+            time_zero=time.time(),
             created_at=time.monotonic() - _SESSION_TTL - 1,
         )
         assert session.is_expired
@@ -325,7 +325,7 @@ class TestSessionExpiry:
             session_info_key=b"\xcc" * 32,
             epoch=b"\x01\x02\x03\x04",
             counter=5,
-            clock_offset=0,
+            time_zero=time.time(),
             created_at=time.monotonic(),
         )
         assert session.next_counter() == 6

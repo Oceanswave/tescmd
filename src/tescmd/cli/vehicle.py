@@ -370,9 +370,12 @@ async def _cmd_alerts(app_ctx: AppContext, vin_positional: str | None) -> None:
     else:
         if alerts:
             for alert in alerts:
-                name = alert.get("name", "Unknown")
-                ts = alert.get("time", "")
-                formatter.rich.info(f"  {name}  [dim]{ts}[/dim]")
+                if isinstance(alert, dict):
+                    name = alert.get("name", "Unknown")
+                    ts = alert.get("time", "")
+                    formatter.rich.info(f"  {name}  [dim]{ts}[/dim]")
+                else:
+                    formatter.rich.info(f"  {alert}")
         else:
             formatter.rich.info("[dim]No recent alerts.[/dim]")
 
@@ -466,37 +469,76 @@ async def _cmd_drivers(app_ctx: AppContext, vin_positional: str | None) -> None:
         formatter.output(drivers, command="vehicle.drivers")
     else:
         if drivers:
+            formatter.rich.info("[bold]Drivers[/bold]")
             for d in drivers:
-                email = (d.get("email") if isinstance(d, dict) else d.email) or "unknown"
-                status = (d.get("status") if isinstance(d, dict) else d.status) or ""
-                formatter.rich.info(f"  {email}  [dim]{status}[/dim]")
+                row = d if isinstance(d, dict) else d.model_dump(exclude_none=True)
+                user_id = row.get("share_user_id", "")
+                email = row.get("email") or "(no email)"
+                status = row.get("status") or ""
+                parts = [f"  {email}"]
+                if status:
+                    parts.append(f"[dim]{status}[/dim]")
+                if user_id:
+                    parts.append(f"[dim](id: {user_id})[/dim]")
+                formatter.rich.info("  ".join(parts))
         else:
             formatter.rich.info("[dim]No drivers found.[/dim]")
 
 
 @vehicle_group.command("calendar")
 @click.argument("vin_positional", required=False, default=None, metavar="VIN")
-@click.argument("calendar_data")
+@click.option(
+    "--file",
+    "-f",
+    "calendar_file",
+    type=click.File("r"),
+    default=None,
+    help="Read calendar JSON from file (use '-' for stdin)",
+)
+@click.argument("calendar_data", required=False, default=None)
 @global_options
-def calendar_cmd(app_ctx: AppContext, vin_positional: str | None, calendar_data: str) -> None:
+def calendar_cmd(
+    app_ctx: AppContext,
+    vin_positional: str | None,
+    calendar_file: click.utils.LazyFile | None,
+    calendar_data: str | None,
+) -> None:
     """Send calendar entries to the vehicle.
 
-    CALENDAR_DATA should be a JSON string of calendar entries.
+    Pass calendar JSON as an argument, via --file, or piped through stdin.
+
+    \b
+    Examples:
+      tescmd vehicle calendar '{"entries": [...]}'
+      tescmd vehicle calendar --file cal.json
+      cat cal.json | tescmd vehicle calendar --file -
     """
+    import sys
+
+    if calendar_file is not None:
+        data = calendar_file.read()  # type: ignore[union-attr]
+    elif calendar_data is not None:
+        data = calendar_data
+    elif not sys.stdin.isatty():
+        data = sys.stdin.read()
+    else:
+        raise click.UsageError(
+            "No calendar data provided.\n\n"
+            "Usage:\n"
+            "  tescmd vehicle calendar '{\"entries\": [...]}'\n"
+            "  tescmd vehicle calendar --file cal.json\n"
+            "  cat cal.json | tescmd vehicle calendar --file -"
+        )
+
     run_async(
         execute_command(
             app_ctx,
             vin_positional,
             "upcoming_calendar_entries",
             "vehicle.calendar",
-            body={"calendar_data": calendar_data},
+            body={"calendar_data": data.strip()},
         )
     )
-
-
-# ---------------------------------------------------------------------------
-# Power management commands
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
@@ -625,13 +667,14 @@ async def _cmd_specs(app_ctx: AppContext, vin_positional: str | None) -> None:
 
 
 @vehicle_group.command("warranty")
+@click.argument("vin_positional", required=False, default=None, metavar="VIN")
 @global_options
-def warranty_cmd(app_ctx: AppContext) -> None:
-    """Fetch warranty details for the account."""
-    run_async(_cmd_warranty(app_ctx))
+def warranty_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
+    """Fetch warranty details for the vehicle."""
+    run_async(_cmd_warranty(app_ctx, vin_positional))
 
 
-async def _cmd_warranty(app_ctx: AppContext) -> None:
+async def _cmd_warranty(app_ctx: AppContext, vin_positional: str | None) -> None:
     formatter = app_ctx.formatter
     client, api = get_vehicle_api(app_ctx)
     try:

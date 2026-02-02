@@ -5,6 +5,7 @@ dist/
 build/
 .venv/
 .env
+.env.bak
 *.pem
 .mypy_cache/
 .pytest_cache/

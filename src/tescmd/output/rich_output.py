@@ -214,11 +214,29 @@ class RichOutput:
 
     def vehicle_release_notes(self, data: dict[str, Any]) -> None:
         """Display firmware release notes."""
-        self._dict_table(
-            "Release Notes",
-            data,
-            empty_msg="[dim]No release notes available.[/dim]",
-        )
+        version = data.get("deployed_version") or data.get("release_notes_version", "")
+        notes = data.get("release_notes", [])
+
+        if not notes:
+            self._con.print("[dim]No release notes available.[/dim]")
+            return
+
+        if version:
+            self._con.print(f"[bold]Release Notes — {version}[/bold]")
+            self._con.print()
+
+        for note in notes:
+            if not isinstance(note, dict):
+                self._con.print(f"  {note}")
+                continue
+            title = note.get("title", "")
+            desc = note.get("description", "")
+            if title:
+                self._con.print(f"[bold cyan]{title}[/bold cyan]")
+            if desc:
+                for line in desc.strip().splitlines():
+                    self._con.print(f"  {line.strip()}")
+                self._con.print()
 
     # ------------------------------------------------------------------
     # Vehicle list
@@ -434,6 +452,13 @@ class RichOutput:
                 "Updated",
                 datetime.fromtimestamp(ds.timestamp / 1000).strftime("%Y-%m-%d %H:%M:%S"),
             )
+
+        # Show any additional fields returned by the API (extra="allow" on the model)
+        _known = {"latitude", "longitude", "heading", "shift_state", "speed", "power", "timestamp"}
+        for key, value in sorted(ds.model_extra.items()):
+            if key not in _known and value is not None:
+                label = key.replace("_", " ").title()
+                table.add_row(label, str(value))
 
         self._con.print(table)
 

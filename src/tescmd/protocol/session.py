@@ -63,7 +63,7 @@ class Session:
     session_info_key: bytes
     epoch: bytes
     counter: int
-    clock_offset: int  # vehicle_clock - local_clock (seconds)
+    time_zero: float  # wall-clock time when the vehicle's epoch counter was 0
     created_at: float
     ttl: float = _SESSION_TTL
 
@@ -308,9 +308,11 @@ class SessionManager:
                 "The vehicle response may have been tampered with."
             )
 
-        # Calculate clock offset
-        local_time = int(time.time())
-        clock_offset = session_info.clock_time - local_time if session_info.clock_time else 0
+        # Reconstruct the wall-clock instant when the vehicle's epoch counter
+        # was zero.  The Go SDK does: timeZero = now - Duration(clockTime).
+        # clock_time is a monotonic uptime counter (seconds since the
+        # vehicle's security module last booted), NOT a Unix timestamp.
+        time_zero = time.time() - session_info.clock_time if session_info.clock_time else time.time()
 
         return Session(
             vin=vin,
@@ -320,6 +322,6 @@ class SessionManager:
             session_info_key=session_info_key,
             epoch=session_info.epoch,
             counter=session_info.counter,
-            clock_offset=clock_offset,
+            time_zero=time_zero,
             created_at=time.monotonic(),
         )

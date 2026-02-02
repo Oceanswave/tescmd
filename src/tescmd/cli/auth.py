@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from tescmd.cli.main import AppContext
     from tescmd.output.formatter import OutputFormatter
 
-DEVELOPER_PORTAL_URL = "https://developer.tesla.com"
+DEVELOPER_PORTAL_URL = "https://developer.tesla.com/dashboard"
 
 
 # ---------------------------------------------------------------------------

@@ -103,7 +103,7 @@ class SignedCommandAPI:
 
         # Metadata + HMAC
         counter = session.next_counter()
-        expires_at = default_expiry(clock_offset=session.clock_offset)
+        expires_at = default_expiry(time_zero=session.time_zero)
         metadata_bytes = encode_metadata(
             epoch=session.epoch,
             expires_at=expires_at,
@@ -115,17 +115,16 @@ class SignedCommandAPI:
             session.signing_key,
             metadata_bytes,
             payload,
-            domain=domain,
         )
 
         logger.debug(
             "Signed command '%s' for %s: counter=%d, expires_at=%d "
-            "(clock_offset=%d), payload=%s, metadata=%s, hmac_tag=%s",
+            "(time_zero=%.1f), payload=%s, metadata=%s, hmac_tag=%s",
             command,
             vin,
             counter,
             expires_at,
-            session.clock_offset,
+            session.time_zero,
             payload.hex(),
             metadata_bytes.hex(),
             hmac_tag.hex(),
@@ -168,7 +167,7 @@ class SignedCommandAPI:
             # etc.) propagate so callers like auto_wake() can handle them.
             raise
 
-        result = self._parse_signed_response(data, vin, command)
+        result = self._parse_signed_response(data, vin, command, domain)
         if result is not None:
             return result
 
@@ -194,6 +193,7 @@ class SignedCommandAPI:
         data: dict[str, Any],
         vin: str,
         command: str,
+        domain: Domain,
     ) -> CommandResponse | None:
         """Parse a signed_command endpoint response.
 
@@ -237,7 +237,7 @@ class SignedCommandAPI:
 
             # Stale session — invalidate and signal caller to retry.
             if fault in _STALE_SESSION_FAULTS:
-                self._session_mgr.invalidate(vin)
+                self._session_mgr.invalidate(vin, domain)
                 logger.debug(
                     "Stale session fault %s for %s, invalidated cache",
                     fault.name,
