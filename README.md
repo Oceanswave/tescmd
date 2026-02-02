@@ -27,7 +27,8 @@ tescmd is designed to work as a tool that AI agents can invoke directly. Platfor
 - **User & sharing** — account info, region, orders, feature flags, driver management, vehicle sharing invites
 - **Live Dashboard** — `tescmd serve` launches a full-screen TUI showing live telemetry data, MCP server info, tunnel URL, sink count, and cache stats — all in a scrollable, interactive terminal UI powered by Textual
 - **Fleet Telemetry streaming** — `tescmd serve` (or `tescmd vehicle telemetry stream`) receives push-based data from your vehicle via Tailscale Funnel — no polling, 99%+ cost reduction. Telemetry sessions produce a wide-format CSV log by default
-- **OpenClaw Bridge** — `tescmd serve --openclaw ws://...` streams filtered telemetry to an OpenClaw Gateway with configurable delta+throttle filtering per field
+- **OpenClaw Bridge** — `tescmd serve --openclaw ws://...` streams filtered telemetry to an OpenClaw Gateway with configurable delta+throttle filtering per field; supports bidirectional command dispatch so bots can send vehicle commands back through the gateway
+- **Trigger subscriptions** — register conditions on any telemetry field (battery < 20%, speed > 80, location enters geofence) and get notified via OpenClaw push events or MCP polling; supports one-shot and persistent modes with cooldown
 - **MCP Server** — `tescmd serve` (or `tescmd mcp serve`) exposes all commands as MCP tools for Claude.ai, Claude Desktop, Claude Code, and other agent frameworks via OAuth 2.1
 - **Universal response caching** — all read commands are cached with tiered TTLs (1h for specs/warranty, 5m for fleet lists, 1m standard, 30s for location-dependent); bots can call tescmd as often as needed — within the TTL window, responses are instant and free
 - **Cost-aware wake** — prompts before sending billable wake API calls; `--wake` flag for scripts that accept the cost
@@ -179,8 +180,9 @@ Check which backend is active with `tescmd status` — the output includes a `To
 | `sharing` | `add-driver`, `remove-driver`, `create-invite`, `redeem-invite`, `revoke-invite`, `list-invites` | Vehicle sharing and driver management |
 | `key` | `generate`, `deploy`, `validate`, `show`, `enroll`, `unenroll` | Key management and enrollment |
 | `partner` | `public-key`, `telemetry-error-vins`, `telemetry-errors` | Partner account endpoints (require client credentials) |
-| `openclaw` | `bridge` | Stream filtered telemetry to an OpenClaw Gateway |
-| `mcp` | `serve` | MCP server exposing all commands as agent tools |
+| `serve` | *(unified server)* | Combined MCP + telemetry + OpenClaw TUI dashboard with trigger subscriptions |
+| `openclaw` | `bridge` | Standalone OpenClaw bridge with bidirectional command dispatch |
+| `mcp` | `serve` | Standalone MCP server exposing all commands as agent tools |
 | `cache` | `status`, `clear` | Response cache management |
 | `raw` | `get`, `post` | Arbitrary Fleet API endpoint access |
 
@@ -457,6 +459,8 @@ See [docs/development.md](docs/development.md) for detailed contribution guideli
 - [Command Reference](docs/commands.md) — detailed usage for every command
 - [API Costs](docs/api-costs.md) — detailed cost breakdown and savings calculations
 - [Bot Integration](docs/bot-integration.md) — JSON schema, exit codes, telemetry streaming, headless auth
+- [OpenClaw Bridge](docs/openclaw.md) — gateway protocol, bidirectional commands, trigger subscriptions, geofencing
+- [MCP Server](docs/mcp.md) — tool reference, authentication, custom tools, trigger polling
 - [Architecture](docs/architecture.md) — layered design, module responsibilities, design decisions
 - [Vehicle Command Protocol](docs/vehicle-command-protocol.md) — ECDH sessions and signed commands
 - [Authentication](docs/authentication.md) — OAuth2 PKCE flow, token storage, scopes
