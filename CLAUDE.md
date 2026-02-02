@@ -124,3 +124,8 @@ mypy src/
 | `TESLA_SETUP_TIER` | `readonly` or `full` |
 | `TESLA_PROFILE` | Active config profile |
 | `OPENCLAW_GATEWAY_TOKEN` | OpenClaw gateway auth token |
+
+
+## Additional Resources
+
+Tesla's published vehicle-command proto omits some VehicleAction fields (e.g. navigation commands). The Teslemetry project maintains a more complete proto: https://github.com/Teslemetry/python-tesla-fleet-api/blob/main/proto/car_server.proto

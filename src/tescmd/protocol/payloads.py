@@ -148,6 +148,13 @@ _VA_BATCH_REMOVE_CHARGE = 108
 _VA_SET_LOW_POWER_MODE = 130
 _VA_KEEP_ACCESSORY_POWER = 138
 
+# Navigation (from Teslemetry's extended proto — not in Tesla's published proto)
+# https://github.com/Teslemetry/python-tesla-fleet-api/blob/main/proto/car_server.proto
+_VA_NAVIGATION_REQUEST = 21
+_VA_NAVIGATION_SC_REQUEST = 22
+_VA_NAVIGATION_GPS_REQUEST = 53
+_VA_NAVIGATION_WAYPOINTS_REQUEST = 90
+
 
 # ---------------------------------------------------------------------------
 # Infotainment payload builders
@@ -566,6 +573,60 @@ def _batch_remove_charge_schedules(body: dict[str, Any]) -> bytes:
 
 
 # ---------------------------------------------------------------------------
+# Navigation payload builders
+# ---------------------------------------------------------------------------
+
+
+def _navigation_request(body: dict[str, Any]) -> bytes:
+    """NavigationRequest: destination (field 1, string), order (field 2, int32).
+
+    The CLI ``nav send`` command passes ``{"address": "..."}``.  The REST
+    ``share`` endpoint wraps this in an Android intent JSON, but the VCP
+    proto only needs the destination string.
+    """
+    inner = b""
+    destination = body.get("address", body.get("destination", ""))
+    if destination:
+        inner += _encode_length_delimited(1, str(destination).encode())
+    order = body.get("order")
+    if order is not None:
+        inner += _encode_varint_field(2, int(order))
+    return _wrap_vehicle_action(_VA_NAVIGATION_REQUEST, inner)
+
+
+def _navigation_sc_request(body: dict[str, Any]) -> bytes:
+    """NavigationSuperchargerRequest: order (field 1, int32)."""
+    order = body.get("order", 1)
+    inner = _encode_varint_field(1, int(order))
+    return _wrap_vehicle_action(_VA_NAVIGATION_SC_REQUEST, inner)
+
+
+def _navigation_gps_request(body: dict[str, Any]) -> bytes:
+    """NavigationGpsRequest: lat (1, double), lon (2, double), order (3, enum)."""
+    import struct
+
+    inner = b""
+    lat = body.get("lat", 0.0)
+    lon = body.get("lon", 0.0)
+    # Protobuf double = wire type 1 (fixed 64-bit)
+    inner += _encode_tag_raw(1, 1) + struct.pack("<d", float(lat))
+    inner += _encode_tag_raw(2, 1) + struct.pack("<d", float(lon))
+    order = body.get("order")
+    if order is not None:
+        inner += _encode_varint_field(3, int(order))
+    return _wrap_vehicle_action(_VA_NAVIGATION_GPS_REQUEST, inner)
+
+
+def _navigation_waypoints_request(body: dict[str, Any]) -> bytes:
+    """NavigationWaypointsRequest: waypoints (field 1, string)."""
+    inner = b""
+    waypoints = body.get("waypoints", "")
+    if waypoints:
+        inner += _encode_length_delimited(1, str(waypoints).encode())
+    return _wrap_vehicle_action(_VA_NAVIGATION_WAYPOINTS_REQUEST, inner)
+
+
+# ---------------------------------------------------------------------------
 # Builder registry — maps REST command names to payload builder functions
 # ---------------------------------------------------------------------------
 
@@ -644,6 +705,10 @@ _BUILDERS: dict[str, _PayloadBuilder] = {
     ),
     "adjust_volume": _media_volume,
     # Navigation
+    "share": _navigation_request,
+    "navigation_gps_request": _navigation_gps_request,
+    "navigation_sc_request": _navigation_sc_request,
+    "navigation_waypoints_request": _navigation_waypoints_request,
     "trigger_homelink": _trigger_homelink,
     # Software
     "schedule_software_update": _schedule_software_update,

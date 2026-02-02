@@ -111,15 +111,11 @@ _INFOTAINMENT_COMMANDS: dict[str, CommandSpec] = {
     "media_volume_down": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "adjust_volume": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     # Navigation
-    # NOTE: "share" is intentionally omitted — it has a custom REST implementation
-    # in CommandAPI.share() with a specialized body format.  Keeping it out of
-    # the registry lets SignedCommandAPI.__getattr__ fall through to the real method.
-    "navigation_gps_request": CommandSpec(Domain.DOMAIN_INFOTAINMENT, requires_signing=False),
-    "navigation_sc_request": CommandSpec(Domain.DOMAIN_INFOTAINMENT, requires_signing=False),
+    "share": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
+    "navigation_gps_request": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
+    "navigation_sc_request": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "trigger_homelink": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
-    "navigation_waypoints_request": CommandSpec(
-        Domain.DOMAIN_INFOTAINMENT, requires_signing=False
-    ),
+    "navigation_waypoints_request": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     # Software
     "schedule_software_update": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
     "cancel_software_update": CommandSpec(Domain.DOMAIN_INFOTAINMENT),
