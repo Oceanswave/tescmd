@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-02-02
+
+### Added
+
+- **Unique app name generation** — setup wizard generates a `tescmd-<hex>` application name to prevent collisions on the Tesla Developer Portal; reused on re-runs unless `--force` is passed
+- **In-process KeyServer** — ephemeral HTTP server (`KeyServer`) serves the PEM public key on localhost during interactive setup so Tailscale Funnel can proxy it without writing to the serve directory
+- **Key mismatch warning** — setup wizard detects when the remote public key (GitHub Pages or Tailscale) differs from the local key and warns before Phase 2, so the user knows a redeploy is coming
+- **`fetch_tailscale_key_pem()`** — synchronous helper in the deploy module to fetch the raw PEM from a Tailscale Funnel URL, mirroring `github_pages.fetch_key_pem()`
+- **`TailscaleManager.start_proxy()`** — reverse-proxy mode (`tailscale serve --bg http://127.0.0.1:<port>`) for forwarding to a local HTTP server, distinct from the static-file `start_serve()`
+
+### Changed
+
+- **Setup phase reorder** — phases now run: keys → Fleet API registration → OAuth login → key enrollment (was: keys → enrollment → registration → OAuth); registration happens while credentials are fresh, enrollment is last so the user finishes in the Tesla app
+- **Credentials always required** — both Client ID and Client Secret are mandatory with retry loops (3 attempts each); empty input no longer silently skips setup
+- **Auto-save credentials** — `.env` file is written automatically after credential entry; removed the "Save to .env?" prompt
+- **`--force` regenerates app name** — passing `--force` to setup now generates a fresh `tescmd-<hex>` name instead of reusing the saved one
+- **Atomic Tailscale serve + Funnel** — `start_key_serving()` uses a single `tailscale serve --bg --funnel --set-path / <dir>` command instead of separate serve + funnel calls
+- **`TailscaleManager.start_serve()` API** — added `port` and `funnel` keyword arguments for configurable HTTPS port and inline Funnel enablement
+- **Enrollment messaging** — streamlined to focus on QR code scanning; removed duplicate URL display and the "Open in browser?" prompt (browser opens automatically)
+- **GitHub Pages note** — clarified that Tailscale is used alongside GitHub Pages for telemetry streaming, not as a replacement
+- **Funnel cleanup uses `stop_funnel()`** — finally block in `_interactive_setup` now calls the proper `TailscaleManager.stop_funnel()` method instead of the low-level `_run()` static method, preserving state tracking and idempotency
+
+### Fixed
+
+- **CLI module HTTP isolation** — moved direct `httpx.get()` call out of `setup.py` into `tailscale_serve.fetch_tailscale_key_pem()` to comply with single-responsibility layering (CLI handles args + output, deploy modules handle HTTP)
+
+## [0.3.2] - 2026-02-02
+
+### Fixed
+
+- **OAuth URL printed for manual fallback** — `login_flow()` now prints the authorization URL before opening the browser so users can copy-paste it when `webbrowser.open()` fails
+- **422 "already registered" treated as success** — `register_partner_account()` now treats HTTP 422 with "already been taken" as idempotent success instead of raising `AuthError`; re-running setup or `auth register` shows "Already registered — no action needed"
+- **GitHub key comparison on re-deploy** — `_deploy_key_github()` fetches the remote public key and compares it to the local key; if they match, deployment is skipped; if they differ, the user is prompted before overwriting
+
 ## [0.3.1] - 2026-02-02
 
 ### Added

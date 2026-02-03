@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import urllib.request
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -10,6 +11,7 @@ import pytest
 
 from tescmd.api.errors import TailscaleError
 from tescmd.deploy import tailscale_serve as ts_serve
+from tescmd.deploy.tailscale_serve import KeyServer
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -51,7 +53,7 @@ class TestDeployPublicKeyTailscale:
 
 
 class TestStartKeyServing:
-    async def test_starts_serve_and_funnel(self, tmp_path: Path) -> None:
+    async def test_starts_serve_with_funnel(self, tmp_path: Path) -> None:
         # Create the expected directory structure
         well_known = tmp_path / ".well-known" / "appspecific"
         well_known.mkdir(parents=True)
@@ -68,15 +70,11 @@ class TestStartKeyServing:
             patch.object(
                 ts_serve.TailscaleManager, "start_serve", new_callable=AsyncMock
             ) as mock_serve,
-            patch.object(
-                ts_serve.TailscaleManager, "enable_funnel", new_callable=AsyncMock
-            ) as mock_funnel,
         ):
             hostname = await ts_serve.start_key_serving(serve_dir=tmp_path)
 
         assert hostname == "mybox.tail99.ts.net"
-        mock_serve.assert_awaited_once()
-        mock_funnel.assert_awaited_once()
+        mock_serve.assert_awaited_once_with("/", str(tmp_path), funnel=True)
 
     async def test_raises_when_serve_dir_missing(self, tmp_path: Path) -> None:
         empty_dir = tmp_path / "empty"
@@ -97,7 +95,7 @@ class TestStopKeyServing:
             ts_serve.TailscaleManager, "stop_serve", new_callable=AsyncMock
         ) as mock_stop:
             await ts_serve.stop_key_serving()
-            mock_stop.assert_awaited_once_with("/.well-known/")
+            mock_stop.assert_awaited_once_with("/")
 
 
 # ---------------------------------------------------------------------------
@@ -268,3 +266,61 @@ class TestWaitForTailscaleDeployment:
             ),
         ):
             assert await ts_serve.wait_for_tailscale_deployment("bad.ts.net", timeout=10) is False
+
+
+# ---------------------------------------------------------------------------
+# KeyServer (in-process HTTP server)
+# ---------------------------------------------------------------------------
+
+PEM_CONTENT = "-----BEGIN PUBLIC KEY-----\ntest-key-data\n-----END PUBLIC KEY-----\n"
+
+
+class TestKeyServer:
+    def test_serves_root_200(self) -> None:
+        server = KeyServer(PEM_CONTENT, port=0)
+        server.start()
+        try:
+            port = server.server_address[1]
+            resp = urllib.request.urlopen(f"http://127.0.0.1:{port}/")
+            assert resp.status == 200
+        finally:
+            server.stop()
+
+    def test_serves_wellknown_pem(self) -> None:
+        server = KeyServer(PEM_CONTENT, port=0)
+        server.start()
+        try:
+            port = server.server_address[1]
+            resp = urllib.request.urlopen(f"http://127.0.0.1:{port}/{ts_serve.WELL_KNOWN_PATH}")
+            assert resp.status == 200
+            body = resp.read().decode()
+            assert body == PEM_CONTENT
+            assert resp.headers["Content-Type"] == "application/x-pem-file"
+        finally:
+            server.stop()
+
+    def test_returns_404_for_unknown(self) -> None:
+        server = KeyServer(PEM_CONTENT, port=0)
+        server.start()
+        try:
+            port = server.server_address[1]
+            with pytest.raises(urllib.error.HTTPError) as exc_info:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/unknown")
+            assert exc_info.value.code == 404
+        finally:
+            server.stop()
+
+    def test_start_stop_lifecycle(self) -> None:
+        server = KeyServer(PEM_CONTENT, port=0)
+        server.start()
+        port = server.server_address[1]
+
+        # Server is responsive
+        resp = urllib.request.urlopen(f"http://127.0.0.1:{port}/")
+        assert resp.status == 200
+
+        server.stop()
+
+        # Server is no longer responsive
+        with pytest.raises(urllib.error.URLError):
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=1)

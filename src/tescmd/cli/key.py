@@ -585,13 +585,12 @@ async def _cmd_enroll(
     formatter.rich.info("")
     formatter.rich.info(f"  Enrollment URL: [link={enroll_url}]{enroll_url}[/link]")
     formatter.rich.info("")
-    formatter.rich.info("  1. Open the URL above [bold]on your phone[/bold]")
-    formatter.rich.info("  2. Tap [bold]Finish Setup[/bold] on the web page")
-    formatter.rich.info("  3. The Tesla app will show an [bold]Add Virtual Key[/bold] prompt")
-    formatter.rich.info("  4. Approve it")
+    formatter.rich.info("  1. Scan the QR code on the page above with your phone[/bold]")
+    formatter.rich.info("  2. The Tesla app will show an [bold]Add Virtual Key[/bold] prompt")
+    formatter.rich.info("  3. Select all Scopes (if shown) and approve it")
     formatter.rich.info("")
     formatter.rich.info("  [dim]If the prompt doesn't appear, force-quit the Tesla app,[/dim]")
-    formatter.rich.info("  [dim]go back to your browser, and tap Finish Setup again.[/dim]")
+    formatter.rich.info("  [dim]and scan the QR code again.[/dim]")
     formatter.rich.info("━" * 55)
     formatter.rich.info("")
 
@@ -601,11 +600,11 @@ async def _cmd_enroll(
         formatter.rich.info("")
 
     formatter.rich.info("After approving in the Tesla app, try a command:")
-    formatter.rich.info("  [cyan]tescmd security lock --wake[/cyan]")
+    formatter.rich.info("  [cyan]tescmd vehicle list[/cyan]")
     formatter.rich.info("  [cyan]tescmd charge status --wake[/cyan]")
     formatter.rich.info("")
     formatter.rich.info(
-        "[dim]Tip: This URL must be opened on your phone, not a desktop browser.[/dim]"
+        "[dim]Tip: The QR code must be scanned on your phone that has the Tesla app installed.[/dim]"
     )
 
 

@@ -11,10 +11,13 @@ from tescmd.cli.main import AppContext
 from tescmd.cli.setup import (
     TIER_FULL,
     TIER_READONLY,
+    _check_key_mismatch,
     _cmd_setup,
     _deploy_key_github,
     _developer_portal_setup,
     _domain_setup,
+    _key_setup,
+    _oauth_login_step,
     _precheck_public_key,
     _print_next_steps,
     _prompt_tier,
@@ -214,6 +217,129 @@ class TestAutomatedDomainSetup:
 
 
 # ---------------------------------------------------------------------------
+# Key mismatch warning
+# ---------------------------------------------------------------------------
+
+
+class TestCheckKeyMismatch:
+    """Tests for _check_key_mismatch (runs between Phase 1 and Phase 2)."""
+
+    def test_no_warning_when_no_local_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No warning when no local key pair exists."""
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        formatter = _make_formatter()
+
+        with patch("tescmd.crypto.keys.has_key_pair", return_value=False):
+            _check_key_mismatch(formatter, settings, "user.github.io")
+
+        # No warning should have been printed
+        calls = [str(c) for c in formatter.rich.info.call_args_list]
+        assert not any("differs" in c for c in calls)
+
+    def test_no_warning_when_keys_match(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No warning when remote key matches local key."""
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        formatter = _make_formatter()
+        local_pem = "-----BEGIN PUBLIC KEY-----\nMATCH\n-----END PUBLIC KEY-----\n"
+
+        with (
+            patch("tescmd.crypto.keys.has_key_pair", return_value=True),
+            patch("tescmd.crypto.keys.load_public_key_pem", return_value=local_pem),
+            patch("tescmd.deploy.github_pages.fetch_key_pem", return_value=local_pem.strip()),
+        ):
+            _check_key_mismatch(formatter, settings, "user.github.io")
+
+        calls = [str(c) for c in formatter.rich.info.call_args_list]
+        assert not any("differs" in c for c in calls)
+
+    def test_warns_when_keys_differ_github(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Warning shown when remote GitHub key differs from local."""
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        formatter = _make_formatter()
+        local_pem = "-----BEGIN PUBLIC KEY-----\nLOCAL\n-----END PUBLIC KEY-----\n"
+        remote_pem = "-----BEGIN PUBLIC KEY-----\nREMOTE\n-----END PUBLIC KEY-----"
+
+        with (
+            patch("tescmd.crypto.keys.has_key_pair", return_value=True),
+            patch("tescmd.crypto.keys.load_public_key_pem", return_value=local_pem),
+            patch("tescmd.deploy.github_pages.fetch_key_pem", return_value=remote_pem),
+        ):
+            _check_key_mismatch(formatter, settings, "user.github.io")
+
+        calls = [str(c) for c in formatter.rich.info.call_args_list]
+        assert any("differs" in c for c in calls)
+        assert any("Phase 3" in c for c in calls)
+
+    def test_warns_when_keys_differ_tailscale(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Warning shown when remote Tailscale key differs from local."""
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("TESLA_HOSTING_METHOD", "tailscale")
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        formatter = _make_formatter()
+        local_pem = "-----BEGIN PUBLIC KEY-----\nLOCAL\n-----END PUBLIC KEY-----\n"
+
+        remote_pem = "-----BEGIN PUBLIC KEY-----\nREMOTE\n-----END PUBLIC KEY-----"
+
+        with (
+            patch("tescmd.crypto.keys.has_key_pair", return_value=True),
+            patch("tescmd.crypto.keys.load_public_key_pem", return_value=local_pem),
+            patch(
+                "tescmd.deploy.tailscale_serve.fetch_tailscale_key_pem",
+                return_value=remote_pem,
+            ),
+        ):
+            _check_key_mismatch(formatter, settings, "mybox.tail99.ts.net")
+
+        calls = [str(c) for c in formatter.rich.info.call_args_list]
+        assert any("differs" in c for c in calls)
+
+    def test_no_warning_when_remote_unreachable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No warning when remote key cannot be fetched."""
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        formatter = _make_formatter()
+        local_pem = "-----BEGIN PUBLIC KEY-----\nLOCAL\n-----END PUBLIC KEY-----\n"
+
+        with (
+            patch("tescmd.crypto.keys.has_key_pair", return_value=True),
+            patch("tescmd.crypto.keys.load_public_key_pem", return_value=local_pem),
+            patch("tescmd.deploy.github_pages.fetch_key_pem", return_value=None),
+        ):
+            _check_key_mismatch(formatter, settings, "user.github.io")
+
+        calls = [str(c) for c in formatter.rich.info.call_args_list]
+        assert not any("differs" in c for c in calls)
+
+
+# ---------------------------------------------------------------------------
 # Phase 6: Next steps
 # ---------------------------------------------------------------------------
 
@@ -323,6 +449,7 @@ class TestCmdSetup:
                 return_value=("test-id", "test-secret"),
             ),
             patch("tescmd.cli.setup._domain_setup", return_value="user.github.io"),
+            patch("tescmd.cli.setup._check_key_mismatch"),
             patch("tescmd.cli.setup._key_setup") as mock_key,
             patch(
                 "tescmd.cli.setup._enrollment_step",
@@ -339,6 +466,48 @@ class TestCmdSetup:
         ):
             await _cmd_setup(app_ctx)
             mock_key.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_full_flow_phase_order(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verify phases run in order: keys → oauth → registration → enrollment."""
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("TESLA_CLIENT_ID", "test-id")
+        monkeypatch.setenv("TESLA_CLIENT_SECRET", "test-secret")
+        monkeypatch.setenv("TESLA_DOMAIN", "user.github.io")
+
+        app_ctx = _make_app_ctx()
+        call_order: list[str] = []
+
+        def track_key(*_a: object, **_k: object) -> None:
+            call_order.append("key_setup")
+
+        async def track_oauth(*_a: object, **_k: object) -> None:
+            call_order.append("oauth")
+
+        async def track_registration(*_a: object, **_k: object) -> None:
+            call_order.append("registration")
+
+        async def track_enrollment(*_a: object, **_k: object) -> None:
+            call_order.append("enrollment")
+
+        with (
+            patch("tescmd.cli.setup._prompt_tier", return_value=TIER_FULL),
+            patch(
+                "tescmd.cli.setup._developer_portal_setup",
+                return_value=("test-id", "test-secret"),
+            ),
+            patch("tescmd.cli.setup._domain_setup", return_value="user.github.io"),
+            patch("tescmd.cli.setup._check_key_mismatch"),
+            patch("tescmd.cli.setup._key_setup", side_effect=track_key),
+            patch("tescmd.cli.setup._oauth_login_step", side_effect=track_oauth),
+            patch("tescmd.cli.setup._registration_step", side_effect=track_registration),
+            patch("tescmd.cli.setup._enrollment_step", side_effect=track_enrollment),
+        ):
+            await _cmd_setup(app_ctx)
+
+        assert call_order == ["key_setup", "registration", "oauth", "enrollment"]
 
 
 # ---------------------------------------------------------------------------
@@ -967,10 +1136,13 @@ class TestDeveloperPortalSetupTailscale:
         formatter = app_ctx.formatter
 
         with patch("tescmd.cli.auth._interactive_setup", return_value=("id", "secret")) as mock_is:
-            _developer_portal_setup(formatter, app_ctx, settings, domain="mybox.tail99.ts.net")
+            _developer_portal_setup(
+                formatter, app_ctx, settings, domain="mybox.tail99.ts.net", tier="full"
+            )
 
         _args, kwargs = mock_is.call_args
         assert kwargs.get("tailscale_hostname") == "mybox.tail99.ts.net"
+        assert kwargs.get("full_tier") is True
 
     def test_no_tailscale_hostname_when_github_hosting(
         self, monkeypatch: pytest.MonkeyPatch
@@ -988,10 +1160,55 @@ class TestDeveloperPortalSetupTailscale:
         formatter = app_ctx.formatter
 
         with patch("tescmd.cli.auth._interactive_setup", return_value=("id", "secret")) as mock_is:
-            _developer_portal_setup(formatter, app_ctx, settings, domain="user.github.io")
+            _developer_portal_setup(
+                formatter, app_ctx, settings, domain="user.github.io", tier="readonly"
+            )
 
         _args, kwargs = mock_is.call_args
         assert kwargs.get("tailscale_hostname") == ""
+        assert kwargs.get("full_tier") is False
+
+    def test_full_tier_passed_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When tier='full', full_tier=True is forwarded to _interactive_setup."""
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("TESLA_DOMAIN", "user.github.io")
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        app_ctx = _make_app_ctx()
+        formatter = app_ctx.formatter
+
+        with patch("tescmd.cli.auth._interactive_setup", return_value=("id", "secret")) as mock_is:
+            _developer_portal_setup(
+                formatter, app_ctx, settings, domain="user.github.io", tier="full"
+            )
+
+        _args, kwargs = mock_is.call_args
+        assert kwargs.get("full_tier") is True
+
+    def test_readonly_tier_passed_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When tier='readonly', full_tier=False is forwarded to _interactive_setup."""
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("TESLA_DOMAIN", "user.github.io")
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        app_ctx = _make_app_ctx()
+        formatter = app_ctx.formatter
+
+        with patch("tescmd.cli.auth._interactive_setup", return_value=("id", "secret")) as mock_is:
+            _developer_portal_setup(
+                formatter, app_ctx, settings, domain="user.github.io", tier="readonly"
+            )
+
+        _args, kwargs = mock_is.call_args
+        assert kwargs.get("full_tier") is False
 
     def test_skips_when_already_configured(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When client_id is already set, returns early without calling _interactive_setup."""
@@ -1015,3 +1232,230 @@ class TestDeveloperPortalSetupTailscale:
         assert cid == "existing-id"
         assert cs == "existing-secret"
         mock_is.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# --force flag behavior
+# ---------------------------------------------------------------------------
+
+
+class TestForceFlag:
+    """Verify --force bypasses all 'already configured' guards."""
+
+    def test_force_reconfigures_tier_when_already_full(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With force, a user with full tier gets re-prompted instead of auto-returning."""
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("TESLA_SETUP_TIER", "full")
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        formatter = _make_formatter()
+
+        # Without force, full tier returns immediately
+        tier = _prompt_tier(formatter, settings, force=False)
+        assert tier == TIER_FULL
+
+        # With force, the user is re-prompted (choose "2" for full)
+        with (
+            patch("builtins.input", return_value="2"),
+            patch("tescmd.cli.auth._write_env_value"),
+        ):
+            tier = _prompt_tier(formatter, settings, force=True)
+        assert tier == TIER_FULL
+
+    def test_force_reconfigures_domain_when_already_set(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With force, domain is re-prompted despite an existing value."""
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("TESLA_DOMAIN", "existing.example.com")
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        formatter = _make_formatter()
+
+        # Without force, returns existing domain
+        domain = _domain_setup(formatter, settings, force=False)
+        assert domain == "existing.example.com"
+
+        # With force, falls through to the domain selection logic
+        with (
+            patch("tescmd.deploy.github_pages.is_gh_available", return_value=False),
+            patch(
+                "tescmd.cli.setup._is_tailscale_ready",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch(
+                "tescmd.cli.setup._manual_domain_setup",
+                return_value="new.example.com",
+            ) as mock_manual,
+        ):
+            domain = _domain_setup(formatter, settings, force=True)
+
+        assert domain == "new.example.com"
+        mock_manual.assert_called_once()
+
+    def test_force_reconfigures_credentials_when_already_set(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With force, _interactive_setup is called despite existing client_id."""
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("TESLA_CLIENT_ID", "existing-id")
+        monkeypatch.setenv("TESLA_CLIENT_SECRET", "existing-secret")
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        app_ctx = _make_app_ctx()
+        formatter = app_ctx.formatter
+
+        with patch(
+            "tescmd.cli.auth._interactive_setup",
+            return_value=("new-id", "new-secret"),
+        ) as mock_is:
+            cid, cs = _developer_portal_setup(
+                formatter, app_ctx, settings, domain="user.github.io", force=True, tier="full"
+            )
+
+        assert cid == "new-id"
+        assert cs == "new-secret"
+        mock_is.assert_called_once()
+
+    def test_force_regenerates_keys(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """With force, keys are regenerated with overwrite=True."""
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("TESLA_CONFIG_DIR", "/tmp/test-tescmd")
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        formatter = _make_formatter()
+
+        with (
+            patch("tescmd.crypto.keys.has_key_pair", return_value=True),
+            patch("tescmd.crypto.keys.get_key_fingerprint", return_value="abc123"),
+            patch("tescmd.crypto.keys.generate_ec_key_pair") as mock_gen,
+            patch("tescmd.cli.setup._deploy_key_github"),
+        ):
+            _key_setup(formatter, settings, "user.github.io", force=True)
+
+        mock_gen.assert_called_once()
+        _args, kwargs = mock_gen.call_args
+        assert kwargs.get("overwrite") is True
+
+    def test_force_does_not_regenerate_without_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Without force, existing keys are kept."""
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("TESLA_CONFIG_DIR", "/tmp/test-tescmd")
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+        formatter = _make_formatter()
+
+        with (
+            patch("tescmd.crypto.keys.has_key_pair", return_value=True),
+            patch("tescmd.crypto.keys.get_key_fingerprint", return_value="abc123"),
+            patch("tescmd.crypto.keys.generate_ec_key_pair") as mock_gen,
+            patch("tescmd.cli.setup._deploy_key_github"),
+        ):
+            _key_setup(formatter, settings, "user.github.io", force=False)
+
+        mock_gen.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_force_reauthenticates_oauth(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """With force, OAuth re-runs despite existing token with all scopes."""
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+
+        app_ctx = _make_app_ctx()
+        formatter = app_ctx.formatter
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+
+        mock_store = MagicMock()
+        mock_store.has_token = True
+        mock_store.metadata = {
+            "scopes": [
+                "openid",
+                "offline_access",
+                "user_data",
+                "vehicle_device_data",
+                "vehicle_cmds",
+                "vehicle_charging_cmds",
+                "vehicle_location",
+                "energy_device_data",
+                "energy_cmds",
+            ]
+        }
+
+        with (
+            patch("tescmd.auth.token_store.TokenStore", return_value=mock_store),
+            patch("tescmd.auth.oauth.login_flow", new_callable=AsyncMock) as mock_login,
+        ):
+            await _oauth_login_step(
+                formatter, app_ctx, settings, "test-id", "test-secret", force=True
+            )
+
+        mock_login.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_no_force_skips_oauth_when_scopes_present(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without force, OAuth is skipped when token has all required scopes."""
+        for key in list(os.environ):
+            if key.startswith("TESLA_"):
+                monkeypatch.delenv(key, raising=False)
+
+        app_ctx = _make_app_ctx()
+        formatter = app_ctx.formatter
+
+        from tescmd.models.config import AppSettings
+
+        settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+
+        mock_store = MagicMock()
+        mock_store.has_token = True
+        mock_store.metadata = {
+            "scopes": [
+                "openid",
+                "offline_access",
+                "user_data",
+                "vehicle_device_data",
+                "vehicle_cmds",
+                "vehicle_charging_cmds",
+                "vehicle_location",
+                "energy_device_data",
+                "energy_cmds",
+            ]
+        }
+
+        with (
+            patch("tescmd.auth.token_store.TokenStore", return_value=mock_store),
+            patch("tescmd.auth.oauth.login_flow", new_callable=AsyncMock) as mock_login,
+        ):
+            await _oauth_login_step(
+                formatter, app_ctx, settings, "test-id", "test-secret", force=False
+            )
+
+        mock_login.assert_not_called()
