@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
 
-class TriggerOperator(str, Enum):
+class TriggerOperator(StrEnum):
     """Supported comparison operators for trigger conditions."""
 
     LT = "lt"

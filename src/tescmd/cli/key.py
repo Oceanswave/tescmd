@@ -604,7 +604,8 @@ async def _cmd_enroll(
     formatter.rich.info("  [cyan]tescmd charge status --wake[/cyan]")
     formatter.rich.info("")
     formatter.rich.info(
-        "[dim]Tip: The QR code must be scanned on your phone that has the Tesla app installed.[/dim]"
+        "[dim]Tip: The QR code must be scanned on your phone"
+        " that has the Tesla app installed.[/dim]"
     )
 
 
