@@ -562,8 +562,8 @@ def _interactive_setup(
 
                     pem = load_public_key_pem(key_dir)
                     _key_server = KeyServer(pem, port=0)
-                    _key_server.start()
                     _local_port = _key_server.server_address[1]
+                    _key_server.start()
 
                     _ts_manager = TailscaleManager()
                     run_async(_ts_manager.start_funnel(_local_port))
