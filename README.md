@@ -199,6 +199,10 @@ Check which backend is active with `tescmd status` — the output includes a `To
 
 Use `tescmd <group> --help` for detailed usage on any command group. For API endpoints not yet covered by a dedicated command, use `raw get` or `raw post` as an escape hatch.
 
+<p align="center">
+  <img src="images/tescmd_waypoints.png" alt="tescmd nav waypoints — multi-stop route" width="500">
+</p>
+
 ### Global Flags
 
 These flags can be placed at the root level or after any subcommand:
@@ -356,6 +360,10 @@ tescmd serve 5YJ3... --legacy-dashboard
 
 **Requires Tailscale** with Funnel enabled. The serve command starts a local WebSocket server, exposes it via Tailscale Funnel (handles TLS + NAT traversal), configures Tesla to push data to it, and renders a full-screen TUI with live telemetry data, server info (MCP URL, tunnel, sinks), unit conversion, and connection status. Press `q` to quit.
 
+<p align="center">
+  <img src="images/tescmd_serve.png" alt="tescmd serve — live TUI dashboard" width="700">
+</p>
+
 By default, telemetry sessions write a wide-format CSV log to `~/.config/tescmd/logs/` with one row per frame and one column per subscribed field. Disable with `--no-log`.
 
 `tescmd vehicle telemetry stream` is an alias for `tescmd serve --no-mcp`.
@@ -403,6 +411,10 @@ See [docs/vehicle-command-protocol.md](docs/vehicle-command-protocol.md) for the
 ## Agent Integration
 
 tescmd is designed for use by AI agents and automation platforms. Agents like [Claude Code](https://github.com/anthropics/claude-code), Claude Desktop, and other LLM-powered tools can invoke tescmd commands, parse the structured JSON output, and act on your behalf.
+
+<p align="center">
+  <img src="images/tescmd_mcp.png" alt="tescmd MCP server — Claude Desktop integration" width="700">
+</p>
 
 **Why tescmd works well as an agent tool:**
 
@@ -486,5 +498,5 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 MIT
 
 <p align="center">
-  <img src="images/tescmd_logo.jpeg" alt="tescmd logo" width="180">
+  <img src="images/tescmd_logo.jpeg" alt="tescmd logo" width="300">
 </p>
