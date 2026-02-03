@@ -187,15 +187,15 @@ def _check_key_mismatch(
 
     # Fetch remote key (method-aware)
     if settings.hosting_method == "tailscale":
-        from tescmd.deploy.tailscale_serve import fetch_tailscale_key_pem, get_key_url
+        from tescmd.deploy import tailscale_serve as _ts
 
-        url = get_key_url(domain)
-        remote_pem = fetch_tailscale_key_pem(domain)
+        url = _ts.get_key_url(domain)
+        remote_pem = _ts.fetch_tailscale_key_pem(domain)
     else:
-        from tescmd.deploy.github_pages import fetch_key_pem, get_key_url
+        from tescmd.deploy import github_pages as _gh
 
-        url = get_key_url(domain)
-        remote_pem = fetch_key_pem(domain)
+        url = _gh.get_key_url(domain)
+        remote_pem = _gh.fetch_key_pem(domain)
 
     if remote_pem is not None and remote_pem != pem.strip():
         info("[yellow]The public key on your domain differs from your local key.[/yellow]")
