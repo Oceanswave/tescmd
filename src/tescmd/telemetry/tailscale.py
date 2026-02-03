@@ -112,27 +112,86 @@ class TailscaleManager:
     # Serve management (static file hosting)
     # ------------------------------------------------------------------
 
-    async def start_serve(self, path: str, target: str | Path) -> None:
+    async def start_serve(
+        self,
+        path: str,
+        target: str | Path,
+        *,
+        port: int = 443,
+        funnel: bool = False,
+    ) -> None:
         """Serve a local directory at a URL path prefix.
 
-        Runs: ``tailscale serve --bg --set-path <path> <target>``
+        Runs: ``tailscale serve --bg [--https=<port>] [--funnel] --set-path <path> <target>``
+
+        When *port* differs from 443 the ``--https=<port>`` flag is added so
+        Tailscale listens on the requested HTTPS port.
 
         Args:
             path: URL path prefix (e.g. ``/.well-known/``).
             target: Local directory to serve.
+            port: HTTPS port to serve on (default ``443``).
+            funnel: Also enable Funnel (public access) for this handler.
         """
-        returncode, stdout, stderr = await self._run(
-            "tailscale",
-            "serve",
-            "--bg",
-            "--set-path",
-            path,
-            str(target),
-        )
+        cmd: list[str] = ["tailscale", "serve", "--bg"]
+        if port != 443:
+            cmd.append(f"--https={port}")
+        if funnel:
+            cmd.append("--funnel")
+        cmd.extend(["--set-path", path, str(target)])
+
+        returncode, stdout, stderr = await self._run(*cmd)
         if returncode != 0:
             msg = stderr.strip() or stdout.strip()
             raise TailscaleError(f"Failed to start Tailscale serve: {msg}")
-        logger.info("Tailscale serve started: %s -> %s", path, target)
+        logger.info("Tailscale serve started: %s -> %s (port %d)", path, target, port)
+
+    async def start_proxy(self, local_port: int, *, https_port: int = 443) -> None:
+        """Reverse-proxy an HTTPS port to a local HTTP server.
+
+        Runs: ``tailscale serve --bg [--https=<https_port>] http://127.0.0.1:<local_port>``
+
+        Unlike :meth:`start_serve` (which serves static files via
+        ``--set-path``), this sets up a reverse proxy so Tailscale
+        forwards traffic to a local HTTP server.
+
+        Args:
+            local_port: Port of the local HTTP server to proxy to.
+            https_port: Public-facing HTTPS port (default ``443``).
+        """
+        cmd: list[str] = ["tailscale", "serve", "--bg"]
+        if https_port != 443:
+            cmd.append(f"--https={https_port}")
+        cmd.append(f"http://127.0.0.1:{local_port}")
+
+        returncode, stdout, stderr = await self._run(*cmd)
+        if returncode != 0:
+            msg = stderr.strip() or stdout.strip()
+            raise TailscaleError(f"Failed to start Tailscale proxy: {msg}")
+        logger.info(
+            "Tailscale proxy started: https port %d -> http://127.0.0.1:%d",
+            https_port,
+            local_port,
+        )
+
+    async def stop_proxy(self, *, https_port: int = 443) -> None:
+        """Remove a reverse-proxy serve configuration for an HTTPS port.
+
+        Runs: ``tailscale serve --bg [--https=<https_port>] off``
+        """
+        cmd: list[str] = ["tailscale", "serve", "--bg"]
+        if https_port != 443:
+            cmd.append(f"--https={https_port}")
+        cmd.append("off")
+
+        returncode, stdout, stderr = await self._run(*cmd)
+        if returncode != 0:
+            logger.warning(
+                "Failed to stop Tailscale proxy on port %d (may already be stopped): %s",
+                https_port,
+                stderr.strip() or stdout.strip(),
+            )
+        logger.info("Tailscale proxy stopped for HTTPS port %d", https_port)
 
     async def stop_serve(self, path: str) -> None:
         """Remove a serve handler for a path.
@@ -155,21 +214,24 @@ class TailscaleManager:
             )
         logger.info("Tailscale serve stopped for path: %s", path)
 
-    async def enable_funnel(self) -> None:
-        """Enable Funnel on port 443 (expose all serve handlers publicly).
+    async def enable_funnel(self, port: int = 443) -> None:
+        """Enable Funnel on the given *port* (expose all serve handlers publicly).
 
-        Runs: ``tailscale funnel --bg 443``
+        Runs: ``tailscale funnel --bg <port>``
+
+        Args:
+            port: HTTPS port to expose via Funnel (default ``443``).
         """
         returncode, stdout, stderr = await self._run(
             "tailscale",
             "funnel",
             "--bg",
-            "443",
+            str(port),
         )
         if returncode != 0:
             msg = stderr.strip() or stdout.strip()
             raise TailscaleError(f"Failed to enable Tailscale Funnel: {msg}")
-        logger.info("Tailscale Funnel enabled on port 443")
+        logger.info("Tailscale Funnel enabled on port %d", port)
 
     # ------------------------------------------------------------------
     # Funnel management (port proxying for telemetry)

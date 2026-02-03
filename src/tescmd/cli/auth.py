@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
+import uuid
 import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -31,7 +33,9 @@ from tescmd.models.config import AppSettings
 
 if TYPE_CHECKING:
     from tescmd.cli.main import AppContext
+    from tescmd.deploy.tailscale_serve import KeyServer
     from tescmd.output.formatter import OutputFormatter
+    from tescmd.telemetry.tailscale import TailscaleManager
 
 DEVELOPER_PORTAL_URL = "https://developer.tesla.com/dashboard"
 
@@ -476,6 +480,8 @@ def _interactive_setup(
     *,
     domain: str = "",
     tailscale_hostname: str = "",
+    full_tier: bool = False,
+    force: bool = False,
 ) -> tuple[str, str]:
     """Walk the user through first-time Tesla API credential setup.
 
@@ -483,9 +489,11 @@ def _interactive_setup(
     portal instructions show ``https://{domain}`` as the Allowed Origin URL.
     Tesla's Fleet API requires the origin to match the registration domain.
 
-    When *tailscale_hostname* is provided (or auto-detected), the user is
-    offered the chance to start a Tailscale Funnel so Tesla can verify the
-    origin URL when the portal app config is saved.
+    When *full_tier* is True and *tailscale_hostname* is provided (or
+    auto-detected), the user is offered the chance to start a Tailscale
+    Funnel so Tesla can verify the origin URL when the portal app config
+    is saved.  The Tailscale prompt appears **before** the browser is
+    opened so the developer portal steps (1-6) are uninterrupted.
     """
     info = formatter.rich.info
     origin_url = f"https://{domain}" if domain else f"http://localhost:{port}"
@@ -499,170 +507,222 @@ def _interactive_setup(
     )
     info("")
 
-    # Offer to open the developer portal
-    try:
-        answer = input("Open the Tesla Developer Portal in your browser? [Y/n] ")
-    except (EOFError, KeyboardInterrupt):
-        info("")
-        return ("", "")
-
-    if answer.strip().lower() != "n":
-        webbrowser.open(DEVELOPER_PORTAL_URL)
-        info("[dim]Browser opened.[/dim]")
-
-    info("")
-    info(
-        "Follow these steps to create a Fleet API application."
-        " If you already have one, skip to the credentials prompt below."
-    )
-    info("")
-
-    # Step 1 — Registration
-    info("[bold]Step 1 — Registration[/bold]")
-    info("  Select [cyan]Just for me[/cyan] and click Next.")
-    info("")
-
-    # Step 2 — Application Details
-    info("[bold]Step 2 — Application Details[/bold]")
-    info("  Application Name:  [cyan]tescmd[/cyan]  (or anything you like)")
-    info("  Description:       [cyan]Personal CLI tool for vehicle status and control[/cyan]")
-    info(
-        "  Purpose of Usage:  [cyan]Query vehicle data and send commands from the terminal[/cyan]"
-    )
-    info("  Click Next.")
-    info("")
-
-    # Detect Tailscale and offer to start Funnel for origin URL verification
-    ts_hostname = tailscale_hostname
+    # --- Tailscale detection + Funnel prompt (before browser opens) ----
+    # Only shown during the full setup wizard — the standalone ``auth
+    # setup`` command is credentials-only and defaults full_tier=False.
+    ts_hostname = tailscale_hostname if full_tier else ""
     ts_funnel_started = False
-    if not ts_hostname:
-        try:
-            from tescmd.deploy.tailscale_serve import is_tailscale_serve_ready
+    _ts_manager: TailscaleManager | None = None
+    _key_server: KeyServer | None = None
 
-            if run_async(is_tailscale_serve_ready()):
-                from tescmd.telemetry.tailscale import TailscaleManager
-
-                ts_hostname = run_async(TailscaleManager().get_hostname())
-        except Exception:
-            pass
-
-    if ts_hostname:
-        ts_origin = f"https://{ts_hostname}"
-        info("")
-        info(f"[green]Tailscale detected:[/green] {ts_hostname}")
-        info("")
-        info(f"  Adding [cyan]{ts_origin}[/cyan] as an Allowed Origin URL")
-        info("  will let [cyan]tescmd serve[/cyan] stream telemetry without")
-        info("  extra portal changes later.")
-        info("")
-        try:
-            answer = input("Start Tailscale Funnel so Tesla can verify the URL? [Y/n] ").strip()
-        except (EOFError, KeyboardInterrupt):
-            answer = "n"
-
-        if answer.lower() != "n":
-            info("Starting Tailscale Funnel...")
+    if full_tier:
+        if not ts_hostname:
             try:
-                from tescmd.telemetry.tailscale import TailscaleManager as _TsMgr
+                from tescmd.deploy.tailscale_serve import is_tailscale_serve_ready
 
-                run_async(_TsMgr().enable_funnel())
-                ts_funnel_started = True
-                info(f"[green]Funnel active — {ts_origin} is reachable.[/green]")
-            except Exception as exc:
-                info(f"[yellow]Could not start Funnel: {exc}[/yellow]")
-                info("[dim]You can add the origin URL manually later.[/dim]")
-                ts_hostname = ""
+                if run_async(is_tailscale_serve_ready()):
+                    from tescmd.telemetry.tailscale import TailscaleManager
 
-    # Step 3 — Client Details
-    info("[bold]Step 3 — Client Details[/bold]")
-    info(
-        "  OAuth Grant Type:    [cyan]Authorization Code and"
-        " Machine-to-Machine[/cyan]  (the default)"
-    )
-    info(f"  Allowed Origin URL:  [cyan]{origin_url}[/cyan]")
-    if ts_hostname:
-        info(f"  [bold]Also add:[/bold]          [cyan]https://{ts_hostname}[/cyan]")
-    info(f"  Allowed Redirect URI: [cyan]{redirect_uri}[/cyan]")
-    info("  Allowed Returned URL: (leave empty)")
-    info("")
-    if not ts_hostname:
+                    ts_hostname = run_async(TailscaleManager().get_hostname())
+            except Exception:
+                pass
+
+        if ts_hostname:
+            ts_origin = f"https://{ts_hostname}"
+
+            info(f"[green]Tailscale detected:[/green] {ts_hostname}")
+            info("")
+            info(f"  Adding [cyan]{ts_origin}[/cyan] as an Allowed Origin URL")
+            info("  will let [cyan]tescmd serve[/cyan] stream telemetry without")
+            info("  extra portal changes later.")
+            info("")
+            try:
+                answer = input(
+                    "Start Tailscale Funnel so Tesla can verify the URL? [Y/n] "
+                ).strip()
+            except (EOFError, KeyboardInterrupt):
+                answer = "n"
+
+            if answer.lower() != "n":
+                info("Starting Tailscale Funnel...")
+                try:
+                    from tescmd.crypto.keys import (
+                        generate_ec_key_pair,
+                        has_key_pair,
+                        load_public_key_pem,
+                    )
+                    from tescmd.deploy.tailscale_serve import KeyServer
+                    from tescmd.telemetry.tailscale import TailscaleManager
+
+                    key_dir = Path(AppSettings().config_dir).expanduser() / "keys"
+
+                    if not has_key_pair(key_dir):
+                        info("Generating EC P-256 key pair...")
+                        generate_ec_key_pair(key_dir)
+
+                    pem = load_public_key_pem(key_dir)
+                    _key_server = KeyServer(pem, port=0)
+                    _local_port = _key_server.server_address[1]
+                    _key_server.start()
+
+                    _ts_manager = TailscaleManager()
+                    run_async(_ts_manager.start_funnel(_local_port))
+
+                    ts_funnel_started = True
+                    info(f"[green]Funnel active — {ts_origin} is reachable.[/green]")
+                except Exception as exc:
+                    if _key_server is not None:
+                        _key_server.stop()
+                        _key_server = None
+                    _ts_manager = None
+                    info(f"[yellow]Could not start Funnel: {exc}[/yellow]")
+                    info("[dim]You can add the origin URL manually later.[/dim]")
+                    ts_hostname = ""
+
+    # --- Open browser + credential prompts (with guaranteed cleanup) ---
+    try:
+        try:
+            answer = input("Open the Tesla Developer Portal in your browser? [Y/n] ")
+        except (EOFError, KeyboardInterrupt):
+            info("")
+            return ("", "")
+
+        if answer.strip().lower() != "n":
+            webbrowser.open(DEVELOPER_PORTAL_URL)
+            info("[dim]Browser opened.[/dim]")
+
+        info("")
         info(
-            "  [dim]For telemetry streaming, add your Tailscale hostname"
-            " as an additional origin:[/dim]"
+            "Follow these steps to create a Fleet API application."
+            " If you already have one, skip to the credentials prompt below."
         )
-        info("  [dim]  https://<machine>.tailnet.ts.net[/dim]")
-    info("  Click Next.")
-    info("")
-
-    # Step 4 — API & Scopes
-    info("[bold]Step 4 — API & Scopes[/bold]")
-    info("  Under [bold]Fleet API[/bold], check at least:")
-    info("    [cyan]Vehicle Information[/cyan]")
-    info("    [cyan]Vehicle Location[/cyan]")
-    info("    [cyan]Vehicle Commands[/cyan]")
-    info("    [cyan]Vehicle Charging Management[/cyan]")
-    info("  Click Next.")
-    info("")
-
-    # Step 5 — Billing Details
-    info("[bold]Step 5 — Billing Details[/bold]")
-    info("  Click [cyan]Skip and Submit[/cyan] at the bottom of the page.")
-    info("")
-
-    # Post-creation
-    info("[bold]Step 6 — Copy your credentials[/bold]")
-    info(
-        "  Open your dashboard:"
-        " [link=https://developer.tesla.com/en_US/dashboard]"
-        "developer.tesla.com/dashboard[/link]"
-    )
-    info("  Click [cyan]View Details[/cyan] on your app.")
-    info("  Under the [cyan]Credentials & APIs[/cyan] tab you'll see your")
-    info("  Client ID (copy icon) and Client Secret (eye icon to reveal).")
-    info("")
-
-    # Prompt for Client ID
-    try:
-        client_id = input("Client ID: ").strip()
-    except (EOFError, KeyboardInterrupt):
         info("")
-        return ("", "")
 
-    if not client_id:
-        info("[yellow]No Client ID provided. Setup cancelled.[/yellow]")
-        return ("", "")
-
-    # Prompt for Client Secret (optional for public clients)
-    try:
-        client_secret = input("Client Secret (optional, press Enter to skip): ").strip()
-    except (EOFError, KeyboardInterrupt):
+        # Step 1 — Create New Application
+        info("[bold]Step 1 — Create New Application[/bold]")
+        info("  Select [cyan]Just for me[/cyan] and click Next.")
         info("")
-        return ("", "")
 
-    # Offer to persist credentials to .env
-    info("")
-    try:
-        save = input("Save credentials to .env file? [Y/n] ")
-    except (EOFError, KeyboardInterrupt):
+        # Step 2 — Application Details
+        #
+        # Generate a unique app name so the user doesn't collide with anyone
+        # else on the Tesla Developer Portal.  Reuse a previously saved name
+        # if setup is being re-run.
+        saved_app_name = "" if force else os.environ.get("TESLA_APP_NAME", "")
+        app_name = saved_app_name or f"tescmd-{uuid.uuid4().hex[:8]}"
+
+        info("[bold]Step 2 — Application Details[/bold]")
+        info(f"  Application Name:  [cyan]{app_name}[/cyan]")
+        info("  Description:       [cyan]Personal CLI tool for vehicle status and control[/cyan]")
+        info(
+            "  Purpose of Usage:  [cyan]Query vehicle data and send commands"
+            " from the terminal[/cyan]"
+        )
+        info("  Click Next.")
         info("")
-        return (client_id, client_secret)
 
-    if save.strip().lower() != "n":
+        # Step 3 — Client Details
+        info("[bold]Step 3 — Client Details[/bold]")
+        info(
+            "  OAuth Grant Type:    [cyan]Authorization Code and"
+            " Machine-to-Machine[/cyan]  (the default)"
+        )
+        info(f"  Allowed Origin URL:  [cyan]{origin_url}[/cyan]")
+        if ts_hostname:
+            info(f"  [bold]Also add:[/bold]          [cyan]https://{ts_hostname}[/cyan]")
+        info(f"  Allowed Redirect URI: [cyan]{redirect_uri}[/cyan]")
+        info("  Allowed Returned URL: (leave empty)")
+        info("")
+        if not ts_hostname:
+            info(
+                "  [dim]For telemetry streaming, add your Tailscale hostname"
+                " as an additional origin:[/dim]"
+            )
+            info("  [dim]  https://<machine>.tailnet.ts.net[/dim]")
+        info("  Click Next.")
+        info("")
+
+        # Step 4 — API & Scopes
+        info("[bold]Step 4 — API & Scopes[/bold]")
+        if full_tier:
+            info("  Under [bold]Fleet API[/bold], click [cyan]Select All[/cyan].")
+        else:
+            info("  Under [bold]Fleet API[/bold], check at least:")
+            info("    [cyan]Vehicle Information[/cyan]")
+            info("    [cyan]Vehicle Location[/cyan]")
+            info("    [cyan]Energy Information[/cyan]")
+            info("    [cyan]User Data[/cyan]")
+        info("  Click Next.")
+        info("")
+
+        # Step 5 — Billing Details
+        info("[bold]Step 5 — Billing Details (Optional)[/bold]")
+        info("  Click [cyan]Skip and Submit[/cyan] at the bottom of the page.")
+        info("")
+
+        # Post-creation
+        info("[bold]Step 6 — Copy your credentials[/bold]")
+        info(
+            "  Open your dashboard:"
+            " [link=https://developer.tesla.com/en_US/dashboard]"
+            "developer.tesla.com/dashboard[/link]"
+        )
+        info("  Click [cyan]View Details[/cyan] on your app.")
+        info("  Under the [cyan]Credentials & APIs[/cyan] tab you'll see your")
+        info("  Client ID (copy icon) and Client Secret (eye icon to reveal).")
+        info("")
+
+        # Prompt for Client ID (required — retry on empty)
+        client_id = ""
+        for _ in range(3):
+            try:
+                client_id = input("Client ID: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                info("")
+                return ("", "")
+            if client_id:
+                break
+            info("[yellow]Client ID is required.[/yellow]")
+
+        if not client_id:
+            info("[yellow]No Client ID provided. Setup cancelled.[/yellow]")
+            return ("", "")
+
+        # Prompt for Client Secret (required — retry on empty)
+        client_secret = ""
+        for _ in range(3):
+            try:
+                client_secret = input("Client Secret: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                info("")
+                return ("", "")
+            if client_secret:
+                break
+            info("[yellow]Client Secret is required.[/yellow]")
+
+        if not client_secret:
+            info("[yellow]No Client Secret provided. Setup cancelled.[/yellow]")
+            return ("", "")
+
+        # Persist credentials to .env
+        info("")
         _write_env_file(client_id, client_secret)
+        if not saved_app_name:
+            _write_env_value("TESLA_APP_NAME", app_name)
         info("[green]Credentials saved to .env[/green]")
 
-    # Clean up Tailscale Funnel if we started it during this session
-    if ts_funnel_started:
-        try:
-            from tescmd.telemetry.tailscale import TailscaleManager as _TsMgr
-
-            run_async(_TsMgr._run("tailscale", "funnel", "--bg", "off"))
-        except Exception as exc:
-            info(f"[yellow]Warning: Failed to stop Tailscale Funnel: {exc}[/yellow]")
-            info("[dim]You may need to run 'tailscale funnel --bg off' manually.[/dim]")
-
-    info("")
-    return (client_id, client_secret)
+        info("")
+        return (client_id, client_secret)
+    finally:
+        if ts_funnel_started:
+            if _key_server is not None:
+                _key_server.stop()
+            if _ts_manager is not None:
+                try:
+                    run_async(_ts_manager.stop_funnel())
+                except Exception as exc:
+                    info(f"[yellow]Warning: Failed to stop Tailscale Funnel: {exc}[/yellow]")
+                    info("[dim]You may need to run 'tailscale funnel --bg off' manually.[/dim]")
 
 
 def _prompt_for_domain(formatter: OutputFormatter) -> str:

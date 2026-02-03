@@ -424,10 +424,17 @@ class CommandDispatcher:
 
         Accepts both OpenClaw-style (``door.lock``) and API-style
         (``door_lock``) method names via :data:`_METHOD_ALIASES`.
+
+        The target method can be specified as ``method`` or ``command``
+        (the latter mirrors the gateway protocol's field name).
         """
-        method = params.get("method", "")
+        raw = params.get("method", "") or params.get("command", "")
+        # Normalize: bots may send a list like ["door.lock"] instead of a string
+        if isinstance(raw, list):
+            raw = raw[0] if raw else ""
+        method = str(raw).strip() if raw else ""
         if not method:
-            raise ValueError("system.run requires 'method' parameter")
+            raise ValueError("system.run requires 'method' (or 'command') parameter")
         resolved = _METHOD_ALIASES.get(method, method)
         if resolved == "system.run":
             raise ValueError("system.run cannot invoke itself")

@@ -364,10 +364,10 @@ ACTION REQUIRED: Add virtual key in the Tesla app
 
   Enrollment URL: https://tesla.com/_ak/yourdomain.github.io
 
-  1. Open the URL above on your phone
-  2. Tap Finish Setup on the web page
-  3. The Tesla app will show an Add Virtual Key prompt
-  4. Approve it
+  1. Scan the QR code on the page above with your phone
+  2. The Tesla app will show an Add Virtual Key prompt
+  3. Approve it
+
 ```
 
 **JSON mode:** Returns a single envelope with `"status": "ready"`, `enroll_url`, and instructions.

@@ -808,6 +808,30 @@ class TestSystemRun:
         with pytest.raises(ValueError, match="requires 'method'"):
             await d.dispatch({"method": "system.run", "params": {}})
 
+    @pytest.mark.asyncio
+    async def test_system_run_accepts_command_key(self) -> None:
+        """system.run accepts 'command' as alias for 'method' (matches gateway protocol)."""
+        ctx = _mock_app_ctx()
+        store = _store_with(Soc=72.0)
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, telemetry_store=store)
+        result = await d.dispatch(
+            {"method": "system.run", "params": {"command": "battery.get", "params": {}}}
+        )
+        assert result is not None
+        assert "battery_level" in result
+
+    @pytest.mark.asyncio
+    async def test_system_run_accepts_list_method(self) -> None:
+        """system.run normalizes a list value like ['battery.get'] to a string."""
+        ctx = _mock_app_ctx()
+        store = _store_with(Soc=72.0)
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, telemetry_store=store)
+        result = await d.dispatch(
+            {"method": "system.run", "params": {"method": ["battery.get"], "params": {}}}
+        )
+        assert result is not None
+        assert "battery_level" in result
+
     def test_method_aliases_cover_key_commands(self) -> None:
         assert "door_lock" in _METHOD_ALIASES
         assert "door_unlock" in _METHOD_ALIASES

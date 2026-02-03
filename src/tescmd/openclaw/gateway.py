@@ -280,8 +280,21 @@ class GatewayClient:
         so gateways that enforce authentication at the transport layer
         accept the connection before the OpenClaw handshake begins.
 
+        If a receive loop is already running (e.g. from a previous
+        connection or a concurrent reconnect attempt), it is cancelled
+        before establishing the new connection to prevent duplicate
+        ``recv()`` calls on the same WebSocket.
+
         Raises :class:`GatewayConnectionError` on failure.
         """
+        import contextlib
+
+        if self._recv_task is not None and not self._recv_task.done():
+            self._recv_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._recv_task
+            self._recv_task = None
+
         await self._establish_connection()
 
         if self._on_request is not None:

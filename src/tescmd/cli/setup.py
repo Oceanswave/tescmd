@@ -29,10 +29,11 @@ TIER_FULL = "full"
 
 
 @click.command("setup")
+@click.option("--force", is_flag=True, help="Reconfigure everything from scratch.")
 @global_options
-def setup_cmd(app_ctx: AppContext) -> None:
+def setup_cmd(app_ctx: AppContext, force: bool) -> None:
     """Interactive setup wizard for first-time configuration."""
-    run_async(_cmd_setup(app_ctx))
+    run_async(_cmd_setup(app_ctx, force=force))
 
 
 # ---------------------------------------------------------------------------
@@ -40,29 +41,35 @@ def setup_cmd(app_ctx: AppContext) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def _cmd_setup(app_ctx: AppContext) -> None:
+async def _cmd_setup(app_ctx: AppContext, *, force: bool = False) -> None:
     """Run the tiered onboarding wizard."""
     formatter = app_ctx.formatter
     settings = AppSettings()
 
     # Phase 0: Welcome + tier selection
-    tier = _prompt_tier(formatter, settings)
+    tier = _prompt_tier(formatter, settings, force=force)
     if not tier:
         return
 
     # Phase 1: Domain setup via GitHub Pages (must happen before developer
     # portal because Tesla requires the Allowed Origin URL to match the
     # registration domain)
-    domain = _domain_setup(formatter, settings)
+    domain = _domain_setup(formatter, settings, force=force)
     if not domain:
         return
 
     # Re-read settings after potential .env changes
     settings = AppSettings()
 
+    # Early check: warn if remote key differs from local
+    if tier == TIER_FULL:
+        _check_key_mismatch(formatter, settings, domain)
+
     # Phase 2: Developer portal walkthrough (credentials — uses domain for
     # the Allowed Origin URL instructions)
-    client_id, client_secret = _developer_portal_setup(formatter, app_ctx, settings, domain=domain)
+    client_id, client_secret = _developer_portal_setup(
+        formatter, app_ctx, settings, domain=domain, force=force, tier=tier
+    )
     if not client_id:
         return
 
@@ -71,17 +78,17 @@ async def _cmd_setup(app_ctx: AppContext) -> None:
 
     # Phase 3: Key generation + deployment (full tier only)
     if tier == TIER_FULL:
-        _key_setup(formatter, settings, domain)
+        _key_setup(formatter, settings, domain, force=force)
 
-    # Phase 3.5: Key enrollment (full tier only)
-    if tier == TIER_FULL:
-        await _enrollment_step(formatter, app_ctx, settings)
-
-    # Phase 4: Fleet API partner registration
+    # Phase 4: Fleet API partner registration (closes out the setup phases)
     await _registration_step(formatter, app_ctx, settings, client_id, client_secret, domain)
 
     # Phase 5: OAuth login
-    await _oauth_login_step(formatter, app_ctx, settings, client_id, client_secret)
+    await _oauth_login_step(formatter, app_ctx, settings, client_id, client_secret, force=force)
+
+    # Phase 3.5: Key enrollment (full tier only — after login)
+    if tier == TIER_FULL:
+        await _enrollment_step(formatter, app_ctx, settings)
 
     # Phase 6: Summary
     _print_next_steps(formatter, tier)
@@ -92,13 +99,13 @@ async def _cmd_setup(app_ctx: AppContext) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _prompt_tier(formatter: OutputFormatter, settings: AppSettings) -> str:
+def _prompt_tier(formatter: OutputFormatter, settings: AppSettings, *, force: bool = False) -> str:
     """Ask the user which tier they want and persist the choice."""
     info = formatter.rich.info
 
     # If already configured, offer to keep or change
     existing_tier = settings.setup_tier
-    if existing_tier in (TIER_READONLY, TIER_FULL):
+    if existing_tier in (TIER_READONLY, TIER_FULL) and not force:
         info(f"Setup tier: [cyan]{existing_tier}[/cyan] (previously configured)")
         info("")
 
@@ -158,6 +165,47 @@ def _prompt_tier(formatter: OutputFormatter, settings: AppSettings) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Key mismatch warning (between Phase 1 and Phase 2)
+# ---------------------------------------------------------------------------
+
+
+def _check_key_mismatch(
+    formatter: OutputFormatter,
+    settings: AppSettings,
+    domain: str,
+) -> None:
+    """Warn early if the remote public key differs from the local key."""
+    info = formatter.rich.info
+    key_dir = Path(settings.config_dir).expanduser() / "keys"
+
+    from tescmd.crypto.keys import has_key_pair, load_public_key_pem
+
+    if not has_key_pair(key_dir):
+        return
+
+    pem = load_public_key_pem(key_dir)
+
+    # Fetch remote key (method-aware)
+    if settings.hosting_method == "tailscale":
+        from tescmd.deploy.tailscale_serve import fetch_tailscale_key_pem, get_key_url
+
+        url = get_key_url(domain)
+        remote_pem = fetch_tailscale_key_pem(domain)
+    else:
+        from tescmd.deploy.github_pages import fetch_key_pem, get_key_url
+
+        url = get_key_url(domain)
+        remote_pem = fetch_key_pem(domain)
+
+    if remote_pem is not None and remote_pem != pem.strip():
+        info("[yellow]The public key on your domain differs from your local key.[/yellow]")
+        info(f"  Remote: {url}")
+        info("  This can happen after regenerating your key pair.")
+        info("  The key will be redeployed in Phase 3.")
+        info("")
+
+
+# ---------------------------------------------------------------------------
 # Phase 2: Developer portal walkthrough
 # ---------------------------------------------------------------------------
 
@@ -168,6 +216,8 @@ def _developer_portal_setup(
     settings: AppSettings,
     *,
     domain: str = "",
+    force: bool = False,
+    tier: str = "",
 ) -> tuple[str, str]:
     """Walk through Tesla Developer Portal setup if credentials are missing."""
     info = formatter.rich.info
@@ -175,7 +225,7 @@ def _developer_portal_setup(
     client_id = settings.client_id
     client_secret = settings.client_secret
 
-    if client_id:
+    if client_id and not force:
         info(f"Client ID: [cyan]{client_id[:8]}...[/cyan] (already configured)")
         return (client_id, client_secret or "")
 
@@ -196,7 +246,13 @@ def _developer_portal_setup(
     from tescmd.cli.auth import _interactive_setup
 
     return _interactive_setup(
-        formatter, port, redirect_uri, domain=domain, tailscale_hostname=ts_hostname
+        formatter,
+        port,
+        redirect_uri,
+        domain=domain,
+        tailscale_hostname=ts_hostname,
+        full_tier=(tier == TIER_FULL),
+        force=force,
     )
 
 
@@ -205,11 +261,13 @@ def _developer_portal_setup(
 # ---------------------------------------------------------------------------
 
 
-def _domain_setup(formatter: OutputFormatter, settings: AppSettings) -> str:
+def _domain_setup(
+    formatter: OutputFormatter, settings: AppSettings, *, force: bool = False
+) -> str:
     """Set up a domain via GitHub Pages, Tailscale Funnel, or manual entry."""
     info = formatter.rich.info
 
-    if settings.domain:
+    if settings.domain and not force:
         info(f"Domain: [cyan]{settings.domain}[/cyan] (already configured)")
         info("")
         return settings.domain
@@ -256,10 +314,10 @@ def _automated_domain_setup(formatter: OutputFormatter, settings: AppSettings) -
     info(f"GitHub CLI detected. Logged in as [cyan]{username}[/cyan].")
     info(f"Suggested domain: [cyan]{suggested_domain}[/cyan]")
     info("")
-    info("[dim]Note: GitHub Pages provides always-on key hosting but cannot[/dim]")
-    info("[dim]serve as a Fleet Telemetry server. If you plan to use telemetry[/dim]")
-    info("[dim]streaming, choose Tailscale instead (install Tailscale, then[/dim]")
-    info("[dim]re-run setup).[/dim]")
+    info("[dim]Note: GitHub Pages provides always-on key hosting. For Fleet[/dim]")
+    info("[dim]Telemetry streaming, Tailscale will also be used alongside[/dim]")
+    info("[dim]GitHub Pages — just add your Tailscale hostname as an extra[/dim]")
+    info("[dim]Allowed Origin URL in the developer portal.[/dim]")
     info("")
 
     try:
@@ -350,7 +408,9 @@ def _manual_domain_setup(formatter: OutputFormatter) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _key_setup(formatter: OutputFormatter, settings: AppSettings, domain: str) -> None:
+def _key_setup(
+    formatter: OutputFormatter, settings: AppSettings, domain: str, *, force: bool = False
+) -> None:
     """Generate keys and deploy via the configured hosting method (full tier only)."""
     info = formatter.rich.info
 
@@ -365,12 +425,12 @@ def _key_setup(formatter: OutputFormatter, settings: AppSettings, domain: str) -
         has_key_pair,
     )
 
-    # Generate keys if needed
-    if has_key_pair(key_dir):
+    # Generate keys if needed (force → overwrite existing keys)
+    if has_key_pair(key_dir) and not force:
         info(f"Key pair: [cyan]exists[/cyan] (fingerprint: {get_key_fingerprint(key_dir)})")
     else:
         info("Generating EC P-256 key pair...")
-        generate_ec_key_pair(key_dir)
+        generate_ec_key_pair(key_dir, overwrite=force)
         info("[green]Key pair generated.[/green]")
         info(f"  Fingerprint: {get_key_fingerprint(key_dir)}")
 
@@ -380,9 +440,9 @@ def _key_setup(formatter: OutputFormatter, settings: AppSettings, domain: str) -
     hosting = settings.hosting_method
 
     if hosting == "tailscale":
-        _deploy_key_tailscale(formatter, settings, key_dir, domain)
+        _deploy_key_tailscale(formatter, settings, key_dir, domain, force=force)
     else:
-        _deploy_key_github(formatter, settings, key_dir, domain)
+        _deploy_key_github(formatter, settings, key_dir, domain, force=force)
 
 
 def _deploy_key_tailscale(
@@ -390,6 +450,8 @@ def _deploy_key_tailscale(
     settings: AppSettings,
     key_dir: Path,
     domain: str,
+    *,
+    force: bool = False,
 ) -> None:
     """Deploy key via Tailscale Funnel."""
     info = formatter.rich.info
@@ -404,7 +466,7 @@ def _deploy_key_tailscale(
     )
 
     # Check if key is already deployed
-    if run_async(validate_tailscale_key_url(domain)):
+    if run_async(validate_tailscale_key_url(domain)) and not force:
         info(f"Public key: [green]already accessible[/green] at {get_key_url(domain)}")
         info("")
         return
@@ -434,6 +496,8 @@ def _deploy_key_github(
     settings: AppSettings,
     key_dir: Path,
     domain: str,
+    *,
+    force: bool = False,
 ) -> None:
     """Deploy key via GitHub Pages."""
     info = formatter.rich.info
@@ -465,7 +529,7 @@ def _deploy_key_github(
     pem = load_public_key_pem(key_dir)
     remote_pem = fetch_key_pem(domain)
 
-    if remote_pem is not None and remote_pem == pem.strip():
+    if remote_pem is not None and remote_pem == pem.strip() and not force:
         info(f"Public key: [green]matches GitHub[/green] at {get_key_url(domain)}")
         info("")
         return
@@ -569,33 +633,23 @@ async def _enrollment_step(
     info(f"  Public key:  [green]accessible[/green] at {key_url}")
     info("")
 
-    try:
-        answer = input("  Open enrollment URL in your browser? [Y/n] ").strip()
-    except (EOFError, KeyboardInterrupt):
-        info("")
-        return
-
-    if answer.lower() not in ("n", "no"):
-        info("")
-        info(f"  Opening [link={enroll_url}]{enroll_url}[/link]…")
-        webbrowser.open(enroll_url)
-        info("")
+    info(f"  Opening [link={enroll_url}]{enroll_url}[/link]…")
+    webbrowser.open(enroll_url)
+    info("")
 
     info("  " + "━" * 49)
     info("    [bold yellow]ACTION REQUIRED: Add virtual key in the Tesla app[/bold yellow]")
     info("")
-    info(f"    Enrollment URL: {enroll_url}")
-    info("")
-    info("    1. Open the URL above [bold]on your phone[/bold]")
+    info("    1. Scan the QR code with your phone (iOS / Android)")
     info("    2. Tap [bold]Finish Setup[/bold] on the web page")
     info("    3. The Tesla app shows an [bold]Add Virtual Key[/bold] prompt")
     info("    4. Approve it")
     info("")
-    info("    [dim]If the prompt doesn't appear, force-quit the Tesla app,[/dim]")
-    info("    [dim]go back to your browser, and tap Finish Setup again.[/dim]")
+    info(
+        "    [dim]If the prompt doesn't appear, force-quit the Tesla app,"
+        " scan the QR code again, and tap Finish Setup.[/dim]"
+    )
     info("  " + "━" * 49)
-    info("")
-    info("  After approving, try: [cyan]tescmd charge status --wake[/cyan]")
     info("")
 
 
@@ -917,6 +971,8 @@ async def _oauth_login_step(
     settings: AppSettings,
     client_id: str,
     client_secret: str,
+    *,
+    force: bool = False,
 ) -> None:
     """Run the OAuth2 login flow."""
     info = formatter.rich.info
@@ -930,7 +986,7 @@ async def _oauth_login_step(
         config_dir=settings.config_dir,
     )
 
-    if store.has_token:
+    if store.has_token and not force:
         # Check whether the stored scopes cover what we need.
         # A readonly→full upgrade requires vehicle_cmds + vehicle_charging_cmds
         # that the original readonly token may not have.

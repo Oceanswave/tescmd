@@ -458,6 +458,36 @@ class TestGatewayBackoff:
         assert call_count == 3
 
 
+class TestConnectCancelsExistingRecvLoop:
+    @pytest.mark.asyncio
+    async def test_connect_cancels_old_recv_task(self) -> None:
+        """Calling connect() while a receive loop is running cancels the old task."""
+        gw = GatewayClient("ws://test:1234", on_request=AsyncMock())
+
+        # Create a real task that blocks forever (simulates running recv loop)
+        old_task = asyncio.create_task(asyncio.sleep(3600))
+        gw._recv_task = old_task
+
+        with patch.object(gw, "_establish_connection", new_callable=AsyncMock):
+            await gw.connect()
+
+        # Old task should have been cancelled and replaced
+        assert old_task.cancelled()
+        assert gw._recv_task is not old_task
+        assert gw._recv_task is not None
+
+    @pytest.mark.asyncio
+    async def test_connect_skips_cancel_when_no_task(self) -> None:
+        """connect() works fine when no previous recv task exists."""
+        gw = GatewayClient("ws://test:1234", on_request=AsyncMock())
+        assert gw._recv_task is None
+
+        with patch.object(gw, "_establish_connection", new_callable=AsyncMock):
+            await gw.connect()
+
+        assert gw._recv_task is not None
+
+
 class _MockWebSocket:
     """Minimal async-iterable WebSocket mock for receive loop tests."""
 
