@@ -37,7 +37,7 @@ POLL_INTERVAL = 3  # seconds
 class _KeyRequestHandler(BaseHTTPRequestHandler):
     """Serve the root (200 OK) and the ``.well-known`` PEM path."""
 
-    server: KeyServer  # type: ignore[assignment]
+    server: KeyServer
 
     def do_GET(self) -> None:
         if self.path == "/":
