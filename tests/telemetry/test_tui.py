@@ -310,14 +310,15 @@ class TestTelemetryTUIApp:
 
     @pytest.mark.asyncio
     async def test_queue_overflow_drops_silently(self) -> None:
+        # Test the overflow behavior directly without Textual's run_test(),
+        # which deadlocks on Python 3.11 due to ContextVar + event loop
+        # scheduling differences between 3.11 and 3.12+.
         app = TelemetryTUI(vin=VIN)
-        async with app.run_test():
-            # Fill the queue.
-            for i in range(110):
-                await app.push_frame(_frame(("BatteryLevel", 8, 80 - i, "int")))
+        for i in range(110):
+            await app.push_frame(_frame(("BatteryLevel", 8, 80 - i, "int")))
 
-            # No exception should be raised — overflow is silent.
-            assert app._queue.qsize() <= 100
+        # No exception should be raised — overflow is silent.
+        assert app._queue.qsize() <= 100
 
     @pytest.mark.asyncio
     async def test_server_info_setters(self) -> None:
