@@ -229,6 +229,7 @@ class GatewayClient:
         model_identifier: str | None = None,
         capabilities: NodeCapabilities | None = None,
         on_request: Callable[[dict[str, Any]], Awaitable[dict[str, Any] | None]] | None = None,
+        on_reconnect: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self._url = url
         self._token = token
@@ -243,6 +244,7 @@ class GatewayClient:
         self._model_identifier = model_identifier or "tescmd"
         self._capabilities = capabilities
         self._on_request = on_request
+        self._on_reconnect = on_reconnect
         self._ws: ClientConnection | None = None
         self._connected = False
         self._send_count = 0
@@ -523,6 +525,12 @@ class GatewayClient:
                 logger.error("Reconnection failed — receive loop exiting")
                 break
 
+            if self._on_reconnect is not None:
+                try:
+                    await self._on_reconnect()
+                except Exception:
+                    logger.warning("on_reconnect callback failed", exc_info=True)
+
     async def _try_reconnect(self) -> bool:
         """Attempt to re-establish the gateway connection with exponential backoff.
 
@@ -544,7 +552,6 @@ class GatewayClient:
         invoke_id = payload.get("id", "")
         command = payload.get("command", "")
         params_json = payload.get("paramsJSON", "{}")
-        logger.info("Invoke request: id=%s command=%s", invoke_id, command)
 
         if not self._on_request:
             await self._send_invoke_result(invoke_id, ok=False, error="no handler configured")
@@ -562,6 +569,18 @@ class GatewayClient:
                 command,
             )
             params = {}
+
+        # Log with the real command name — for system.run, peek at the
+        # inner method so the activity log shows what's actually invoked.
+        if command == "system.run":
+            inner = params.get("method", "") or params.get("command", "")
+            if isinstance(inner, list):
+                inner = inner[0] if inner else ""
+            logger.info(
+                "Invoke request: id=%s command=%s (via system.run)", invoke_id, inner or "?"
+            )
+        else:
+            logger.info("Invoke request: id=%s command=%s", invoke_id, command)
 
         # Build the message dict the dispatcher expects
         dispatch_msg: dict[str, Any] = {

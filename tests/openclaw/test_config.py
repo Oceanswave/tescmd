@@ -116,10 +116,8 @@ class TestBridgeConfigMerge:
 class TestNodeCapabilities:
     def test_defaults(self) -> None:
         caps = NodeCapabilities()
-        assert "location.get" in caps.reads
-        assert "battery.get" in caps.reads
-        assert "door.lock" in caps.writes
-        assert "flash_lights" in caps.writes
+        assert caps.reads == ["location.get"]
+        assert caps.writes == ["system.run"]
 
     def test_custom_reads(self) -> None:
         caps = NodeCapabilities(reads=["custom.read"])
@@ -156,13 +154,23 @@ class TestNodeCapabilities:
         # a.get appears in both reads and writes — deduplicated, reads-first order
         assert caps.all_commands == ["a.get", "b.do"]
 
+    def test_empty_capabilities(self) -> None:
+        caps = NodeCapabilities(reads=[], writes=[])
+        assert caps.all_commands == []
+        assert caps.caps == []
+        assert caps.permissions == {}
+        params = caps.to_connect_params()
+        assert params["commands"] == []
+        assert params["caps"] == []
+        assert params["permissions"] == {}
+
 
 class TestBridgeConfigCapabilities:
     def test_default_capabilities(self) -> None:
         cfg = BridgeConfig()
         assert isinstance(cfg.capabilities, NodeCapabilities)
-        assert len(cfg.capabilities.reads) == 8
-        assert len(cfg.capabilities.writes) == 21
+        assert len(cfg.capabilities.reads) == 1
+        assert len(cfg.capabilities.writes) == 1
 
     def test_custom_capabilities_from_json(self, tmp_path: Path) -> None:
         config_file = tmp_path / "bridge.json"

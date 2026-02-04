@@ -61,10 +61,8 @@ class TestBridgeOnFrame:
 
         assert bridge.event_count == 1
         assert bridge.drop_count == 0
-        # 1 connected lifecycle event + 1 data event = 2 sends
-        assert gateway._ws.send.call_count == 2
+        assert gateway._ws.send.call_count == 1
 
-        # Last send should be the data event
         sent = json.loads(gateway._ws.send.call_args[0][0])
         assert sent["method"] == "req:agent"
         assert sent["params"]["event_type"] == "battery"
@@ -91,8 +89,7 @@ class TestBridgeOnFrame:
         await bridge.on_frame(frame)
 
         assert bridge.event_count == 2
-        # 1 connected lifecycle event + 2 data events = 3 sends
-        assert gateway._ws.send.call_count == 3
+        assert gateway._ws.send.call_count == 2
 
     @pytest.mark.asyncio
     async def test_filter_drops_duplicate(self, bridge: TelemetryBridge) -> None:
@@ -164,7 +161,8 @@ class TestBridgeReconnection:
         await bridge.on_frame(frame)
 
         gateway.connect.assert_awaited_once()
-        assert gateway._ws.send.call_count == 1
+        # 1 connected lifecycle event (from reconnect) + 1 data event = 2 sends
+        assert gateway._ws.send.call_count == 2
         assert bridge.event_count == 1
         assert bridge.drop_count == 0
 
@@ -282,27 +280,25 @@ class TestBridgeLifecycleEvents:
     """Tests for node.connected / node.disconnecting lifecycle events."""
 
     @pytest.mark.asyncio
-    async def test_first_frame_sends_connected_event(self, gateway: GatewayClient) -> None:
-        """First frame should trigger a node.connected event before data events."""
+    async def test_send_connected(self, gateway: GatewayClient) -> None:
+        """Calling send_connected() sends a node.connected event to the gateway."""
         filters = {"Soc": FieldFilter(granularity=0.0, throttle_seconds=0.0)}
         filt = DualGateFilter(filters)
         emitter = EventEmitter(client_id="test")
         bridge = TelemetryBridge(gateway, filt, emitter, vin="VIN1", client_id="test-client")
 
-        frame = _make_frame(data=[TelemetryDatum("Soc", 3, 72.0, "float")])
-        await bridge.on_frame(frame)
+        assert await bridge.send_connected() is True
 
-        # First send should be the connected event, second the data event
-        assert gateway._ws.send.call_count == 2
-        first_msg = json.loads(gateway._ws.send.call_args_list[0][0][0])
-        assert first_msg["method"] == "req:agent"
-        assert first_msg["params"]["event_type"] == "node.connected"
-        assert first_msg["params"]["vin"] == "VIN1"
-        assert first_msg["params"]["source"] == "test-client"
+        assert gateway._ws.send.call_count == 1
+        msg = json.loads(gateway._ws.send.call_args[0][0])
+        assert msg["method"] == "req:agent"
+        assert msg["params"]["event_type"] == "node.connected"
+        assert msg["params"]["vin"] == "VIN1"
+        assert msg["params"]["source"] == "test-client"
 
     @pytest.mark.asyncio
-    async def test_connected_event_sent_only_once(self, gateway: GatewayClient) -> None:
-        """node.connected should only be sent on the first frame."""
+    async def test_on_frame_does_not_send_connected(self, gateway: GatewayClient) -> None:
+        """on_frame() should only send data events, never connected events."""
         filters = {"Soc": FieldFilter(granularity=0.0, throttle_seconds=0.0)}
         filt = DualGateFilter(filters)
         emitter = EventEmitter(client_id="test")
@@ -310,16 +306,18 @@ class TestBridgeLifecycleEvents:
 
         frame1 = _make_frame(data=[TelemetryDatum("Soc", 3, 72.0, "float")])
         await bridge.on_frame(frame1)
-        # 1 connected + 1 data = 2
-        assert gateway._ws.send.call_count == 2
+        # Only the data event, no connected event
+        assert gateway._ws.send.call_count == 1
+        msg = json.loads(gateway._ws.send.call_args[0][0])
+        assert msg["params"]["event_type"] == "battery"
 
         frame2 = _make_frame(data=[TelemetryDatum("Soc", 3, 80.0, "float")])
         await bridge.on_frame(frame2)
-        # Only 1 more data event (no second connected) = 3
-        assert gateway._ws.send.call_count == 3
+        # One more data event
+        assert gateway._ws.send.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_connected_event_not_sent_in_dry_run(self, gateway: GatewayClient) -> None:
+    async def test_send_connected_not_sent_in_dry_run(self, gateway: GatewayClient) -> None:
         filters = {"Soc": FieldFilter(granularity=0.0, throttle_seconds=0.0)}
         filt = DualGateFilter(filters)
         emitter = EventEmitter(client_id="test")
@@ -327,29 +325,37 @@ class TestBridgeLifecycleEvents:
             gateway, filt, emitter, dry_run=True, vin="VIN1", client_id="test"
         )
 
-        frame = _make_frame(data=[TelemetryDatum("Soc", 3, 72.0, "float")])
-        await bridge.on_frame(frame)
+        # Dry-run is considered success (nothing to send)
+        assert await bridge.send_connected() is True
 
-        # Dry run doesn't send anything via gateway
+        # Gateway should NOT have been called in dry-run
         assert gateway._ws.send.call_count == 0
 
     @pytest.mark.asyncio
-    async def test_connected_event_skipped_when_disconnected(self, gateway: GatewayClient) -> None:
-        """No connected event if gateway is disconnected."""
-        gateway._connected = False
+    async def test_reconnect_sends_connected(self, gateway: GatewayClient) -> None:
+        """Successful reconnect in _maybe_reconnect() sends node.connected."""
         filters = {"Soc": FieldFilter(granularity=0.0, throttle_seconds=0.0)}
         filt = DualGateFilter(filters)
         emitter = EventEmitter(client_id="test")
-        bridge = TelemetryBridge(gateway, filt, emitter, vin="VIN1", client_id="test")
+        bridge = TelemetryBridge(gateway, filt, emitter, vin="VIN1", client_id="test-client")
 
-        # Patch out reconnect to keep things simple
-        bridge._reconnect_at = float("inf")
+        # Simulate disconnected state so _maybe_reconnect is invoked.
+        gateway._connected = False
 
+        async def _mock_connect() -> None:
+            gateway._connected = True
+
+        gateway.connect = AsyncMock(side_effect=_mock_connect)  # type: ignore[method-assign]
+
+        # Trigger reconnect via on_frame with a mapped datum.
         frame = _make_frame(data=[TelemetryDatum("Soc", 3, 72.0, "float")])
         await bridge.on_frame(frame)
 
-        # Nothing sent (gateway is disconnected)
-        assert gateway._ws.send.call_count == 0
+        gateway.connect.assert_awaited_once()
+        # 1 connected lifecycle event (from reconnect) + 1 data event = 2
+        assert gateway._ws.send.call_count == 2
+        first_msg = json.loads(gateway._ws.send.call_args_list[0][0][0])
+        assert first_msg["params"]["event_type"] == "node.connected"
 
     @pytest.mark.asyncio
     async def test_send_disconnecting(self, gateway: GatewayClient) -> None:
@@ -377,6 +383,31 @@ class TestBridgeLifecycleEvents:
         )
 
         await bridge.send_disconnecting()
+        assert gateway._ws.send.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_send_connected_failure_does_not_raise(self, gateway: GatewayClient) -> None:
+        """Connected event failure should not crash, returns False."""
+        gateway._ws.send = AsyncMock(side_effect=ConnectionError("broken"))
+        filters = {}
+        filt = DualGateFilter(filters)
+        emitter = EventEmitter(client_id="test")
+        bridge = TelemetryBridge(gateway, filt, emitter, vin="VIN1", client_id="test")
+
+        # Should not raise, but should report failure
+        assert await bridge.send_connected() is False
+
+    @pytest.mark.asyncio
+    async def test_send_connected_skipped_when_disconnected(self, gateway: GatewayClient) -> None:
+        """send_connected() returns False when gateway is not connected."""
+        gateway._connected = False
+        filters = {}
+        filt = DualGateFilter(filters)
+        emitter = EventEmitter(client_id="test")
+        bridge = TelemetryBridge(gateway, filt, emitter, vin="VIN1", client_id="test")
+
+        assert await bridge.send_connected() is False
+
         assert gateway._ws.send.call_count == 0
 
     @pytest.mark.asyncio

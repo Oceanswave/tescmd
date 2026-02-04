@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-02-03
+
+### Changed
+
+- **Slim node capabilities** — node now advertises only `location.get` + `system.run` to the gateway (was 29 individual commands); all 34 handlers remain available via `system.run` meta-dispatch, reducing handshake payload and simplifying capability negotiation
+- **Explicit `send_connected()` lifecycle** — `node.connected` event is now sent explicitly after `connect_with_backoff()` and after successful reconnection, replacing the implicit first-frame trigger; CLI callers show a warning if the lifecycle event fails while the connection itself succeeded
+- **`send_connected()` returns bool** — callers can now detect lifecycle event failure; both `openclaw bridge` and `serve` commands display a yellow warning when the event fails to send
+- **Separated reconnect error handling** — `_maybe_reconnect()` now handles connection failure and lifecycle event failure independently; a failed `node.connected` no longer incorrectly doubles the reconnect backoff timer
+
+### Added
+
+- **`on_reconnect` gateway callback** — `GatewayClient` accepts an `on_reconnect` callback invoked after the receive loop successfully reconnects, ensuring `node.connected` is sent on every reconnection (not just the initial connect)
+- **`system.run` activity logging** — dispatcher logs the resolved inner method when routing through `system.run`, so operational logs show `system.run → door.lock` instead of just `system.run`
+
+### Fixed
+
+- **`send_connected()` false-positive logging** — no longer logs "Sent node.connected event" when the gateway is disconnected (the event was being silently dropped by `send_event()`)
+- **`OpenClawPipeline.dispatcher` typing** — changed from `Any` to `CommandDispatcher` for static analysis support
+
 ## [0.4.0] - 2026-02-02
 
 ### Added

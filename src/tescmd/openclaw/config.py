@@ -12,8 +12,16 @@ from pydantic import BaseModel, Field
 class NodeCapabilities(BaseModel):
     """Advertised capabilities for the OpenClaw node role.
 
+    The node advertises only two commands to the gateway:
+
+    - ``location.get`` (read) — standard node location capability
+    - ``system.run`` (write) — single entry point; the gateway routes all
+      invocations through this method and the internal
+      :class:`~tescmd.openclaw.dispatcher.CommandDispatcher` fans out to
+      the full set of 34 handlers.
+
     Maps to the gateway connect schema fields:
-    - ``caps``: broad capability categories (e.g. ``"location"``, ``"climate"``)
+    - ``caps``: broad capability categories (``"location"``, ``"system"``)
     - ``commands``: specific method names the node can handle
     - ``permissions``: per-command permission booleans
 
@@ -23,39 +31,8 @@ class NodeCapabilities(BaseModel):
 
     reads: list[str] = [
         "location.get",
-        "battery.get",
-        "temperature.get",
-        "speed.get",
-        "charge_state.get",
-        "security.get",
-        # Trigger reads
-        "trigger.list",
-        "trigger.poll",
     ]
     writes: list[str] = [
-        "door.lock",
-        "door.unlock",
-        "climate.on",
-        "climate.off",
-        "climate.set_temp",
-        "charge.start",
-        "charge.stop",
-        "charge.set_limit",
-        "trunk.open",
-        "frunk.open",
-        "flash_lights",
-        "honk_horn",
-        "sentry.on",
-        "sentry.off",
-        # Trigger writes
-        "trigger.create",
-        "trigger.delete",
-        # Convenience trigger aliases
-        "cabin_temp.trigger",
-        "outside_temp.trigger",
-        "battery.trigger",
-        "location.trigger",
-        # Meta-dispatch
         "system.run",
     ]
 

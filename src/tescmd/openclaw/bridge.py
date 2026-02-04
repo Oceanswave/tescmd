@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from tescmd.cli.main import AppContext
     from tescmd.openclaw.config import BridgeConfig
+    from tescmd.openclaw.dispatcher import CommandDispatcher
     from tescmd.openclaw.emitter import EventEmitter
     from tescmd.openclaw.filters import DualGateFilter
     from tescmd.openclaw.gateway import GatewayClient
@@ -61,7 +62,6 @@ class TelemetryBridge:
         self._event_count = 0
         self._drop_count = 0
         self._last_event_time: float | None = None
-        self._first_frame_received = False
         self._reconnect_at: float = 0.0
         self._reconnect_backoff: float = _RECONNECT_BASE
         self._shutting_down = False
@@ -88,8 +88,6 @@ class TelemetryBridge:
         logger.info("Attempting OpenClaw gateway reconnection...")
         try:
             await self._gateway.connect()
-            self._reconnect_backoff = _RECONNECT_BASE
-            logger.info("Reconnected to OpenClaw gateway")
         except Exception:
             self._reconnect_at = now + self._reconnect_backoff
             logger.warning(
@@ -97,6 +95,13 @@ class TelemetryBridge:
                 self._reconnect_backoff,
             )
             self._reconnect_backoff = min(self._reconnect_backoff * 2, _RECONNECT_MAX)
+            return
+        self._reconnect_backoff = _RECONNECT_BASE
+        logger.info("Reconnected to OpenClaw gateway")
+        try:
+            await self.send_connected()
+        except Exception:
+            logger.warning("Failed to send connected event after reconnect", exc_info=True)
 
     def _build_lifecycle_event(self, event_type: str) -> dict[str, Any]:
         """Build a ``req:agent`` lifecycle event (connecting/disconnecting)."""
@@ -148,6 +153,30 @@ class TelemetryBridge:
 
         return _push_trigger_notification
 
+    async def send_connected(self) -> bool:
+        """Send a ``node.connected`` lifecycle event to the gateway.
+
+        Returns ``True`` if the event was sent (or skipped due to dry-run),
+        ``False`` if the gateway was disconnected or the send failed.
+        """
+        if self._dry_run:
+            return True
+        if not self._gateway.is_connected:
+            logger.warning("Cannot send node.connected — gateway not connected")
+            return False
+        event = self._build_lifecycle_event("node.connected")
+        try:
+            await self._gateway.send_event(event)
+        except Exception:
+            logger.warning("Failed to send connected event", exc_info=True)
+            return False
+        # send_event() swallows errors and marks disconnected, so check again.
+        if not self._gateway.is_connected:
+            logger.warning("Failed to send connected event — gateway disconnected during send")
+            return False
+        logger.info("Sent node.connected event")
+        return True
+
     async def send_disconnecting(self) -> None:
         """Send a ``node.disconnecting`` lifecycle event to the gateway.
 
@@ -174,17 +203,6 @@ class TelemetryBridge:
         (with exponential backoff) before dropping events.
         """
         now = time.monotonic()
-
-        # Send node.connected lifecycle event on the very first frame.
-        if not self._first_frame_received:
-            self._first_frame_received = True
-            if not self._dry_run and self._gateway.is_connected:
-                lifecycle_event = self._build_lifecycle_event("node.connected")
-                try:
-                    await self._gateway.send_event(lifecycle_event)
-                    logger.info("Sent node.connected event")
-                except Exception:
-                    logger.warning("Failed to send connected event", exc_info=True)
 
         for datum in frame.data:
             if not self._filter.should_emit(datum.field_name, datum.value, now):
@@ -259,7 +277,7 @@ class OpenClawPipeline:
     gateway: GatewayClient
     bridge: TelemetryBridge
     telemetry_store: TelemetryStore
-    dispatcher: Any  # CommandDispatcher — avoids circular import
+    dispatcher: CommandDispatcher
 
 
 def build_openclaw_pipeline(
@@ -301,6 +319,17 @@ def build_openclaw_pipeline(
 
     from tescmd import __version__
 
+    # bridge is assigned below, but the closure captures it by reference —
+    # on_reconnect is only called during live reconnection, long after this
+    # function returns, so bridge is always initialised by then.
+    bridge: TelemetryBridge | None = None
+
+    async def _on_reconnect() -> None:
+        if bridge is not None:
+            await bridge.send_connected()
+        else:
+            logger.error("on_reconnect fired but bridge is None — this should never happen")
+
     gateway = GatewayClient(
         config.gateway_url,
         token=config.gateway_token,
@@ -310,6 +339,7 @@ def build_openclaw_pipeline(
         model_identifier=vin,
         capabilities=config.capabilities,
         on_request=dispatcher.dispatch,
+        on_reconnect=_on_reconnect,
     )
     bridge = TelemetryBridge(
         gateway,
