@@ -401,8 +401,13 @@ async def _cmd_serve(
                 if is_rich:
                     formatter.rich.info(f"Connecting to OpenClaw Gateway: {config.gateway_url}")
                 await gw.connect_with_backoff(max_attempts=5)
+                lifecycle_ok = await oc_bridge.send_connected()
                 if is_rich:
                     formatter.rich.info("[green]Connected to OpenClaw gateway.[/green]")
+                    if not lifecycle_ok:
+                        formatter.rich.info(
+                            "[yellow]Warning: node.connected event failed[/yellow]"
+                        )
             else:
                 if is_rich:
                     formatter.rich.info(

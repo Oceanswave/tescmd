@@ -543,8 +543,8 @@ class TestHandshakeCapabilities:
 
     @pytest.mark.asyncio
     async def test_default_capabilities_sends_all_commands(self) -> None:
-        """Default NodeCapabilities sends all 20 commands in the connect params."""
-        caps = NodeCapabilities()  # defaults: 6 reads + 14 writes
+        """Default NodeCapabilities sends location.get + system.run."""
+        caps = NodeCapabilities()  # defaults: 1 read + 1 write
         mock_ws = AsyncMock()
         mock_ws.recv = AsyncMock(side_effect=[_challenge(), _hello_ok()])
         mock_ws.send = AsyncMock()
@@ -558,33 +558,19 @@ class TestHandshakeCapabilities:
         permissions = sent["params"]["permissions"]
         caps_list = sent["params"]["caps"]
 
-        # All 29 commands must be present
-        # (6 reads + 14 writes + 4 trigger + 4 convenience + system.run)
-        assert len(commands) == 29
+        # 2 commands: location.get (read) + system.run (write)
+        assert len(commands) == 2
         assert "location.get" in commands
-        assert "battery.get" in commands
-        assert "temperature.get" in commands
-        assert "charge_state.get" in commands
-        assert "speed.get" in commands
-        assert "security.get" in commands
-        assert "door.lock" in commands
-        assert "climate.set_temp" in commands
-        assert "charge.start" in commands
-        assert "sentry.on" in commands
-        assert "trigger.create" in commands
-        assert "trigger.delete" in commands
-        assert "trigger.list" in commands
-        assert "trigger.poll" in commands
-        assert "battery.trigger" in commands
         assert "system.run" in commands
 
         # permissions must match commands 1:1
-        assert len(permissions) == 29
+        assert len(permissions) == 2
         assert all(permissions[cmd] is True for cmd in commands)
 
-        # caps should include all unique prefixes
-        # 14 original + trigger, cabin_temp, outside_temp, system = 18
-        assert len(caps_list) == 18
+        # caps: location, system
+        assert len(caps_list) == 2
+        assert "location" in caps_list
+        assert "system" in caps_list
 
     @pytest.mark.asyncio
     async def test_no_capabilities_omits_caps(self) -> None:
@@ -971,3 +957,57 @@ class TestGatewayCloseWithRecv:
 
         assert gw._recv_task is None
         assert gw._connected is False
+
+
+class TestReconnectCallback:
+    @pytest.mark.asyncio
+    async def test_reconnect_callback_called(self) -> None:
+        """on_reconnect callback is awaited after successful reconnect in receive loop."""
+        on_reconnect = AsyncMock()
+
+        gw = GatewayClient("ws://test:1234", on_request=AsyncMock(), on_reconnect=on_reconnect)
+        gw._ws = _MockWebSocket([])  # empty → iterator exhausts immediately
+        gw._connected = True
+
+        reconnect_count = 0
+
+        async def _fake_reconnect() -> bool:
+            nonlocal reconnect_count
+            reconnect_count += 1
+            if reconnect_count == 1:
+                gw._ws = _MockWebSocket([])
+                gw._connected = True
+                return True
+            return False
+
+        with patch.object(gw, "_try_reconnect", side_effect=_fake_reconnect):
+            await gw._receive_loop()
+
+        on_reconnect.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_reconnect_callback_failure_does_not_break_loop(self) -> None:
+        """on_reconnect callback failure doesn't crash the receive loop."""
+        on_reconnect = AsyncMock(side_effect=RuntimeError("callback boom"))
+
+        gw = GatewayClient("ws://test:1234", on_request=AsyncMock(), on_reconnect=on_reconnect)
+        gw._ws = _MockWebSocket([])
+        gw._connected = True
+
+        reconnect_count = 0
+
+        async def _fake_reconnect() -> bool:
+            nonlocal reconnect_count
+            reconnect_count += 1
+            if reconnect_count == 1:
+                gw._ws = _MockWebSocket([])
+                gw._connected = True
+                return True
+            return False
+
+        with patch.object(gw, "_try_reconnect", side_effect=_fake_reconnect):
+            await gw._receive_loop()
+
+        # Callback was called despite the error, and the loop continued
+        on_reconnect.assert_awaited_once()
+        assert reconnect_count == 2  # Loop continued after callback failure

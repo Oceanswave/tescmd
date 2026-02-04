@@ -139,8 +139,11 @@ async def _cmd_bridge(
         if formatter.format != "json":
             formatter.rich.info(f"Connecting to OpenClaw Gateway: {config.gateway_url}")
         await gw.connect_with_backoff(max_attempts=5)
+        lifecycle_ok = await bridge.send_connected()
         if formatter.format != "json":
             formatter.rich.info("[green]Connected to gateway.[/green]")
+            if not lifecycle_ok:
+                formatter.rich.info("[yellow]Warning: node.connected event failed[/yellow]")
     else:
         if formatter.format != "json":
             formatter.rich.info("[yellow]Dry-run mode — events will be logged as JSONL.[/yellow]")
