@@ -49,6 +49,7 @@ dev = [
     "pytest-httpx>=0.34",
     "pytest-xdist>=3.0",
     "pytest-cov>=5.0",
+    "pytest-timeout>=2.3",
     "ruff>=0.8",
     "mypy>=1.13",
     "mypy-protobuf>=3.6",
@@ -88,6 +89,7 @@ plugins = ["pydantic.mypy"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-n auto -m 'not e2e'"
+timeout = 30
 markers = [
     "e2e: End-to-end smoke tests against the live Tesla Fleet API (requires TESLA_ACCESS_TOKEN)",
 ]
