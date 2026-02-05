@@ -530,9 +530,7 @@ class CommandDispatcher:
             if snap is not None:
                 from datetime import UTC, datetime
 
-                fired = await mgr.evaluate_single(
-                    created.id, snap.value, None, datetime.now(UTC)
-                )
+                fired = await mgr.evaluate_single(created.id, snap.value, None, datetime.now(UTC))
                 if fired:
                     result["immediate"] = True
                     logger.info(

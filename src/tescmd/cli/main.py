@@ -248,9 +248,7 @@ def main(argv: list[str] | None = None) -> None:
         )
         if not exc_msg and formatter.format != "json":
             # The message was empty — nudge toward --verbose for the traceback.
-            formatter.rich.info(
-                "[dim]Run with --verbose to see the full traceback.[/dim]"
-            )
+            formatter.rich.info("[dim]Run with --verbose to see the full traceback.[/dim]")
         raise SystemExit(1) from exc
 
 

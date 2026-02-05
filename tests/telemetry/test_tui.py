@@ -627,14 +627,18 @@ class TestTriggersWidget:
         mgr.create(
             TriggerDefinition(
                 condition=TriggerCondition(
-                    field="BatteryLevel", operator=TriggerOperator.LT, value=20,
+                    field="BatteryLevel",
+                    operator=TriggerOperator.LT,
+                    value=20,
                 ),
             )
         )
         mgr.create(
             TriggerDefinition(
                 condition=TriggerCondition(
-                    field="InsideTemp", operator=TriggerOperator.GT, value=35,
+                    field="InsideTemp",
+                    operator=TriggerOperator.GT,
+                    value=35,
                 ),
                 once=True,
             )
@@ -657,7 +661,9 @@ class TestTriggersWidget:
         t = mgr.create(
             TriggerDefinition(
                 condition=TriggerCondition(
-                    field="BatteryLevel", operator=TriggerOperator.LT, value=20,
+                    field="BatteryLevel",
+                    operator=TriggerOperator.LT,
+                    value=20,
                 ),
             )
         )

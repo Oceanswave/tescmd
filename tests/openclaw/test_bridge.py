@@ -759,7 +759,11 @@ class TestTriggerPushCallback:
         filt = DualGateFilter(filters)
         emitter = EventEmitter(client_id="test")
         bridge = TelemetryBridge(
-            gateway, filt, emitter, vin="VIN1", client_id="test-client",
+            gateway,
+            filt,
+            emitter,
+            vin="VIN1",
+            client_id="test-client",
             trigger_manager=mgr,
         )
 
@@ -775,7 +779,8 @@ class TestTriggerPushCallback:
 
     @pytest.mark.asyncio
     async def test_push_callback_queues_when_disconnected(
-        self, gateway: GatewayClient,
+        self,
+        gateway: GatewayClient,
     ) -> None:
         """Push callback queues when gateway is disconnected."""
         gateway._connected = False
@@ -784,7 +789,11 @@ class TestTriggerPushCallback:
         filt = DualGateFilter(filters)
         emitter = EventEmitter(client_id="test")
         bridge = TelemetryBridge(
-            gateway, filt, emitter, vin="VIN1", client_id="test-client",
+            gateway,
+            filt,
+            emitter,
+            vin="VIN1",
+            client_id="test-client",
         )
 
         cb = bridge.make_trigger_push_callback()
@@ -795,14 +804,19 @@ class TestTriggerPushCallback:
 
     @pytest.mark.asyncio
     async def test_push_callback_queues_on_ws_failure(
-        self, gateway: GatewayClient,
+        self,
+        gateway: GatewayClient,
     ) -> None:
         """Push callback queues when gateway is connected but send_event raises."""
         filters: dict[str, FieldFilter] = {}
         filt = DualGateFilter(filters)
         emitter = EventEmitter(client_id="test")
         bridge = TelemetryBridge(
-            gateway, filt, emitter, vin="VIN1", client_id="test-client",
+            gateway,
+            filt,
+            emitter,
+            vin="VIN1",
+            client_id="test-client",
         )
 
         cb = bridge.make_trigger_push_callback()
@@ -816,14 +830,19 @@ class TestTriggerPushCallback:
 
     @pytest.mark.asyncio
     async def test_flush_sends_queued_via_ws(
-        self, gateway: GatewayClient,
+        self,
+        gateway: GatewayClient,
     ) -> None:
         """flush_pending_push sends via WS when gateway is connected."""
         filters: dict[str, FieldFilter] = {}
         filt = DualGateFilter(filters)
         emitter = EventEmitter(client_id="test")
         bridge = TelemetryBridge(
-            gateway, filt, emitter, vin="VIN1", client_id="test-client",
+            gateway,
+            filt,
+            emitter,
+            vin="VIN1",
+            client_id="test-client",
         )
 
         bridge._pending_push.append(self._make_notification("t1"))
@@ -839,14 +858,19 @@ class TestTriggerPushCallback:
 
     @pytest.mark.asyncio
     async def test_flush_stops_on_ws_failure(
-        self, gateway: GatewayClient,
+        self,
+        gateway: GatewayClient,
     ) -> None:
         """flush_pending_push stops when WS send fails mid-flush."""
         filters: dict[str, FieldFilter] = {}
         filt = DualGateFilter(filters)
         emitter = EventEmitter(client_id="test")
         bridge = TelemetryBridge(
-            gateway, filt, emitter, vin="VIN1", client_id="test-client",
+            gateway,
+            filt,
+            emitter,
+            vin="VIN1",
+            client_id="test-client",
         )
 
         bridge._pending_push.append(self._make_notification("t1"))
@@ -874,7 +898,11 @@ class TestTriggerPushCallback:
         filt = DualGateFilter(filters)
         emitter = EventEmitter(client_id="test")
         bridge = TelemetryBridge(
-            gateway, filt, emitter, vin="VIN1", client_id="test-client",
+            gateway,
+            filt,
+            emitter,
+            vin="VIN1",
+            client_id="test-client",
         )
 
         sent = await bridge.flush_pending_push()
@@ -888,7 +916,11 @@ class TestTriggerPushCallback:
         filt = DualGateFilter(filters)
         emitter = EventEmitter(client_id="test")
         bridge = TelemetryBridge(
-            gateway, filt, emitter, vin="VIN1", client_id="test-client",
+            gateway,
+            filt,
+            emitter,
+            vin="VIN1",
+            client_id="test-client",
         )
 
         bridge._pending_push.append(self._make_notification("t1"))
@@ -899,7 +931,8 @@ class TestTriggerPushCallback:
 
     @pytest.mark.asyncio
     async def test_push_callback_deletes_once_trigger_on_delivery(
-        self, gateway: GatewayClient,
+        self,
+        gateway: GatewayClient,
     ) -> None:
         """Push callback deletes one-shot trigger after confirmed WS delivery."""
         mgr = TriggerManager(vin="VIN1")
@@ -910,7 +943,11 @@ class TestTriggerPushCallback:
         filt = DualGateFilter(filters)
         emitter = EventEmitter(client_id="test")
         bridge = TelemetryBridge(
-            gateway, filt, emitter, vin="VIN1", client_id="test-client",
+            gateway,
+            filt,
+            emitter,
+            vin="VIN1",
+            client_id="test-client",
             trigger_manager=mgr,
         )
 
@@ -923,10 +960,15 @@ class TestTriggerPushCallback:
         n = self._make_notification(trigger_id=t.id)
         # Simulate once=True on notification (as set by evaluate)
         n = TriggerNotification(
-            trigger_id=t.id, field="BatteryLevel", operator=TriggerOperator.LT,
-            threshold=20, value=15.0, previous_value=25.0,
+            trigger_id=t.id,
+            field="BatteryLevel",
+            operator=TriggerOperator.LT,
+            threshold=20,
+            value=15.0,
+            previous_value=25.0,
             fired_at=datetime(2026, 2, 1, 12, 0, 0, tzinfo=UTC),
-            vin="VIN1", once=True,
+            vin="VIN1",
+            once=True,
         )
         await cb(n)
 
@@ -936,7 +978,8 @@ class TestTriggerPushCallback:
 
     @pytest.mark.asyncio
     async def test_push_callback_keeps_once_trigger_on_failure(
-        self, gateway: GatewayClient,
+        self,
+        gateway: GatewayClient,
     ) -> None:
         """Push callback queues notification and keeps trigger when WS fails."""
         mgr = TriggerManager(vin="VIN1")
@@ -949,7 +992,11 @@ class TestTriggerPushCallback:
         filt = DualGateFilter(filters)
         emitter = EventEmitter(client_id="test")
         bridge = TelemetryBridge(
-            gateway, filt, emitter, vin="VIN1", client_id="test-client",
+            gateway,
+            filt,
+            emitter,
+            vin="VIN1",
+            client_id="test-client",
             trigger_manager=mgr,
         )
 
@@ -957,10 +1004,15 @@ class TestTriggerPushCallback:
         assert cb is not None
 
         n = TriggerNotification(
-            trigger_id=t.id, field="BatteryLevel", operator=TriggerOperator.LT,
-            threshold=20, value=15.0, previous_value=25.0,
+            trigger_id=t.id,
+            field="BatteryLevel",
+            operator=TriggerOperator.LT,
+            threshold=20,
+            value=15.0,
+            previous_value=25.0,
             fired_at=datetime(2026, 2, 1, 12, 0, 0, tzinfo=UTC),
-            vin="VIN1", once=True,
+            vin="VIN1",
+            once=True,
         )
         await cb(n)
 
@@ -970,7 +1022,8 @@ class TestTriggerPushCallback:
 
     @pytest.mark.asyncio
     async def test_flush_deletes_once_trigger_on_delivery(
-        self, gateway: GatewayClient,
+        self,
+        gateway: GatewayClient,
     ) -> None:
         """flush_pending_push deletes one-shot trigger after confirmed delivery."""
         mgr = TriggerManager(vin="VIN1")
@@ -981,15 +1034,24 @@ class TestTriggerPushCallback:
         filt = DualGateFilter(filters)
         emitter = EventEmitter(client_id="test")
         bridge = TelemetryBridge(
-            gateway, filt, emitter, vin="VIN1", client_id="test-client",
+            gateway,
+            filt,
+            emitter,
+            vin="VIN1",
+            client_id="test-client",
             trigger_manager=mgr,
         )
 
         n = TriggerNotification(
-            trigger_id=t.id, field="BatteryLevel", operator=TriggerOperator.LT,
-            threshold=20, value=15.0, previous_value=25.0,
+            trigger_id=t.id,
+            field="BatteryLevel",
+            operator=TriggerOperator.LT,
+            threshold=20,
+            value=15.0,
+            previous_value=25.0,
             fired_at=datetime(2026, 2, 1, 12, 0, 0, tzinfo=UTC),
-            vin="VIN1", once=True,
+            vin="VIN1",
+            once=True,
         )
         bridge._pending_push.append(n)
 
@@ -1004,7 +1066,8 @@ class TestTriggerPushCallback:
 
     @pytest.mark.asyncio
     async def test_flush_keeps_persistent_trigger(
-        self, gateway: GatewayClient,
+        self,
+        gateway: GatewayClient,
     ) -> None:
         """flush_pending_push does NOT delete persistent triggers."""
         mgr = TriggerManager(vin="VIN1")
@@ -1015,15 +1078,24 @@ class TestTriggerPushCallback:
         filt = DualGateFilter(filters)
         emitter = EventEmitter(client_id="test")
         bridge = TelemetryBridge(
-            gateway, filt, emitter, vin="VIN1", client_id="test-client",
+            gateway,
+            filt,
+            emitter,
+            vin="VIN1",
+            client_id="test-client",
             trigger_manager=mgr,
         )
 
         n = TriggerNotification(
-            trigger_id=t.id, field="BatteryLevel", operator=TriggerOperator.LT,
-            threshold=20, value=15.0, previous_value=25.0,
+            trigger_id=t.id,
+            field="BatteryLevel",
+            operator=TriggerOperator.LT,
+            threshold=20,
+            value=15.0,
+            previous_value=25.0,
             fired_at=datetime(2026, 2, 1, 12, 0, 0, tzinfo=UTC),
-            vin="VIN1", once=False,
+            vin="VIN1",
+            once=False,
         )
         bridge._pending_push.append(n)
 
@@ -1037,14 +1109,20 @@ class TestTriggerPushCallback:
 
     @pytest.mark.asyncio
     async def test_push_callback_none_in_dry_run(
-        self, gateway: GatewayClient,
+        self,
+        gateway: GatewayClient,
     ) -> None:
         """make_trigger_push_callback returns None in dry-run mode."""
         filters: dict[str, FieldFilter] = {}
         filt = DualGateFilter(filters)
         emitter = EventEmitter(client_id="test")
         bridge = TelemetryBridge(
-            gateway, filt, emitter, dry_run=True, vin="VIN1", client_id="test",
+            gateway,
+            filt,
+            emitter,
+            dry_run=True,
+            vin="VIN1",
+            client_id="test",
         )
 
         cb = bridge.make_trigger_push_callback()

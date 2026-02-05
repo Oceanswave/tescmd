@@ -46,7 +46,7 @@ def _resolve_port(host: str, preferred: int, *, auto_select: bool = True) -> int
     # OS picks a free port
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind((host, 0))
-        free_port = s.getsockname()[1]
+        free_port: int = s.getsockname()[1]
 
     logger.info("Port %d in use — using port %d instead", preferred, free_port)
     return free_port
@@ -627,9 +627,7 @@ async def _cmd_serve(
                     combined_app, host=mcp_host, port=mcp_port, log_level="warning"
                 )
                 _uvi_server = uvicorn.Server(_uvi_cfg)
-                combined_task = asyncio.create_task(
-                    _safe_uvicorn_serve(_uvi_server, mcp_port)
-                )
+                combined_task = asyncio.create_task(_safe_uvicorn_serve(_uvi_server, mcp_port))
                 # Give uvicorn a moment to bind the port.
                 await asyncio.sleep(0.5)
                 if combined_task.done():
@@ -777,12 +775,8 @@ def _register_trigger_tools(
 
         return result
 
-    def _list_triggers(
-        field: str, *, show_fahrenheit: bool = False
-    ) -> dict[str, Any]:
-        triggers = [
-            t for t in trigger_manager.list_all() if t.condition.field == field
-        ]
+    def _list_triggers(field: str, *, show_fahrenheit: bool = False) -> dict[str, Any]:
+        triggers = [t for t in trigger_manager.list_all() if t.condition.field == field]
         result = []
         for t in triggers:
             entry: dict[str, Any] = {
@@ -1007,10 +1001,7 @@ def _register_trigger_tools(
             },
             "operator": {
                 "type": "string",
-                "description": (
-                    "Comparison: lt, gt, lte, gte, eq, neq,"
-                    " changed, enter, leave"
-                ),
+                "description": ("Comparison: lt, gt, lte, gte, eq, neq, changed, enter, leave"),
             },
             "value": {
                 "description": (
@@ -1021,16 +1012,11 @@ def _register_trigger_tools(
             },
             "once": {
                 "type": "boolean",
-                "description": (
-                    "Fire once then delete after delivery"
-                    " (default false)"
-                ),
+                "description": ("Fire once then delete after delivery (default false)"),
             },
             "cooldown_seconds": {
                 "type": "number",
-                "description": (
-                    "Minimum seconds between fires (default 60)"
-                ),
+                "description": ("Minimum seconds between fires (default 60)"),
             },
         },
         "required": ["field", "operator"],
@@ -1092,10 +1078,7 @@ def _register_trigger_tools(
             "properties": {
                 "field": {
                     "type": "string",
-                    "description": (
-                        "Telemetry field name"
-                        " (e.g. PackVoltage, HvacFanSpeed)"
-                    ),
+                    "description": ("Telemetry field name (e.g. PackVoltage, HvacFanSpeed)"),
                 },
             },
             "required": ["field"],

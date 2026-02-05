@@ -200,7 +200,8 @@ class TelemetryBridge:
                 )
             pending_push.append(n)
             logger.warning(
-                "Trigger notification queued: trigger=%s", n.trigger_id,
+                "Trigger notification queued: trigger=%s",
+                n.trigger_id,
             )
 
         return _push_trigger_notification
