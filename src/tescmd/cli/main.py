@@ -237,11 +237,20 @@ def main(argv: list[str] | None = None) -> None:
         if _handle_known_error(exc, app_ctx, formatter, cmd_name):
             raise SystemExit(1) from exc
 
+        exc_type = type(exc).__name__
+        exc_msg = str(exc)
+        # Never show an empty error — always include the exception class.
+        message = exc_msg if exc_msg else f"Unexpected {exc_type}"
         formatter.output_error(
-            code=type(exc).__name__,
-            message=str(exc),
+            code=exc_type,
+            message=message,
             command=cmd_name,
         )
+        if not exc_msg and formatter.format != "json":
+            # The message was empty — nudge toward --verbose for the traceback.
+            formatter.rich.info(
+                "[dim]Run with --verbose to see the full traceback.[/dim]"
+            )
         raise SystemExit(1) from exc
 
 

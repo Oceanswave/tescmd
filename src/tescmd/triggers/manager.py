@@ -129,7 +129,7 @@ class TriggerManager:
         if trigger is None:
             return False
 
-        if not _matches(trigger.condition, value, previous_value):
+        if not matches(trigger.condition, value, previous_value):
             return False
 
         now = time.monotonic()
@@ -206,7 +206,7 @@ class TriggerManager:
                 if last_fire is not None and (now - last_fire) < trigger.cooldown_seconds:
                     continue
 
-            if not _matches(trigger.condition, value, previous_value):
+            if not matches(trigger.condition, value, previous_value):
                 continue
 
             # Fire!
@@ -249,7 +249,7 @@ class TriggerManager:
         return fired
 
 
-def _matches(condition: TriggerCondition, value: Any, previous_value: Any) -> bool:
+def matches(condition: TriggerCondition, value: Any, previous_value: Any) -> bool:
     """Check whether a value satisfies a trigger condition."""
     op = condition.operator
 

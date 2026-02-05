@@ -38,7 +38,9 @@ def _to_snake_case(name: str) -> str:
 
 
 def _celsius_to_fahrenheit(c: float) -> float:
-    return c * 9.0 / 5.0 + 32.0
+    from tescmd._internal.units import celsius_to_fahrenheit
+
+    return celsius_to_fahrenheit(c)
 
 
 class EventEmitter:

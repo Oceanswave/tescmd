@@ -96,6 +96,7 @@ class TelemetryBridge:
             logger.warning(
                 "Reconnection failed — next attempt in %.0fs",
                 self._reconnect_backoff,
+                exc_info=True,
             )
             self._reconnect_backoff = min(self._reconnect_backoff * 2, _RECONNECT_MAX)
             return
@@ -107,7 +108,14 @@ class TelemetryBridge:
             logger.warning("Failed to send connected event after reconnect", exc_info=True)
         # Flush any queued trigger notifications now that WS is available.
         if self._pending_push:
-            await self.flush_pending_push()
+            try:
+                await self.flush_pending_push()
+            except Exception:
+                logger.warning(
+                    "Failed to flush %d pending push notification(s) after reconnect",
+                    len(self._pending_push),
+                    exc_info=True,
+                )
 
     def _build_lifecycle_event(self, event_type: str) -> dict[str, Any]:
         """Build a ``req:agent`` lifecycle event (connecting/disconnecting)."""
@@ -145,8 +153,8 @@ class TelemetryBridge:
 
         async def _push_trigger_notification(n: Any) -> None:
             if gateway.is_connected:
-                await gateway.send_event(
-                    {
+                try:
+                    event = {
                         "method": "tescmd.trigger.fired",
                         "params": {
                             "trigger_id": n.trigger_id,
@@ -157,7 +165,14 @@ class TelemetryBridge:
                             "fired_at": n.fired_at.isoformat(),
                         },
                     }
-                )
+                except (AttributeError, TypeError, ValueError):
+                    logger.error(
+                        "Malformed trigger notification — discarding: %r",
+                        n,
+                        exc_info=True,
+                    )
+                    return
+                await gateway.send_event(event)
                 # send_event() never raises — check is_connected to detect failure.
                 if gateway.is_connected:
                     logger.info(
@@ -176,6 +191,13 @@ class TelemetryBridge:
                     n.trigger_id,
                 )
 
+            if len(pending_push) == pending_push.maxlen:
+                dropped = pending_push[0]
+                logger.warning(
+                    "Pending push queue full (%d) — dropping oldest: trigger=%s",
+                    len(pending_push),
+                    dropped.trigger_id,
+                )
             pending_push.append(n)
             logger.warning(
                 "Trigger notification queued: trigger=%s", n.trigger_id,
@@ -201,8 +223,8 @@ class TelemetryBridge:
 
         while self._pending_push:
             n = self._pending_push[0]  # peek without removing
-            await self._gateway.send_event(
-                {
+            try:
+                event = {
                     "method": "tescmd.trigger.fired",
                     "params": {
                         "trigger_id": n.trigger_id,
@@ -213,7 +235,15 @@ class TelemetryBridge:
                         "fired_at": n.fired_at.isoformat(),
                     },
                 }
-            )
+            except (AttributeError, TypeError, ValueError):
+                logger.error(
+                    "Malformed notification in push queue — discarding: %r",
+                    n,
+                    exc_info=True,
+                )
+                self._pending_push.popleft()
+                continue
+            await self._gateway.send_event(event)
             # send_event() never raises — check is_connected to detect failure.
             if not self._gateway.is_connected:
                 logger.warning("Flush stopped at %d/%d", sent, total)

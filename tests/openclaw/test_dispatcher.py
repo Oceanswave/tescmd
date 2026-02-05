@@ -894,13 +894,14 @@ class TestSystemRun:
         assert result["result"] is True
 
     @pytest.mark.asyncio
-    async def test_system_run_unknown_method_raises(self) -> None:
+    async def test_system_run_unknown_method_returns_none(self) -> None:
+        """Unknown inner methods return None (no traceback) for clean gateway handling."""
         ctx = _mock_app_ctx()
         d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
-        with pytest.raises(ValueError, match="Unknown method"):
-            await d.dispatch(
-                {"method": "system.run", "params": {"method": "nonexistent.cmd", "params": {}}}
-            )
+        result = await d.dispatch(
+            {"method": "system.run", "params": {"method": "nonexistent.cmd", "params": {}}}
+        )
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_system_run_self_dispatch_rejected(self) -> None:

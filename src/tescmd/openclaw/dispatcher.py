@@ -9,10 +9,10 @@ first; write handlers call the command API, auto-wake once on
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
+from tescmd._internal.units import celsius_to_fahrenheit, fahrenheit_to_celsius
 from tescmd.api.errors import VehicleAsleepError
 from tescmd.cli._client import (
     check_command_guards,
@@ -28,16 +28,6 @@ if TYPE_CHECKING:
     from tescmd.triggers.manager import TriggerManager
 
 logger = logging.getLogger(__name__)
-
-
-def _fahrenheit_to_celsius(f: float) -> float:
-    """Convert Fahrenheit to Celsius, rounded to 1 decimal place."""
-    return round((f - 32.0) * 5.0 / 9.0, 1)
-
-
-def _celsius_to_fahrenheit(c: float) -> float:
-    """Convert Celsius to Fahrenheit, rounded to 1 decimal place."""
-    return round(c * 9.0 / 5.0 + 32.0, 1)
 
 
 # API snake_case → OpenClaw dot notation aliases for system.run
@@ -458,7 +448,7 @@ class CommandDispatcher:
 
     # -- Meta-dispatch handler -----------------------------------------------
 
-    async def _handle_system_run(self, params: dict[str, Any]) -> dict[str, Any]:
+    async def _handle_system_run(self, params: dict[str, Any]) -> dict[str, Any] | None:
         """Invoke any registered handler by name.
 
         Accepts both OpenClaw-style (``door.lock``) and API-style
@@ -466,6 +456,9 @@ class CommandDispatcher:
 
         The target method can be specified as ``method`` or ``command``
         (the latter mirrors the gateway protocol's field name).
+
+        Returns ``None`` for unknown inner methods so the gateway can
+        send a clean error response without a traceback.
         """
         raw = params.get("method", "") or params.get("command", "")
         # Normalize: bots may send a list like ["door.lock"] instead of a string
@@ -481,7 +474,7 @@ class CommandDispatcher:
         inner_params = params.get("params", {})
         result = await self.dispatch({"method": resolved, "params": inner_params})
         if result is None:
-            raise ValueError(f"Unknown method: {method}")
+            logger.warning("system.run: unknown inner method %s (resolved: %s)", method, resolved)
         return result
 
     # -- Trigger handlers ----------------------------------------------------
@@ -581,8 +574,14 @@ class CommandDispatcher:
                 "cooldown_seconds": t.cooldown_seconds,
             }
             if show_fahrenheit and t.condition.value is not None:
-                with contextlib.suppress(TypeError, ValueError):
-                    entry["value_f"] = _celsius_to_fahrenheit(float(t.condition.value))
+                try:
+                    entry["value_f"] = celsius_to_fahrenheit(float(t.condition.value))
+                except (TypeError, ValueError):
+                    logger.debug(
+                        "Could not convert trigger %s value %r to Fahrenheit",
+                        t.id,
+                        t.condition.value,
+                    )
             result.append(entry)
         return {"triggers": result}
 
@@ -621,7 +620,7 @@ class CommandDispatcher:
         converted = {**params, "field": "InsideTemp"}
         if "value" in converted and converted["value"] is not None:
             f_val = float(converted["value"])
-            converted["value"] = _fahrenheit_to_celsius(f_val)
+            converted["value"] = fahrenheit_to_celsius(f_val)
             logger.debug(
                 "cabin_temp.trigger: converted %.1f°F → %.1f°C", f_val, converted["value"]
             )
@@ -631,7 +630,7 @@ class CommandDispatcher:
         converted = {**params, "field": "OutsideTemp"}
         if "value" in converted and converted["value"] is not None:
             f_val = float(converted["value"])
-            converted["value"] = _fahrenheit_to_celsius(f_val)
+            converted["value"] = fahrenheit_to_celsius(f_val)
             logger.debug(
                 "outside_temp.trigger: converted %.1f°F → %.1f°C", f_val, converted["value"]
             )

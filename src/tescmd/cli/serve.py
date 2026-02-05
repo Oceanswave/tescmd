@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import random
 import signal
@@ -18,6 +17,56 @@ from tescmd.cli._client import require_vin
 from tescmd.cli._options import global_options
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_port(host: str, preferred: int, *, auto_select: bool = True) -> int:
+    """Return *preferred* if available, or find a free port.
+
+    When *auto_select* is ``True`` (default port in use), the OS picks
+    a free port.  When ``False`` (user explicitly chose a port), raise
+    ``click.UsageError`` with an actionable message.
+    """
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((host, preferred))
+            return preferred
+        except OSError:
+            pass
+
+    if not auto_select:
+        raise click.UsageError(
+            f"Port {preferred} is already in use.\n"
+            f"Use --port to specify a different port, e.g.:\n"
+            f"  tescmd serve --port {preferred + 1}"
+        )
+
+    # OS picks a free port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind((host, 0))
+        free_port = s.getsockname()[1]
+
+    logger.info("Port %d in use — using port %d instead", preferred, free_port)
+    return free_port
+
+
+async def _safe_uvicorn_serve(server: Any, port: int) -> None:
+    """Run uvicorn.Server.serve() with SystemExit protection.
+
+    Uvicorn calls ``sys.exit(1)`` when it cannot bind the port.
+    ``SystemExit`` is a ``BaseException`` that kills the asyncio event
+    loop before the owning task can retrieve the exception.  This
+    wrapper converts it to a regular ``OSError``.
+    """
+    try:
+        await server.serve()
+    except SystemExit as exc:
+        if exc.code == 0:
+            logger.debug("Uvicorn exited cleanly (code 0) on port %d", port)
+            return
+        raise OSError(f"MCP server failed to start on port {port}") from exc
 
 
 @click.command("serve")
@@ -201,6 +250,12 @@ def serve_cmd(
     if openclaw_config_path and not openclaw_url:
         raise click.UsageError("--openclaw-config requires --openclaw.")
 
+    port_source = click.get_current_context().get_parameter_source("port")
+    port_explicit = port_source in (
+        click.core.ParameterSource.COMMANDLINE,
+        click.core.ParameterSource.ENVIRONMENT,
+    )
+
     run_async(
         _cmd_serve(
             app_ctx,
@@ -208,6 +263,7 @@ def serve_cmd(
             transport=transport,
             mcp_port=port,
             mcp_host=host,
+            port_explicit=port_explicit,
             telemetry_port=telemetry_port,
             fields_spec=fields,
             interval_override=interval,
@@ -233,6 +289,7 @@ async def _cmd_serve(
     transport: str,
     mcp_port: int,
     mcp_host: str = "127.0.0.1",
+    port_explicit: bool = False,
     telemetry_port: int | None,
     fields_spec: str,
     interval_override: int | None,
@@ -271,6 +328,10 @@ async def _cmd_serve(
 
         mcp_server = create_mcp_server(client_id=client_id, client_secret=client_secret)
         tool_count = len(mcp_server.list_tools())
+
+    # -- Resolve MCP port (pre-check for port conflicts) --
+    if not no_mcp and transport != "stdio":
+        mcp_port = _resolve_port(mcp_host, mcp_port, auto_select=not port_explicit)
 
     # -- stdio mode: no telemetry, no fanout --
     if transport == "stdio" and mcp_server is not None:
@@ -486,7 +547,7 @@ async def _cmd_serve(
             _pre_hostname = await _ts_pre.get_hostname()
             public_url = f"https://{_pre_hostname}"
         except Exception:
-            logger.warning("Tailscale auto-detection failed — using localhost")
+            logger.warning("Tailscale auto-detection failed — using localhost", exc_info=True)
 
     # -- Populate TUI with server info --
     if tui is not None:
@@ -566,7 +627,9 @@ async def _cmd_serve(
                     combined_app, host=mcp_host, port=mcp_port, log_level="warning"
                 )
                 _uvi_server = uvicorn.Server(_uvi_cfg)
-                combined_task = asyncio.create_task(_uvi_server.serve())
+                combined_task = asyncio.create_task(
+                    _safe_uvicorn_serve(_uvi_server, mcp_port)
+                )
                 # Give uvicorn a moment to bind the port.
                 await asyncio.sleep(0.5)
                 if combined_task.done():
@@ -671,19 +734,13 @@ def _register_trigger_tools(
     One-shot triggers are **not** deleted immediately — the push
     callback handles deletion after confirmed WebSocket delivery.
     """
-    from tescmd.triggers.manager import _matches
+    from tescmd._internal.units import celsius_to_fahrenheit, fahrenheit_to_celsius
+    from tescmd.triggers.manager import matches
     from tescmd.triggers.models import (
         TriggerCondition,
         TriggerDefinition,
-        TriggerNotification,
         TriggerOperator,
     )
-
-    def _f_to_c(f: float) -> float:
-        return round((f - 32.0) * 5.0 / 9.0, 1)
-
-    def _c_to_f(c: float) -> float:
-        return round(c * 9.0 / 5.0 + 32.0, 1)
 
     def _create_trigger(
         field: str, params: dict[str, Any], *, convert_temp: bool = False
@@ -693,7 +750,7 @@ def _register_trigger_tools(
             raise ValueError("Trigger requires 'operator' parameter")
         value = params.get("value")
         if convert_temp and value is not None:
-            value = _f_to_c(float(value))
+            value = fahrenheit_to_celsius(float(value))
         condition = TriggerCondition(
             field=field,
             operator=TriggerOperator(op_str),
@@ -708,26 +765,12 @@ def _register_trigger_tools(
         result = dict(created.model_dump(mode="json"))
 
         # Immediate evaluation: if the telemetry store already has a
-        # value that satisfies the condition, fire now.
-        # One-shot triggers are NOT deleted here — the push callback
-        # handles deletion after confirmed WebSocket delivery.
+        # value that satisfies the condition, report it.  One-shot
+        # triggers are marked as fired; the push callback handles
+        # deletion after confirmed WebSocket delivery.
         if telemetry_store is not None:
             snap = telemetry_store.get(field)
-            if snap is not None and _matches(condition, snap.value, None):
-                from datetime import UTC, datetime
-
-                notification = TriggerNotification(
-                    trigger_id=created.id,
-                    field=field,
-                    operator=condition.operator,
-                    threshold=condition.value,
-                    value=snap.value,
-                    previous_value=None,
-                    fired_at=datetime.now(UTC),
-                    vin=trigger_manager.vin,
-                    once=trigger.once,
-                )
-                trigger_manager.queue_notification(notification)
+            if snap is not None and matches(condition, snap.value, None):
                 result["immediate"] = True
                 if trigger.once:
                     trigger_manager.mark_fired_once(created.id)
@@ -751,8 +794,14 @@ def _register_trigger_tools(
                 "cooldown_seconds": t.cooldown_seconds,
             }
             if show_fahrenheit and t.condition.value is not None:
-                with contextlib.suppress(TypeError, ValueError):
-                    entry["value_f"] = _c_to_f(float(t.condition.value))
+                try:
+                    entry["value_f"] = celsius_to_fahrenheit(float(t.condition.value))
+                except (TypeError, ValueError):
+                    logger.debug(
+                        "Could not convert trigger %s value %r to Fahrenheit",
+                        t.id,
+                        t.condition.value,
+                    )
             result.append(entry)
         return {"triggers": result}
 
@@ -989,7 +1038,9 @@ def _register_trigger_tools(
 
     mcp_server.register_custom_tool(
         "trigger_create",
-        lambda p: _create_trigger(p.pop("field", ""), p),
+        lambda p: _create_trigger(
+            p.get("field", ""), {k: v for k, v in p.items() if k != "field"}
+        ),
         "Create a trigger on any telemetry field",
         _generic_trigger_schema,
         is_write=True,
@@ -1026,7 +1077,7 @@ def _register_trigger_tools(
         if not field:
             raise ValueError("telemetry_get requires 'field' parameter")
         if telemetry_store is None:
-            return {"field": field, "pending": True}
+            return {"field": field, "error": "telemetry_store_unavailable", "pending": False}
         snap = telemetry_store.get(field)
         if snap is None:
             return {"field": field, "pending": True}

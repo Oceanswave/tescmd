@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from tescmd.triggers.manager import TriggerLimitError, TriggerManager, _matches
+from tescmd.triggers.manager import TriggerLimitError, TriggerManager, matches
 from tescmd.triggers.models import (
     TriggerCondition,
     TriggerDefinition,
@@ -400,55 +400,55 @@ class TestGeofence:
 
 
 class TestMatches:
-    """Direct tests for the _matches() helper."""
+    """Direct tests for the matches() helper."""
 
     def test_changed_different(self) -> None:
         c = _cond("f", TriggerOperator.CHANGED)
-        assert _matches(c, "a", "b") is True
+        assert matches(c, "a", "b") is True
 
     def test_changed_same(self) -> None:
         c = _cond("f", TriggerOperator.CHANGED)
-        assert _matches(c, "a", "a") is False
+        assert matches(c, "a", "a") is False
 
     def test_eq_match(self) -> None:
         c = _cond("f", TriggerOperator.EQ, "x")
-        assert _matches(c, "x", None) is True
+        assert matches(c, "x", None) is True
 
     def test_eq_no_match(self) -> None:
         c = _cond("f", TriggerOperator.EQ, "x")
-        assert _matches(c, "y", None) is False
+        assert matches(c, "y", None) is False
 
     def test_neq_match(self) -> None:
         c = _cond("f", TriggerOperator.NEQ, "x")
-        assert _matches(c, "y", None) is True
+        assert matches(c, "y", None) is True
 
     def test_lt_numeric(self) -> None:
         c = _cond("f", TriggerOperator.LT, 20)
-        assert _matches(c, 15, None) is True
-        assert _matches(c, 25, None) is False
+        assert matches(c, 15, None) is True
+        assert matches(c, 25, None) is False
 
     def test_gt_numeric(self) -> None:
         c = _cond("f", TriggerOperator.GT, 80)
-        assert _matches(c, 85, None) is True
-        assert _matches(c, 75, None) is False
+        assert matches(c, 85, None) is True
+        assert matches(c, 75, None) is False
 
     def test_lte_boundary(self) -> None:
         c = _cond("f", TriggerOperator.LTE, 20)
-        assert _matches(c, 20, None) is True
-        assert _matches(c, 21, None) is False
+        assert matches(c, 20, None) is True
+        assert matches(c, 21, None) is False
 
     def test_gte_boundary(self) -> None:
         c = _cond("f", TriggerOperator.GTE, 80)
-        assert _matches(c, 80, None) is True
-        assert _matches(c, 79, None) is False
+        assert matches(c, 80, None) is True
+        assert matches(c, 79, None) is False
 
     def test_non_numeric_returns_false(self) -> None:
         c = _cond("f", TriggerOperator.LT, 20)
-        assert _matches(c, "abc", None) is False
+        assert matches(c, "abc", None) is False
 
     def test_string_numeric_coercion(self) -> None:
         c = _cond("f", TriggerOperator.GT, "80")
-        assert _matches(c, "85", None) is True
+        assert matches(c, "85", None) is True
 
 
 class TestEvaluateSingle:
