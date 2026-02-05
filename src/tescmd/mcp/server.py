@@ -388,7 +388,13 @@ class MCPServer:
         app = self.create_http_app(host=host, port=port, public_url=public_url)
         config = uvicorn.Config(app, host=host, port=port, log_level="warning")
         server = uvicorn.Server(config)
-        await server.serve()
+        try:
+            await server.serve()
+        except SystemExit as exc:
+            if exc.code == 0:
+                logger.debug("Uvicorn exited cleanly (code 0) on port %d", port)
+                return
+            raise OSError(f"MCP server failed to start on port {port}") from exc
 
     def _register_fastmcp_tool(
         self,

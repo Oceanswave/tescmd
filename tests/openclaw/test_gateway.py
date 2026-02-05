@@ -543,8 +543,8 @@ class TestHandshakeCapabilities:
 
     @pytest.mark.asyncio
     async def test_default_capabilities_sends_all_commands(self) -> None:
-        """Default NodeCapabilities sends location.get + system.run."""
-        caps = NodeCapabilities()  # defaults: 1 read + 1 write
+        """Default NodeCapabilities sends all advertised commands."""
+        caps = NodeCapabilities()
         mock_ws = AsyncMock()
         mock_ws.recv = AsyncMock(side_effect=[_challenge(), _hello_ok()])
         mock_ws.send = AsyncMock()
@@ -558,18 +558,24 @@ class TestHandshakeCapabilities:
         permissions = sent["params"]["permissions"]
         caps_list = sent["params"]["caps"]
 
-        # 2 commands: location.get (read) + system.run (write)
-        assert len(commands) == 2
+        # 6 commands: 3 reads + 3 writes
+        assert len(commands) == 6
         assert "location.get" in commands
+        assert "telemetry.get" in commands
+        assert "trigger.list" in commands
         assert "system.run" in commands
+        assert "trigger.create" in commands
+        assert "trigger.delete" in commands
 
         # permissions must match commands 1:1
-        assert len(permissions) == 2
+        assert len(permissions) == 6
         assert all(permissions[cmd] is True for cmd in commands)
 
-        # caps: location, system
-        assert len(caps_list) == 2
+        # caps: location, telemetry, trigger, system
+        assert len(caps_list) == 4
         assert "location" in caps_list
+        assert "telemetry" in caps_list
+        assert "trigger" in caps_list
         assert "system" in caps_list
 
     @pytest.mark.asyncio

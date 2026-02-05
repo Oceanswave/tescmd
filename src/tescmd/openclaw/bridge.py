@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 _RECONNECT_BASE = 5.0
 _RECONNECT_MAX = 120.0
+_MAX_PENDING_PUSH = 1000
 
 
 class TelemetryBridge:
@@ -65,6 +67,7 @@ class TelemetryBridge:
         self._reconnect_at: float = 0.0
         self._reconnect_backoff: float = _RECONNECT_BASE
         self._shutting_down = False
+        self._pending_push: deque[Any] = deque(maxlen=_MAX_PENDING_PUSH)
 
     @property
     def event_count(self) -> int:
@@ -93,6 +96,7 @@ class TelemetryBridge:
             logger.warning(
                 "Reconnection failed — next attempt in %.0fs",
                 self._reconnect_backoff,
+                exc_info=True,
             )
             self._reconnect_backoff = min(self._reconnect_backoff * 2, _RECONNECT_MAX)
             return
@@ -102,6 +106,16 @@ class TelemetryBridge:
             await self.send_connected()
         except Exception:
             logger.warning("Failed to send connected event after reconnect", exc_info=True)
+        # Flush any queued trigger notifications now that WS is available.
+        if self._pending_push:
+            try:
+                await self.flush_pending_push()
+            except Exception:
+                logger.warning(
+                    "Failed to flush %d pending push notification(s) after reconnect",
+                    len(self._pending_push),
+                    exc_info=True,
+                )
 
     def _build_lifecycle_event(self, event_type: str) -> dict[str, Any]:
         """Build a ``req:agent`` lifecycle event (connecting/disconnecting)."""
@@ -117,41 +131,135 @@ class TelemetryBridge:
         }
 
     def make_trigger_push_callback(self) -> Any:
-        """Return an async callback that pushes trigger notifications to the gateway.
+        """Return an async callback that pushes trigger notifications.
 
-        Suitable for passing to ``TriggerManager.add_on_fire()``.  Returns
-        ``None`` when in dry-run mode (caller should skip registration).
+        Delivery is via WebSocket (``gateway.send_event``).  On failure
+        the notification is queued in ``_pending_push`` for later
+        :meth:`flush_pending_push`.
+
+        One-shot triggers (``n.once is True``) are deleted from the
+        trigger manager only after confirmed delivery — guaranteeing the
+        notification reaches the gateway before the trigger disappears.
+
+        Returns ``None`` only when in dry-run mode (caller should skip
+        registration).
         """
         if self._dry_run:
             return None
 
         gateway = self._gateway
-        client_id = self._client_id
+        pending_push = self._pending_push
+        trigger_manager = self._trigger_manager
 
         async def _push_trigger_notification(n: Any) -> None:
             if gateway.is_connected:
                 try:
-                    await gateway.send_event(
-                        {
-                            "method": "req:agent",
-                            "params": {
-                                "event_type": "trigger.fired",
-                                "source": client_id,
-                                "vin": n.vin,
-                                "timestamp": n.fired_at.isoformat(),
-                                "data": n.model_dump(mode="json"),
-                            },
-                        }
-                    )
-                except Exception:
-                    logger.warning(
-                        "Failed to push trigger notification (trigger=%s field=%s)",
-                        n.trigger_id,
-                        n.field,
+                    event = {
+                        "method": "tescmd.trigger.fired",
+                        "params": {
+                            "trigger_id": n.trigger_id,
+                            "field": n.field,
+                            "operator": n.operator.value,
+                            "value": n.value,
+                            "vin": n.vin,
+                            "fired_at": n.fired_at.isoformat(),
+                        },
+                    }
+                except (AttributeError, TypeError, ValueError):
+                    logger.error(
+                        "Malformed trigger notification — discarding: %r",
+                        n,
                         exc_info=True,
                     )
+                    return
+                await gateway.send_event(event)
+                # send_event() never raises — check is_connected to detect failure.
+                if gateway.is_connected:
+                    logger.info(
+                        "Pushed trigger notification: trigger=%s",
+                        n.trigger_id,
+                    )
+                    if n.once and trigger_manager is not None:
+                        trigger_manager.delete(n.trigger_id)
+                        logger.info(
+                            "Deleted one-shot trigger %s after confirmed delivery",
+                            n.trigger_id,
+                        )
+                    return
+                logger.warning(
+                    "WS push failed for trigger=%s",
+                    n.trigger_id,
+                )
+
+            if len(pending_push) == pending_push.maxlen:
+                dropped = pending_push[0]
+                logger.warning(
+                    "Pending push queue full (%d) — dropping oldest: trigger=%s",
+                    len(pending_push),
+                    dropped.trigger_id,
+                )
+            pending_push.append(n)
+            logger.warning(
+                "Trigger notification queued: trigger=%s", n.trigger_id,
+            )
 
         return _push_trigger_notification
+
+    async def flush_pending_push(self) -> int:
+        """Replay queued trigger notifications via WebSocket.
+
+        One-shot triggers are deleted after each successful send,
+        mirroring the behaviour of the push callback.
+
+        Returns the number of notifications successfully flushed.
+        """
+        if not self._pending_push or self._dry_run:
+            return 0
+        if not self._gateway.is_connected:
+            return 0
+
+        total = len(self._pending_push)
+        sent = 0
+
+        while self._pending_push:
+            n = self._pending_push[0]  # peek without removing
+            try:
+                event = {
+                    "method": "tescmd.trigger.fired",
+                    "params": {
+                        "trigger_id": n.trigger_id,
+                        "field": n.field,
+                        "operator": n.operator.value,
+                        "value": n.value,
+                        "vin": n.vin,
+                        "fired_at": n.fired_at.isoformat(),
+                    },
+                }
+            except (AttributeError, TypeError, ValueError):
+                logger.error(
+                    "Malformed notification in push queue — discarding: %r",
+                    n,
+                    exc_info=True,
+                )
+                self._pending_push.popleft()
+                continue
+            await self._gateway.send_event(event)
+            # send_event() never raises — check is_connected to detect failure.
+            if not self._gateway.is_connected:
+                logger.warning("Flush stopped at %d/%d", sent, total)
+                break
+            self._pending_push.popleft()
+            sent += 1
+            if n.once and self._trigger_manager is not None:
+                self._trigger_manager.delete(n.trigger_id)
+                logger.info(
+                    "Deleted one-shot trigger %s after flush delivery",
+                    n.trigger_id,
+                )
+
+        if sent:
+            logger.info("Flushed %d/%d queued trigger notification(s)", sent, total)
+        return sent
 
     async def send_connected(self) -> bool:
         """Send a ``node.connected`` lifecycle event to the gateway.
@@ -193,62 +301,108 @@ class TelemetryBridge:
         except Exception:
             logger.warning("Failed to send disconnecting event", exc_info=True)
 
+    async def _send_datum(
+        self,
+        datum: Any,
+        frame: TelemetryFrame,
+        now: float,
+    ) -> bool:
+        """Emit a single datum as a gateway event.
+
+        Returns ``True`` if the event was sent (or printed in dry-run mode).
+        Handles reconnection and error logging internally.
+        """
+        event = self._emitter.to_event(
+            field_name=datum.field_name,
+            value=datum.value,
+            vin=frame.vin,
+            timestamp=frame.created_at,
+        )
+
+        if event is None:
+            self._drop_count += 1
+            return False
+
+        self._filter.record_emit(datum.field_name, datum.value, now)
+        self._event_count += 1
+        self._last_event_time = now
+
+        if self._dry_run:
+            import json
+
+            print(json.dumps(event, default=str), flush=True)
+            return True
+
+        if not self._gateway.is_connected:
+            await self._maybe_reconnect()
+            if not self._gateway.is_connected:
+                self._drop_count += 1
+                return False
+
+        try:
+            await self._gateway.send_event(event)
+            logger.info("Sent %s event for %s", datum.field_name, frame.vin)
+            return True
+        except Exception:
+            logger.warning(
+                "Failed to send event for %s — discarding",
+                datum.field_name,
+                exc_info=True,
+            )
+            return False
+
     async def on_frame(self, frame: TelemetryFrame) -> None:
         """Process a decoded telemetry frame through the filter pipeline.
 
         For each datum in the frame, check the dual-gate filter. If it
         passes, transform to an OpenClaw event and send to the gateway.
+
+        Trigger evaluation runs on **all** datums regardless of the filter.
+        When a trigger fires on a datum that was blocked by the filter, the
+        datum is force-emitted so the gateway always receives the value that
+        caused the trigger to fire.
+
         Failed sends are logged and discarded — never crash the server.
         If the gateway is disconnected, a reconnection attempt is made
         (with exponential backoff) before dropping events.
         """
         now = time.monotonic()
+        trigger_count = (
+            len(self._trigger_manager.list_all()) if self._trigger_manager is not None else 0
+        )
+        logger.debug(
+            "on_frame: vin=%s datums=%d connected=%s triggers=%d",
+            frame.vin,
+            len(frame.data),
+            self._gateway.is_connected,
+            trigger_count,
+        )
 
+        # --- Phase 1: filtered telemetry emission ---
+        emitted = 0
+        emitted_fields: set[str] = set()
         for datum in frame.data:
             if not self._filter.should_emit(datum.field_name, datum.value, now):
                 self._drop_count += 1
                 continue
 
-            event = self._emitter.to_event(
-                field_name=datum.field_name,
-                value=datum.value,
-                vin=frame.vin,
-                timestamp=frame.created_at,
+            if await self._send_datum(datum, frame, now):
+                emitted += 1
+                emitted_fields.add(datum.field_name)
+
+        if emitted > 0 or logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Frame summary: emitted=%d dropped=%d total_events=%d",
+                emitted,
+                self._drop_count,
+                self._event_count,
             )
 
-            if event is None:
-                self._drop_count += 1
-                continue
-
-            self._filter.record_emit(datum.field_name, datum.value, now)
-            self._event_count += 1
-            self._last_event_time = now
-
-            if self._dry_run:
-                import json
-
-                print(json.dumps(event, default=str), flush=True)
-                continue
-
-            if not self._gateway.is_connected:
-                await self._maybe_reconnect()
-                if not self._gateway.is_connected:
-                    self._drop_count += 1
-                    continue
-
-            try:
-                await self._gateway.send_event(event)
-                logger.info("Sent %s event for %s", datum.field_name, frame.vin)
-            except Exception:
-                logger.warning(
-                    "Failed to send event for %s — discarding",
-                    datum.field_name,
-                    exc_info=True,
-                )
-
-        # Update telemetry store and evaluate triggers for ALL datums
-        # (not just filtered ones) so read handlers always see the latest
-        # values and triggers fire on every change.
+        # --- Phase 2: telemetry store + trigger evaluation ---
+        # Runs on ALL datums (not just filtered ones) so read handlers
+        # always see the latest values and triggers fire on every change.
+        # When a trigger fires on a datum that wasn't emitted in phase 1,
+        # force-emit it so the gateway receives the triggering value.
         if self._telemetry_store is not None or self._trigger_manager is not None:
             for datum in frame.data:
                 prev_snap = (
@@ -262,9 +416,22 @@ class TelemetryBridge:
                     self._telemetry_store.update(datum.field_name, datum.value, frame.created_at)
 
                 if self._trigger_manager is not None:
-                    await self._trigger_manager.evaluate(
+                    fired = await self._trigger_manager.evaluate(
                         datum.field_name, datum.value, prev_value, frame.created_at
                     )
+                    # Force-emit the telemetry event when a trigger fires
+                    # but the filter gate blocked it in phase 1.
+                    if (
+                        fired
+                        and datum.field_name not in emitted_fields
+                        and await self._send_datum(datum, frame, now)
+                    ):
+                        emitted_fields.add(datum.field_name)
+                        logger.info(
+                            "Force-emitted %s for %s (trigger fired)",
+                            datum.field_name,
+                            frame.vin,
+                        )
 
 
 # -- Pipeline factory -------------------------------------------------------

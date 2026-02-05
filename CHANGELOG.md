@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-02-04
+
+### Added
+
+- **Generic telemetry events** — all 230+ telemetry fields now produce OpenClaw events via a generic fallback in the emitter; unmapped fields are emitted as snake_case event types (e.g. `PackVoltage` → `pack_voltage`) with `field` and `value` payload keys
+- **Default filter for unconfigured fields** — `DualGateFilter` now applies a sensible default (any-change granularity, 5s throttle, 2min staleness) to unconfigured fields instead of silently dropping them; explicitly disabled fields are still blocked
+- **`telemetry.get` handler** — generic read handler in `CommandDispatcher` allows agents to read the latest value of any telemetry field from the in-memory store
+- **`telemetry_get` MCP tool** — exposes `telemetry.get` as an MCP tool so agent frameworks can read arbitrary telemetry fields
+- **Trigger commands in capabilities** — `NodeCapabilities` now advertises `telemetry.get`, `trigger.list`, `trigger.create`, and `trigger.delete` to the gateway
+
+### Removed
+
+- **`trigger.poll` endpoint and pending queue** — trigger notifications are delivered exclusively via push callbacks over the OpenClaw WebSocket; the MCP `trigger_poll` tool, `drain_pending()`, and the in-memory pending notification queue have been removed
+
+### Changed
+
+- **`matches()` is now a public API** — renamed from `_matches()` in `triggers/manager.py` so cross-module consumers (MCP trigger tools) import a stable public symbol
+- **Shared temperature conversion utility** — `_internal/units.py` provides `fahrenheit_to_celsius()` and `celsius_to_fahrenheit()` replacing three duplicate implementations across `dispatcher.py`, `serve.py`, and `emitter.py`
+- **`telemetry_get` distinguishes store-unavailable from pending** — returns `{"error": "telemetry_store_unavailable", "pending": false}` when no telemetry store is configured instead of the misleading `{"pending": true}`
+
+### Fixed
+
+- **TUI panel widgets not updating** — telemetry panel DataTables now update per-frame as data arrives instead of relying solely on a 1-second timer poll; header, server info, and trigger displays remain on the timer
+- **Port-in-use crash** — `tescmd serve` now pre-checks port availability with `_resolve_port()` and auto-selects a free port when the default is occupied; explicit `--port` raises a clear `UsageError` with a suggested alternative
+- **`SystemExit` killing the event loop** — uvicorn's `sys.exit(1)` on bind failure is now caught by `_safe_uvicorn_serve()` and converted to `OSError`; clean shutdown (`exit(0)`) passes through without error
+- **Empty "Error:" crash** — generic error handler in `main.py` now shows `"Unexpected {ExceptionType}"` when `str(exc)` is empty and suggests `--verbose` for the full traceback
+- **`trigger.poll` ValueError** — removed the defunct `trigger.poll` handler that raised `ValueError` when called; `system.run` now returns `None` for unknown inner methods instead of raising
+- **Trigger notification queue overflow silent data loss** — `_pending_push` deque now logs a warning when at capacity before evicting the oldest notification
+- **`flush_pending_push` crash after reconnect** — flush is now wrapped in try/except so a single malformed notification cannot break the reconnect recovery path
+- **Notification serialization crash blocks all deliveries** — event dict construction in both push callback and flush loop is now guarded per-notification; a bad entry is logged and discarded instead of blocking subsequent notifications
+- **`p.pop("field")` mutates MCP params** — generic `trigger_create` tool now uses `p.get()` with a filtered dict copy to avoid mutating the framework's params dict on retries
+- **Unknown `system.run` method logged at wrong level** — bumped from `info` to `warning` so operators monitoring at warning level see protocol mismatches
+- **`contextlib.suppress` hiding conversion bugs** — replaced with explicit try/except + debug-level logging in both dispatcher and MCP trigger list paths
+- **Reconnect failure logged without traceback** — added `exc_info=True` to reconnect and Tailscale auto-detection warning logs
+- **Notification serialization guard too broad** — narrowed `except Exception` to `(AttributeError, TypeError, ValueError)` in both push callback and flush loop so unexpected errors (e.g. `ConnectionError`) propagate instead of being silently discarded
+- **`system.run` unknown method log missing resolved name** — warning now includes both the raw and resolved method names for easier debugging
+- **`SystemExit(0)` silent return** — clean uvicorn shutdowns now log at debug level in both `serve.py` and `server.py` for traceability
+- **Environment-sourced `--port` treated as auto-select** — ports set via `TESLA_MCP_PORT` env var are now treated as explicit (error on conflict) instead of silently picking an alternative port
+
 ## [0.5.0] - 2026-02-03
 
 ### Changed

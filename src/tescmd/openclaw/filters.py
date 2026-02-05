@@ -6,6 +6,10 @@ Both conditions must pass for a field to be emitted:
    threshold since the last emitted value.
 2. **Throttle gate** — enough time has elapsed since the last emission.
 
+An optional **staleness gate** (``max_seconds``) overrides the delta gate
+when too much time passes without emission — ensuring periodic updates for
+numeric fields that change slowly (e.g. parked vehicle).
+
 Fields with ``granularity=0`` emit on any value change (state fields like
 ``ChargeState``, ``Locked``).  Fields with ``throttle_seconds=0`` have no
 time constraint.
@@ -14,10 +18,17 @@ time constraint.
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from tescmd.openclaw.config import FieldFilter
+from tescmd.openclaw.config import FieldFilter
+
+# Sensible defaults for telemetry fields that have no explicit filter
+# configuration.  Any-change delta, 5-second throttle, 2-minute staleness.
+_DEFAULT_FALLBACK = FieldFilter(
+    granularity=0.0,
+    throttle_seconds=5.0,
+    max_seconds=120.0,
+)
 
 
 def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -81,24 +92,44 @@ class DualGateFilter:
         self._last_emit_times: dict[str, float] = {}
 
     def should_emit(self, field: str, value: Any, now: float) -> bool:
-        """Check whether a field value passes both gates.
+        """Check whether a field value passes the filter gates.
+
+        Gate evaluation order:
+
+        1. **Config gate** — field must be configured and enabled.
+        2. **Throttle gate** — minimum interval since last emission.
+        3. **Staleness gate** — if ``max_seconds > 0`` and that much time
+           has elapsed since the last emission, force through regardless
+           of the delta gate.  Prevents prolonged silence for numeric
+           fields that change slowly (e.g. parked vehicle).
+        4. **Delta gate** — value must have changed beyond granularity.
 
         Returns ``True`` if the value should be emitted downstream.
         """
         cfg = self._filters.get(field)
-        if cfg is None or not cfg.enabled:
+        if cfg is not None and not cfg.enabled:
             return False
+        if cfg is None:
+            cfg = _DEFAULT_FALLBACK
+
+        last_time = self._last_emit_times.get(field)
 
         # Throttle gate: enforce minimum interval
-        if cfg.throttle_seconds > 0:
-            last_time = self._last_emit_times.get(field)
-            if last_time is not None and (now - last_time) < cfg.throttle_seconds:
-                return False
+        if (
+            cfg.throttle_seconds > 0
+            and last_time is not None
+            and (now - last_time) < cfg.throttle_seconds
+        ):
+            return False
 
         # Delta gate: value must have changed beyond granularity
         last_value = self._last_values.get(field)
         if last_value is None:
             # First value for this field — always emit
+            return True
+
+        # Staleness gate: force emission after max_seconds of silence
+        if cfg.max_seconds > 0 and last_time is not None and (now - last_time) >= cfg.max_seconds:
             return True
 
         if field in _LOCATION_FIELDS:

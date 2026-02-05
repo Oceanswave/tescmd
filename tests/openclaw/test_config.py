@@ -42,7 +42,7 @@ class TestBridgeConfigDefaults:
         cfg = BridgeConfig()
         assert "Location" in cfg.telemetry
         assert "Soc" in cfg.telemetry
-        assert cfg.telemetry["Location"].granularity == 50.0
+        assert cfg.telemetry["Location"].granularity == 5.0
         assert cfg.telemetry["Location"].throttle_seconds == 1.0
 
     def test_default_charge_state_filter(self) -> None:
@@ -116,8 +116,13 @@ class TestBridgeConfigMerge:
 class TestNodeCapabilities:
     def test_defaults(self) -> None:
         caps = NodeCapabilities()
-        assert caps.reads == ["location.get"]
-        assert caps.writes == ["system.run"]
+        assert "location.get" in caps.reads
+        assert "telemetry.get" in caps.reads
+        assert "trigger.list" in caps.reads
+        assert "trigger.poll" not in caps.reads
+        assert "system.run" in caps.writes
+        assert "trigger.create" in caps.writes
+        assert "trigger.delete" in caps.writes
 
     def test_custom_reads(self) -> None:
         caps = NodeCapabilities(reads=["custom.read"])
@@ -169,8 +174,10 @@ class TestBridgeConfigCapabilities:
     def test_default_capabilities(self) -> None:
         cfg = BridgeConfig()
         assert isinstance(cfg.capabilities, NodeCapabilities)
-        assert len(cfg.capabilities.reads) == 1
-        assert len(cfg.capabilities.writes) == 1
+        assert len(cfg.capabilities.reads) == 3
+        assert len(cfg.capabilities.writes) == 3
+        assert "telemetry.get" in cfg.capabilities.reads
+        assert "trigger.create" in cfg.capabilities.writes
 
     def test_custom_capabilities_from_json(self, tmp_path: Path) -> None:
         config_file = tmp_path / "bridge.json"

@@ -19,6 +19,56 @@ from tescmd.cli._options import global_options
 logger = logging.getLogger(__name__)
 
 
+def _resolve_port(host: str, preferred: int, *, auto_select: bool = True) -> int:
+    """Return *preferred* if available, or find a free port.
+
+    When *auto_select* is ``True`` (default port in use), the OS picks
+    a free port.  When ``False`` (user explicitly chose a port), raise
+    ``click.UsageError`` with an actionable message.
+    """
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((host, preferred))
+            return preferred
+        except OSError:
+            pass
+
+    if not auto_select:
+        raise click.UsageError(
+            f"Port {preferred} is already in use.\n"
+            f"Use --port to specify a different port, e.g.:\n"
+            f"  tescmd serve --port {preferred + 1}"
+        )
+
+    # OS picks a free port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind((host, 0))
+        free_port = s.getsockname()[1]
+
+    logger.info("Port %d in use — using port %d instead", preferred, free_port)
+    return free_port
+
+
+async def _safe_uvicorn_serve(server: Any, port: int) -> None:
+    """Run uvicorn.Server.serve() with SystemExit protection.
+
+    Uvicorn calls ``sys.exit(1)`` when it cannot bind the port.
+    ``SystemExit`` is a ``BaseException`` that kills the asyncio event
+    loop before the owning task can retrieve the exception.  This
+    wrapper converts it to a regular ``OSError``.
+    """
+    try:
+        await server.serve()
+    except SystemExit as exc:
+        if exc.code == 0:
+            logger.debug("Uvicorn exited cleanly (code 0) on port %d", port)
+            return
+        raise OSError(f"MCP server failed to start on port {port}") from exc
+
+
 @click.command("serve")
 @click.argument("vin_positional", required=False, default=None, metavar="VIN")
 @click.option(
@@ -200,6 +250,12 @@ def serve_cmd(
     if openclaw_config_path and not openclaw_url:
         raise click.UsageError("--openclaw-config requires --openclaw.")
 
+    port_source = click.get_current_context().get_parameter_source("port")
+    port_explicit = port_source in (
+        click.core.ParameterSource.COMMANDLINE,
+        click.core.ParameterSource.ENVIRONMENT,
+    )
+
     run_async(
         _cmd_serve(
             app_ctx,
@@ -207,6 +263,7 @@ def serve_cmd(
             transport=transport,
             mcp_port=port,
             mcp_host=host,
+            port_explicit=port_explicit,
             telemetry_port=telemetry_port,
             fields_spec=fields,
             interval_override=interval,
@@ -232,6 +289,7 @@ async def _cmd_serve(
     transport: str,
     mcp_port: int,
     mcp_host: str = "127.0.0.1",
+    port_explicit: bool = False,
     telemetry_port: int | None,
     fields_spec: str,
     interval_override: int | None,
@@ -270,6 +328,10 @@ async def _cmd_serve(
 
         mcp_server = create_mcp_server(client_id=client_id, client_secret=client_secret)
         tool_count = len(mcp_server.list_tools())
+
+    # -- Resolve MCP port (pre-check for port conflicts) --
+    if not no_mcp and transport != "stdio":
+        mcp_port = _resolve_port(mcp_host, mcp_port, auto_select=not port_explicit)
 
     # -- stdio mode: no telemetry, no fanout --
     if transport == "stdio" and mcp_server is not None:
@@ -370,6 +432,10 @@ async def _cmd_serve(
 
             fanout.add_sink(_jsonl_sink)
 
+        # Telemetry store used for immediate trigger evaluation at creation
+        # time.  Set below in whichever branch owns the store.
+        _telemetry_store = None
+
         # OpenClaw sink — optional bridge to an OpenClaw gateway
         if openclaw_url:
             from pathlib import Path
@@ -390,6 +456,7 @@ async def _cmd_serve(
             )
             gw = oc_pipeline.gateway
             oc_bridge = oc_pipeline.bridge
+            _telemetry_store = oc_pipeline.telemetry_store
 
             # Push trigger notifications to gateway
             if trigger_manager is not None:
@@ -424,6 +491,7 @@ async def _cmd_serve(
             from tescmd.openclaw.telemetry_store import TelemetryStore as _TStore
 
             _trigger_store = _TStore()
+            _telemetry_store = _trigger_store
 
             async def _trigger_sink(frame: object) -> None:
                 from tescmd.telemetry.decoder import TelemetryFrame
@@ -442,7 +510,7 @@ async def _cmd_serve(
 
     # -- Register MCP trigger tools (when both MCP and telemetry are active) --
     if mcp_server is not None and trigger_manager is not None:
-        _register_trigger_tools(mcp_server, trigger_manager)
+        _register_trigger_tools(mcp_server, trigger_manager, _telemetry_store)
         tool_count = len(mcp_server.list_tools())
 
     # -- Tailscale Funnel setup (optional, MCP-only mode) --
@@ -479,7 +547,7 @@ async def _cmd_serve(
             _pre_hostname = await _ts_pre.get_hostname()
             public_url = f"https://{_pre_hostname}"
         except Exception:
-            logger.warning("Tailscale auto-detection failed — using localhost")
+            logger.warning("Tailscale auto-detection failed — using localhost", exc_info=True)
 
     # -- Populate TUI with server info --
     if tui is not None:
@@ -490,6 +558,8 @@ async def _cmd_serve(
         if public_url:
             tui.set_tunnel_url(public_url)
         tui.set_sink_count(fanout.sink_count)
+        if trigger_manager is not None:
+            tui.set_trigger_manager(trigger_manager)
         if csv_sink is not None:
             tui.set_log_path(csv_sink.log_path)
 
@@ -557,7 +627,9 @@ async def _cmd_serve(
                     combined_app, host=mcp_host, port=mcp_port, log_level="warning"
                 )
                 _uvi_server = uvicorn.Server(_uvi_cfg)
-                combined_task = asyncio.create_task(_uvi_server.serve())
+                combined_task = asyncio.create_task(
+                    _safe_uvicorn_serve(_uvi_server, mcp_port)
+                )
                 # Give uvicorn a moment to bind the port.
                 await asyncio.sleep(0.5)
                 if combined_task.done():
@@ -646,21 +718,43 @@ async def _cmd_serve(
                 )
 
 
-def _register_trigger_tools(mcp_server: Any, trigger_manager: Any) -> None:
-    """Register trigger CRUD tools on the MCP server."""
-    from tescmd.triggers.models import TriggerCondition, TriggerDefinition, TriggerOperator
+def _register_trigger_tools(
+    mcp_server: Any, trigger_manager: Any, telemetry_store: Any = None
+) -> None:
+    """Register domain-specific trigger CRUD tools on the MCP server.
 
-    def _handle_create(params: dict[str, Any]) -> dict[str, Any]:
-        field = params.get("field")
-        if not field:
-            raise ValueError("trigger_create requires 'field' parameter")
+    Each trigger domain (cabin_temp, outside_temp, battery, location) gets
+    its own create, list, and delete tools.  Temperature triggers accept
+    values in °F and convert to °C internally (matching the dispatcher's
+    convenience aliases).
+
+    When *telemetry_store* is provided, newly created triggers are
+    immediately evaluated against the current value.  If the condition
+    is already satisfied the response includes ``"immediate": True``.
+    One-shot triggers are **not** deleted immediately — the push
+    callback handles deletion after confirmed WebSocket delivery.
+    """
+    from tescmd._internal.units import celsius_to_fahrenheit, fahrenheit_to_celsius
+    from tescmd.triggers.manager import matches
+    from tescmd.triggers.models import (
+        TriggerCondition,
+        TriggerDefinition,
+        TriggerOperator,
+    )
+
+    def _create_trigger(
+        field: str, params: dict[str, Any], *, convert_temp: bool = False
+    ) -> dict[str, Any]:
         op_str = params.get("operator")
         if not op_str:
-            raise ValueError("trigger_create requires 'operator' parameter")
+            raise ValueError("Trigger requires 'operator' parameter")
+        value = params.get("value")
+        if convert_temp and value is not None:
+            value = fahrenheit_to_celsius(float(value))
         condition = TriggerCondition(
             field=field,
             operator=TriggerOperator(op_str),
-            value=params.get("value"),
+            value=value,
         )
         trigger = TriggerDefinition(
             condition=condition,
@@ -668,71 +762,344 @@ def _register_trigger_tools(mcp_server: Any, trigger_manager: Any) -> None:
             cooldown_seconds=params.get("cooldown_seconds", 60.0),
         )
         created = trigger_manager.create(trigger)
-        return dict(created.model_dump(mode="json"))
+        result = dict(created.model_dump(mode="json"))
 
-    def _handle_delete(params: dict[str, Any]) -> dict[str, Any]:
+        # Immediate evaluation: if the telemetry store already has a
+        # value that satisfies the condition, report it.  One-shot
+        # triggers are marked as fired; the push callback handles
+        # deletion after confirmed WebSocket delivery.
+        if telemetry_store is not None:
+            snap = telemetry_store.get(field)
+            if snap is not None and matches(condition, snap.value, None):
+                result["immediate"] = True
+                if trigger.once:
+                    trigger_manager.mark_fired_once(created.id)
+
+        return result
+
+    def _list_triggers(
+        field: str, *, show_fahrenheit: bool = False
+    ) -> dict[str, Any]:
+        triggers = [
+            t for t in trigger_manager.list_all() if t.condition.field == field
+        ]
+        result = []
+        for t in triggers:
+            entry: dict[str, Any] = {
+                "id": t.id,
+                "field": t.condition.field,
+                "operator": t.condition.operator.value,
+                "value": t.condition.value,
+                "once": t.once,
+                "cooldown_seconds": t.cooldown_seconds,
+            }
+            if show_fahrenheit and t.condition.value is not None:
+                try:
+                    entry["value_f"] = celsius_to_fahrenheit(float(t.condition.value))
+                except (TypeError, ValueError):
+                    logger.debug(
+                        "Could not convert trigger %s value %r to Fahrenheit",
+                        t.id,
+                        t.condition.value,
+                    )
+            result.append(entry)
+        return {"triggers": result}
+
+    def _delete_trigger(params: dict[str, Any]) -> dict[str, Any]:
         trigger_id = params.get("id")
         if not trigger_id:
-            raise ValueError("trigger_delete requires 'id' parameter")
+            raise ValueError("Trigger delete requires 'id' parameter")
         deleted = trigger_manager.delete(trigger_id)
         return {"deleted": deleted, "id": trigger_id}
 
-    def _handle_list(params: dict[str, Any]) -> dict[str, Any]:
-        triggers = trigger_manager.list_all()
-        return {"triggers": [t.model_dump(mode="json") for t in triggers]}
+    # -- Trigger option schemas -----------------------------------------------
 
-    def _handle_poll(params: dict[str, Any]) -> dict[str, Any]:
-        notifications = trigger_manager.drain_pending()
-        return {"notifications": [n.model_dump(mode="json") for n in notifications]}
+    _temp_trigger_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "operator": {
+                "type": "string",
+                "description": "Comparison: lt, gt, lte, gte, eq, neq, changed",
+            },
+            "value": {
+                "type": "number",
+                "description": "Temperature threshold in °F",
+            },
+            "once": {
+                "type": "boolean",
+                "description": "Fire once then auto-delete (default: false)",
+            },
+            "cooldown_seconds": {
+                "type": "number",
+                "description": "Cooldown between firings in seconds (default: 60)",
+            },
+        },
+        "required": ["operator"],
+    }
+
+    _battery_trigger_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "operator": {
+                "type": "string",
+                "description": "Comparison: lt, gt, lte, gte, eq, neq, changed",
+            },
+            "value": {
+                "type": "number",
+                "description": "Battery level threshold (0-100 percent)",
+            },
+            "once": {
+                "type": "boolean",
+                "description": "Fire once then auto-delete (default: false)",
+            },
+            "cooldown_seconds": {
+                "type": "number",
+                "description": "Cooldown between firings in seconds (default: 60)",
+            },
+        },
+        "required": ["operator"],
+    }
+
+    _location_trigger_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "operator": {
+                "type": "string",
+                "description": "Geofence operator: enter or leave",
+            },
+            "value": {
+                "type": "object",
+                "description": "Geofence: {latitude, longitude, radius_m}",
+                "properties": {
+                    "latitude": {"type": "number"},
+                    "longitude": {"type": "number"},
+                    "radius_m": {"type": "number"},
+                },
+                "required": ["latitude", "longitude", "radius_m"],
+            },
+            "once": {
+                "type": "boolean",
+                "description": "Fire once then auto-delete (default: false)",
+            },
+            "cooldown_seconds": {
+                "type": "number",
+                "description": "Cooldown between firings in seconds (default: 60)",
+            },
+        },
+        "required": ["operator", "value"],
+    }
+
+    _trigger_list_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {},
+    }
+
+    _trigger_delete_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {"id": {"type": "string", "description": "Trigger ID"}},
+        "required": ["id"],
+    }
+
+    # -- Cabin temperature triggers -------------------------------------------
+
+    mcp_server.register_custom_tool(
+        "cabin_temp_trigger",
+        lambda p: _create_trigger("InsideTemp", p, convert_temp=True),
+        "Create a cabin temperature trigger (value in °F)",
+        _temp_trigger_schema,
+        is_write=True,
+    )
+    mcp_server.register_custom_tool(
+        "cabin_temp_trigger_list",
+        lambda p: _list_triggers("InsideTemp", show_fahrenheit=True),
+        "List cabin temperature triggers with IDs and thresholds",
+        _trigger_list_schema,
+    )
+    mcp_server.register_custom_tool(
+        "cabin_temp_trigger_delete",
+        _delete_trigger,
+        "Delete a cabin temperature trigger by ID",
+        _trigger_delete_schema,
+        is_write=True,
+    )
+
+    # -- Outside temperature triggers ----------------------------------------
+
+    mcp_server.register_custom_tool(
+        "outside_temp_trigger",
+        lambda p: _create_trigger("OutsideTemp", p, convert_temp=True),
+        "Create an outside temperature trigger (value in °F)",
+        _temp_trigger_schema,
+        is_write=True,
+    )
+    mcp_server.register_custom_tool(
+        "outside_temp_trigger_list",
+        lambda p: _list_triggers("OutsideTemp", show_fahrenheit=True),
+        "List outside temperature triggers with IDs and thresholds",
+        _trigger_list_schema,
+    )
+    mcp_server.register_custom_tool(
+        "outside_temp_trigger_delete",
+        _delete_trigger,
+        "Delete an outside temperature trigger by ID",
+        _trigger_delete_schema,
+        is_write=True,
+    )
+
+    # -- Battery triggers ----------------------------------------------------
+
+    mcp_server.register_custom_tool(
+        "battery_trigger",
+        lambda p: _create_trigger("BatteryLevel", p),
+        "Create a battery level trigger (value in percent 0-100)",
+        _battery_trigger_schema,
+        is_write=True,
+    )
+    mcp_server.register_custom_tool(
+        "battery_trigger_list",
+        lambda p: _list_triggers("BatteryLevel"),
+        "List battery level triggers with IDs and thresholds",
+        _trigger_list_schema,
+    )
+    mcp_server.register_custom_tool(
+        "battery_trigger_delete",
+        _delete_trigger,
+        "Delete a battery level trigger by ID",
+        _trigger_delete_schema,
+        is_write=True,
+    )
+
+    # -- Location triggers ---------------------------------------------------
+
+    mcp_server.register_custom_tool(
+        "location_trigger",
+        lambda p: _create_trigger("Location", p),
+        "Create a location geofence trigger (enter/leave)",
+        _location_trigger_schema,
+        is_write=True,
+    )
+    mcp_server.register_custom_tool(
+        "location_trigger_list",
+        lambda p: _list_triggers("Location"),
+        "List location geofence triggers with IDs and boundaries",
+        _trigger_list_schema,
+    )
+    mcp_server.register_custom_tool(
+        "location_trigger_delete",
+        _delete_trigger,
+        "Delete a location trigger by ID",
+        _trigger_delete_schema,
+        is_write=True,
+    )
+
+    # -- Generic trigger create -----------------------------------------------
+
+    _generic_trigger_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "field": {
+                "type": "string",
+                "description": (
+                    "Telemetry field name (e.g. BatteryLevel, InsideTemp,"
+                    " OutsideTemp, Location, VehicleSpeed, Soc,"
+                    " ChargeState, Locked, Gear, EstBatteryRange)"
+                ),
+            },
+            "operator": {
+                "type": "string",
+                "description": (
+                    "Comparison: lt, gt, lte, gte, eq, neq,"
+                    " changed, enter, leave"
+                ),
+            },
+            "value": {
+                "description": (
+                    "Threshold value (number for comparisons,"
+                    " object with latitude/longitude/radius_m"
+                    " for geofence)"
+                ),
+            },
+            "once": {
+                "type": "boolean",
+                "description": (
+                    "Fire once then delete after delivery"
+                    " (default false)"
+                ),
+            },
+            "cooldown_seconds": {
+                "type": "number",
+                "description": (
+                    "Minimum seconds between fires (default 60)"
+                ),
+            },
+        },
+        "required": ["field", "operator"],
+    }
 
     mcp_server.register_custom_tool(
         "trigger_create",
-        _handle_create,
-        "Create a telemetry trigger condition",
+        lambda p: _create_trigger(
+            p.get("field", ""), {k: v for k, v in p.items() if k != "field"}
+        ),
+        "Create a trigger on any telemetry field",
+        _generic_trigger_schema,
+        is_write=True,
+    )
+
+    # -- Shared: list all triggers -------------------------------------------
+
+    def _handle_trigger_list(params: dict[str, Any]) -> dict[str, Any]:
+        triggers = trigger_manager.list_all()
+        result = []
+        for t in triggers:
+            entry: dict[str, Any] = {
+                "id": t.id,
+                "field": t.condition.field,
+                "operator": t.condition.operator.value,
+                "value": t.condition.value,
+                "once": t.once,
+                "cooldown_seconds": t.cooldown_seconds,
+            }
+            result.append(entry)
+        return {"triggers": result}
+
+    mcp_server.register_custom_tool(
+        "trigger_list",
+        _handle_trigger_list,
+        "List all triggers across all domains",
+        {"type": "object", "properties": {}},
+    )
+
+    # -- Shared: telemetry_get -----------------------------------------------
+
+    def _handle_telemetry_get(params: dict[str, Any]) -> dict[str, Any]:
+        field = params.get("field", "")
+        if not field:
+            raise ValueError("telemetry_get requires 'field' parameter")
+        if telemetry_store is None:
+            return {"field": field, "error": "telemetry_store_unavailable", "pending": False}
+        snap = telemetry_store.get(field)
+        if snap is None:
+            return {"field": field, "pending": True}
+        return {"field": field, "value": snap.value}
+
+    mcp_server.register_custom_tool(
+        "telemetry_get",
+        _handle_telemetry_get,
+        "Read the latest value of any telemetry field",
         {
             "type": "object",
             "properties": {
-                "field": {"type": "string", "description": "Telemetry field name"},
-                "operator": {
+                "field": {
                     "type": "string",
-                    "description": "Operator: lt, gt, lte, gte, eq, neq, changed, enter, leave",
-                },
-                "value": {"description": "Threshold value (optional for 'changed')"},
-                "once": {
-                    "type": "boolean",
-                    "description": "Fire once then auto-delete (default: false)",
-                },
-                "cooldown_seconds": {
-                    "type": "number",
-                    "description": "Cooldown between firings (default: 60)",
+                    "description": (
+                        "Telemetry field name"
+                        " (e.g. PackVoltage, HvacFanSpeed)"
+                    ),
                 },
             },
-            "required": ["field", "operator"],
+            "required": ["field"],
         },
-        is_write=True,
-    )
-    mcp_server.register_custom_tool(
-        "trigger_delete",
-        _handle_delete,
-        "Delete a telemetry trigger by ID",
-        {
-            "type": "object",
-            "properties": {"id": {"type": "string", "description": "Trigger ID"}},
-            "required": ["id"],
-        },
-        is_write=True,
-    )
-    mcp_server.register_custom_tool(
-        "trigger_list",
-        _handle_list,
-        "List all active telemetry triggers",
-        {"type": "object", "properties": {}},
-    )
-    mcp_server.register_custom_tool(
-        "trigger_poll",
-        _handle_poll,
-        "Poll for fired trigger notifications",
-        {"type": "object", "properties": {}},
     )
 
 

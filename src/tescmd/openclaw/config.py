@@ -31,9 +31,13 @@ class NodeCapabilities(BaseModel):
 
     reads: list[str] = [
         "location.get",
+        "telemetry.get",
+        "trigger.list",
     ]
     writes: list[str] = [
         "system.run",
+        "trigger.create",
+        "trigger.delete",
     ]
 
     @property
@@ -75,23 +79,32 @@ class FieldFilter(BaseModel):
     """
     throttle_seconds: float = Field(default=1.0, ge=0)
     """Minimum seconds between emissions for this field."""
+    max_seconds: float = Field(default=0.0, ge=0)
+    """Maximum seconds of silence before forcing emission regardless of delta.
+
+    A value of ``0`` disables the staleness gate (only delta + throttle apply).
+    When set, ensures periodic updates even when values barely change —
+    useful for numeric fields on an idle/parked vehicle.
+    """
 
 
-# Default filter configurations per PRD
+# Default filter configurations — low granularity thresholds so events
+# flow frequently while still deduplicating truly identical values.
 _DEFAULT_FILTERS: dict[str, FieldFilter] = {
-    "Location": FieldFilter(granularity=50.0, throttle_seconds=1.0),
-    "Soc": FieldFilter(granularity=5.0, throttle_seconds=10.0),
-    "InsideTemp": FieldFilter(granularity=5.0, throttle_seconds=30.0),
-    "OutsideTemp": FieldFilter(granularity=5.0, throttle_seconds=30.0),
-    "VehicleSpeed": FieldFilter(granularity=5.0, throttle_seconds=2.0),
+    "Location": FieldFilter(granularity=5.0, throttle_seconds=1.0, max_seconds=60.0),
+    "Soc": FieldFilter(granularity=0.5, throttle_seconds=10.0, max_seconds=120.0),
+    "InsideTemp": FieldFilter(granularity=0.5, throttle_seconds=10.0, max_seconds=60.0),
+    "OutsideTemp": FieldFilter(granularity=0.5, throttle_seconds=10.0, max_seconds=60.0),
+    "VehicleSpeed": FieldFilter(granularity=1.0, throttle_seconds=2.0, max_seconds=30.0),
     "ChargeState": FieldFilter(granularity=0.0, throttle_seconds=0.0),
     "DetailedChargeState": FieldFilter(granularity=0.0, throttle_seconds=0.0),
     "Locked": FieldFilter(granularity=0.0, throttle_seconds=0.0),
     "SentryMode": FieldFilter(granularity=0.0, throttle_seconds=0.0),
-    "BatteryLevel": FieldFilter(granularity=1.0, throttle_seconds=10.0),
-    "EstBatteryRange": FieldFilter(granularity=5.0, throttle_seconds=30.0),
-    "Odometer": FieldFilter(granularity=1.0, throttle_seconds=60.0),
+    "BatteryLevel": FieldFilter(granularity=0.1, throttle_seconds=10.0, max_seconds=120.0),
+    "EstBatteryRange": FieldFilter(granularity=1.0, throttle_seconds=10.0, max_seconds=120.0),
+    "Odometer": FieldFilter(granularity=0.1, throttle_seconds=30.0, max_seconds=300.0),
     "Gear": FieldFilter(granularity=0.0, throttle_seconds=0.0),
+    "DefrostMode": FieldFilter(granularity=0.0, throttle_seconds=0.0),
 }
 
 
