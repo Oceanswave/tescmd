@@ -60,6 +60,18 @@ Every command doubles as an MCP tool. Claude Desktop, Claude Code, and other age
   <img src="images/tescmd_mcp.png" alt="tescmd MCP server — Claude Desktop integration" width="700">
 </p>
 
+<p align="center">
+  <img src="images/tescmd_auto-climate.png" alt="Auto-climate with trigger — turn on climate and auto-off at target temp" width="500">
+</p>
+
+<p align="center">
+  <img src="images/tescmd_geofence.png" alt="Geofence trigger — automated actions when arriving at a location" width="500">
+</p>
+
+<p align="center">
+  <img src="images/tescmd_preferred_routes.png" alt="Multi-stop waypoints — load a preferred route with stops" width="500">
+</p>
+
 ### Rich Terminal Output
 
 Formatted tables in your terminal, structured JSON when piped — tescmd auto-detects the right output for the context.
