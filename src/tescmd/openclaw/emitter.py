@@ -15,8 +15,26 @@ in the PRD:
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import Any
+
+
+def _to_snake_case(name: str) -> str:
+    """Convert PascalCase field name to snake_case event type.
+
+    Examples::
+
+        >>> _to_snake_case("PackVoltage")
+        'pack_voltage'
+        >>> _to_snake_case("TpmsPressureFl")
+        'tpms_pressure_fl'
+        >>> _to_snake_case("HvacFanSpeed")
+        'hvac_fan_speed'
+    """
+    s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
+    s = re.sub(r"([a-z\d])([A-Z])", r"\1_\2", s)
+    return s.lower()
 
 
 def _celsius_to_fahrenheit(c: float) -> float:
@@ -26,7 +44,10 @@ def _celsius_to_fahrenheit(c: float) -> float:
 class EventEmitter:
     """Stateless transformer: telemetry datum → OpenClaw req:agent payload.
 
-    Returns ``None`` for fields that don't map to an event type.
+    Explicitly mapped fields (Location, Soc, temps, charge state, etc.)
+    use domain-specific formatting.  All other fields fall through to a
+    generic handler that produces a snake_case event type from the
+    PascalCase field name.
     """
 
     def __init__(self, client_id: str = "node-host") -> None:
@@ -83,7 +104,8 @@ class EventEmitter:
             return self._range_payload(value)
         if field_name == "Gear":
             return self._gear_payload(value)
-        return None
+        # Generic fallback — any field not explicitly mapped above
+        return self._generic_payload(field_name, value)
 
     def _location_payload(self, value: Any) -> dict[str, Any] | None:
         try:
@@ -172,4 +194,12 @@ class EventEmitter:
         return {
             "_event_type": "gear_changed",
             "gear": str(value),
+        }
+
+    def _generic_payload(self, field_name: str, value: Any) -> dict[str, Any]:
+        """Produce a generic event payload for any unmapped telemetry field."""
+        return {
+            "_event_type": _to_snake_case(field_name),
+            "field": field_name,
+            "value": value,
         }

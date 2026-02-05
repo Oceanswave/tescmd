@@ -48,6 +48,7 @@ class TriggerManager:
         self._last_fire_times: dict[str, float] = {}
         self._pending: deque[TriggerNotification] = deque(maxlen=MAX_PENDING)
         self._on_fire_callbacks: list[Callable[[TriggerNotification], Awaitable[None]]] = []
+        self._fired_once_ids: set[str] = set()
 
     def create(self, trigger: TriggerDefinition) -> TriggerDefinition:
         """Register a trigger.  Returns the trigger with its assigned ID.
@@ -84,6 +85,7 @@ class TriggerManager:
             if not ids:
                 del self._field_index[field]
         self._last_fire_times.pop(trigger_id, None)
+        self._fired_once_ids.discard(trigger_id)
         logger.info("Deleted trigger %s", trigger_id)
         return True
 
@@ -97,9 +99,86 @@ class TriggerManager:
         self._pending.clear()
         return result
 
+    @property
+    def vin(self) -> str:
+        """Vehicle Identification Number included in notifications."""
+        return self._vin
+
+    def queue_notification(self, notification: TriggerNotification) -> None:
+        """Queue a notification for MCP polling via :meth:`drain_pending`."""
+        self._pending.append(notification)
+
+    def mark_fired_once(self, trigger_id: str) -> None:
+        """Mark a one-shot trigger as fired (pending delivery).
+
+        The trigger stays in ``list_all()`` but is skipped in
+        ``evaluate()`` so it won't fire again.  Call :meth:`delete`
+        after confirming delivery to clean up.
+        """
+        if trigger_id in self._triggers:
+            self._fired_once_ids.add(trigger_id)
+
     def add_on_fire(self, callback: Callable[[TriggerNotification], Awaitable[None]]) -> None:
         """Register an async callback invoked when a trigger fires."""
         self._on_fire_callbacks.append(callback)
+
+    async def evaluate_single(
+        self,
+        trigger_id: str,
+        value: Any,
+        previous_value: Any,
+        timestamp: datetime,
+    ) -> bool:
+        """Evaluate a single trigger against *value*.
+
+        Returns ``True`` if the trigger fired.  Does **not** auto-delete
+        one-shot triggers — the caller decides whether to delete.
+
+        Used for immediate evaluation at creation time so the response
+        can indicate the condition was already satisfied.
+        """
+        trigger = self._triggers.get(trigger_id)
+        if trigger is None:
+            return False
+
+        if not _matches(trigger.condition, value, previous_value):
+            return False
+
+        now = time.monotonic()
+        self._last_fire_times[trigger_id] = now
+        notification = TriggerNotification(
+            trigger_id=trigger_id,
+            field=trigger.condition.field,
+            operator=trigger.condition.operator,
+            threshold=trigger.condition.value,
+            value=value,
+            previous_value=previous_value,
+            fired_at=timestamp,
+            vin=self._vin,
+            once=trigger.once,
+        )
+
+        logger.info(
+            "Trigger %s fired (immediate): %s %s %s (value=%s)",
+            trigger_id,
+            trigger.condition.field,
+            trigger.condition.operator.value,
+            trigger.condition.value,
+            value,
+        )
+
+        if trigger.once:
+            self._fired_once_ids.add(trigger_id)
+
+        self._pending.append(notification)
+
+        for callback in self._on_fire_callbacks:
+            try:
+                await callback(notification)
+            except Exception:
+                logger.warning("Trigger fire callback failed for %s", trigger_id, exc_info=True)
+
+        return True
 
     async def evaluate(
         self,
@@ -107,21 +186,32 @@ class TriggerManager:
         value: Any,
         previous_value: Any,
         timestamp: datetime,
-    ) -> None:
+    ) -> bool:
         """Evaluate all triggers registered for *field*.
+
+        Returns ``True`` if at least one trigger fired for this field/value.
+
+        One-shot triggers are **not** deleted here.  Instead they are
+        tracked in ``_fired_once_ids`` and skipped on subsequent
+        evaluations.  The push callback (or caller) is responsible for
+        calling :meth:`delete` after confirming delivery.
 
         Called by the bridge after capturing the previous value and
         before updating the telemetry store.
         """
         trigger_ids = self._field_index.get(field)
         if not trigger_ids:
-            return
+            return False
 
+        fired = False
         now = time.monotonic()
-        # Iterate over a copy — one-shot triggers mutate the set
         for tid in list(trigger_ids):
             trigger = self._triggers.get(tid)
             if trigger is None:
+                continue
+
+            # Skip one-shot triggers that already fired (pending delivery)
+            if tid in self._fired_once_ids:
                 continue
 
             # Cooldown check for persistent triggers
@@ -134,6 +224,7 @@ class TriggerManager:
                 continue
 
             # Fire!
+            fired = True
             self._last_fire_times[tid] = now
             notification = TriggerNotification(
                 trigger_id=tid,
@@ -144,6 +235,7 @@ class TriggerManager:
                 previous_value=previous_value,
                 fired_at=timestamp,
                 vin=self._vin,
+                once=trigger.once,
             )
 
             logger.info(
@@ -156,6 +248,12 @@ class TriggerManager:
                 previous_value,
             )
 
+            # Mark one-shot triggers as fired (pending delivery).
+            # Deletion is deferred until the push callback confirms
+            # successful WebSocket delivery.
+            if trigger.once:
+                self._fired_once_ids.add(tid)
+
             self._pending.append(notification)
 
             for callback in self._on_fire_callbacks:
@@ -164,9 +262,7 @@ class TriggerManager:
                 except Exception:
                     logger.warning("Trigger fire callback failed for %s", tid, exc_info=True)
 
-            # Auto-delete one-shot triggers
-            if trigger.once:
-                self.delete(tid)
+        return fired
 
 
 def _matches(condition: TriggerCondition, value: Any, previous_value: Any) -> bool:

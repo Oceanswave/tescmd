@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-02-04
+
+### Added
+
+- **Generic telemetry events** — all 230+ telemetry fields now produce OpenClaw events via a generic fallback in the emitter; unmapped fields are emitted as snake_case event types (e.g. `PackVoltage` → `pack_voltage`) with `field` and `value` payload keys
+- **Default filter for unconfigured fields** — `DualGateFilter` now applies a sensible default (any-change granularity, 5s throttle, 2min staleness) to unconfigured fields instead of silently dropping them; explicitly disabled fields are still blocked
+- **`telemetry.get` handler** — generic read handler in `CommandDispatcher` allows agents to read the latest value of any telemetry field from the in-memory store
+- **`telemetry_get` MCP tool** — exposes `telemetry.get` as an MCP tool so agent frameworks can read arbitrary telemetry fields
+- **Trigger commands in capabilities** — `NodeCapabilities` now advertises `telemetry.get`, `trigger.list`, `trigger.poll`, `trigger.create`, and `trigger.delete` to the gateway
+
+### Fixed
+
+- **TUI panel widgets not updating** — telemetry panel DataTables now update per-frame as data arrives instead of relying solely on a 1-second timer poll; header, server info, and trigger displays remain on the timer
+
 ## [0.5.0] - 2026-02-03
 
 ### Changed

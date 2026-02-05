@@ -39,9 +39,27 @@ class TestDualGateFilter:
         filt = self._make_filter(Soc=(5.0, 10.0))
         assert filt.should_emit("Soc", 72, 0.0) is True
 
-    def test_unknown_field_rejected(self) -> None:
+    def test_unknown_field_uses_default_filter(self) -> None:
+        """Unconfigured fields pass through with the module-level default fallback."""
         filt = self._make_filter(Soc=(5.0, 10.0))
-        assert filt.should_emit("Unknown", 42, 0.0) is False
+        # First value for an unconfigured field — always emits
+        assert filt.should_emit("Unknown", 42, 0.0) is True
+
+    def test_default_filter_throttles(self) -> None:
+        """Default fallback enforces its 5-second throttle on unconfigured fields."""
+        filt = self._make_filter()
+        assert filt.should_emit("NewField", 1, 0.0) is True
+        filt.record_emit("NewField", 1, 0.0)
+        # Changed value but within 5s throttle window
+        assert filt.should_emit("NewField", 2, 3.0) is False
+        # After 5s throttle
+        assert filt.should_emit("NewField", 2, 6.0) is True
+
+    def test_disabled_field_still_rejected(self) -> None:
+        """Explicitly disabled fields are blocked even if unconfigured ones pass."""
+        filters = {"Blocked": FieldFilter(enabled=False, granularity=0.0, throttle_seconds=0.0)}
+        filt = DualGateFilter(filters)
+        assert filt.should_emit("Blocked", 42, 0.0) is False
 
     def test_disabled_field_rejected(self) -> None:
         filters = {"Soc": FieldFilter(enabled=False, granularity=0.0, throttle_seconds=0.0)}
@@ -129,3 +147,72 @@ class TestDualGateFilter:
         filt.record_emit("Gear", "D", 0.0)
         # Non-numeric delta → infinity → always passes
         assert filt.should_emit("Gear", "R", 1.0) is True
+
+
+class TestStalenessGate:
+    """Tests for max_seconds (staleness override)."""
+
+    def test_max_seconds_forces_emit_when_stale(self) -> None:
+        """Value barely changes but max_seconds elapsed → force emit."""
+        filters = {"Soc": FieldFilter(granularity=5.0, throttle_seconds=1.0, max_seconds=60.0)}
+        filt = DualGateFilter(filters)
+        assert filt.should_emit("Soc", 72, 0.0) is True
+        filt.record_emit("Soc", 72, 0.0)
+        # Delta too small (1), throttle passed, but max_seconds not reached
+        assert filt.should_emit("Soc", 73, 30.0) is False
+        # max_seconds reached (61s > 60s) → force through despite small delta
+        assert filt.should_emit("Soc", 73, 61.0) is True
+
+    def test_max_seconds_zero_disables_staleness(self) -> None:
+        """max_seconds=0 means staleness gate is inactive."""
+        filters = {"Soc": FieldFilter(granularity=5.0, throttle_seconds=1.0, max_seconds=0.0)}
+        filt = DualGateFilter(filters)
+        assert filt.should_emit("Soc", 72, 0.0) is True
+        filt.record_emit("Soc", 72, 0.0)
+        # Even after a long time, small delta still blocked
+        assert filt.should_emit("Soc", 73, 999.0) is False
+
+    def test_max_seconds_respects_throttle(self) -> None:
+        """Staleness gate doesn't bypass the throttle gate."""
+        filters = {"Soc": FieldFilter(granularity=5.0, throttle_seconds=10.0, max_seconds=5.0)}
+        filt = DualGateFilter(filters)
+        assert filt.should_emit("Soc", 72, 0.0) is True
+        filt.record_emit("Soc", 72, 0.0)
+        # max_seconds elapsed (6s > 5s) but throttle blocks (6s < 10s)
+        assert filt.should_emit("Soc", 73, 6.0) is False
+        # Both staleness and throttle satisfied (11s > 10s > 5s)
+        assert filt.should_emit("Soc", 73, 11.0) is True
+
+    def test_max_seconds_on_first_value(self) -> None:
+        """First value always emits regardless of max_seconds config."""
+        filters = {"Soc": FieldFilter(granularity=5.0, throttle_seconds=1.0, max_seconds=60.0)}
+        filt = DualGateFilter(filters)
+        assert filt.should_emit("Soc", 72, 0.0) is True
+
+    def test_max_seconds_resets_after_forced_emit(self) -> None:
+        """After staleness forces an emit, timer resets normally."""
+        filters = {"Soc": FieldFilter(granularity=5.0, throttle_seconds=1.0, max_seconds=10.0)}
+        filt = DualGateFilter(filters)
+        assert filt.should_emit("Soc", 72, 0.0) is True
+        filt.record_emit("Soc", 72, 0.0)
+        # Force emit at 11s via staleness
+        assert filt.should_emit("Soc", 73, 11.0) is True
+        filt.record_emit("Soc", 73, 11.0)
+        # Small delta again, staleness timer reset — not stale yet
+        assert filt.should_emit("Soc", 74, 15.0) is False
+        # Stale again at 22s (11s since last emit at 11s)
+        assert filt.should_emit("Soc", 74, 22.0) is True
+
+    def test_max_seconds_with_location(self) -> None:
+        """Staleness gate works for location fields too."""
+        filters = {
+            "Location": FieldFilter(granularity=50.0, throttle_seconds=1.0, max_seconds=30.0),
+        }
+        filt = DualGateFilter(filters)
+        loc = {"latitude": 40.7128, "longitude": -74.0060}
+        assert filt.should_emit("Location", loc, 0.0) is True
+        filt.record_emit("Location", loc, 0.0)
+        # Same location, not stale yet
+        assert filt.should_emit("Location", loc, 15.0) is False
+        # Same location, but stale (31s > 30s)
+        assert filt.should_emit("Location", loc, 31.0) is True

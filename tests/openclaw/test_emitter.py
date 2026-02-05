@@ -147,9 +147,43 @@ class TestGearEvent:
         assert event["params"]["data"]["gear"] == "D"
 
 
-class TestUnmappedField:
-    def test_unknown_field_returns_none(self, emitter: EventEmitter) -> None:
-        assert emitter.to_event("UnknownField", 42, vin="VIN1") is None
+class TestGenericFallback:
+    def test_unknown_field_produces_generic_event(self, emitter: EventEmitter) -> None:
+        event = emitter.to_event("PackVoltage", 398.2, vin="VIN1")
+        assert event is not None
+        assert event["params"]["event_type"] == "pack_voltage"
+        data = event["params"]["data"]
+        assert data["field"] == "PackVoltage"
+        assert data["value"] == 398.2
+
+    def test_generic_event_snake_case_naming(self, emitter: EventEmitter) -> None:
+        cases = {
+            "HvacFanSpeed": "hvac_fan_speed",
+            "TpmsPressureFl": "tpms_pressure_fl",
+            "ChargeLimitSoc": "charge_limit_soc",
+            "Odometer": "odometer",
+            "BMSState": "bms_state",
+        }
+        for field_name, expected_type in cases.items():
+            event = emitter.to_event(field_name, 1, vin="VIN1")
+            assert event is not None, f"No event for {field_name}"
+            assert event["params"]["event_type"] == expected_type, (
+                f"{field_name} → {event['params']['event_type']}, expected {expected_type}"
+            )
+
+    def test_generic_event_with_dict_value(self, emitter: EventEmitter) -> None:
+        val = {"a": 1, "b": "two"}
+        event = emitter.to_event("CustomSensor", val, vin="VIN1")
+        assert event is not None
+        data = event["params"]["data"]
+        assert data["value"] == val
+
+    def test_generic_event_preserves_envelope(self, emitter: EventEmitter) -> None:
+        event = emitter.to_event("PackVoltage", 398.2, vin="VIN1")
+        assert event is not None
+        assert event["method"] == "req:agent"
+        assert event["params"]["source"] == "test-bridge"
+        assert event["params"]["vin"] == "VIN1"
 
 
 class TestTimestamp:

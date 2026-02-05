@@ -92,7 +92,7 @@ class TestListAll:
     def test_returns_all(self) -> None:
         mgr = TriggerManager(vin="V")
         t1 = mgr.create(_trig("Soc", TriggerOperator.LT, 20))
-        t2 = mgr.create(_trig("InsideTemp", TriggerOperator.GT, 100))
+        t2 = mgr.create(_trig("InsideTemp", TriggerOperator.GT, 35))
         assert set(t.id for t in mgr.list_all()) == {t1.id, t2.id}
 
 
@@ -130,8 +130,8 @@ class TestEvaluate:
     @pytest.mark.asyncio
     async def test_gte_fires_at_boundary(self) -> None:
         mgr = TriggerManager(vin="V")
-        mgr.create(_trig("InsideTemp", TriggerOperator.GTE, 100, cooldown=0))
-        await mgr.evaluate("InsideTemp", 100.0, 95.0, TS)
+        mgr.create(_trig("InsideTemp", TriggerOperator.GTE, 35, cooldown=0))
+        await mgr.evaluate("InsideTemp", 35.0, 30.0, TS)
         assert len(mgr.drain_pending()) == 1
 
     @pytest.mark.asyncio
@@ -208,37 +208,61 @@ class TestCooldown:
 
 class TestOnce:
     @pytest.mark.asyncio
-    async def test_one_shot_auto_deletes(self) -> None:
+    async def test_one_shot_stays_until_delivery(self) -> None:
+        """One-shot triggers remain registered after firing (pending delivery)."""
         mgr = TriggerManager(vin="V")
         mgr.create(_trig("Soc", TriggerOperator.LT, 20, once=True, cooldown=0))
 
         await mgr.evaluate("Soc", 15.0, 25.0, TS)
         assert len(mgr.drain_pending()) == 1
-        assert mgr.list_all() == []
+        # Trigger still exists — waiting for push callback to confirm delivery
+        assert len(mgr.list_all()) == 1
 
     @pytest.mark.asyncio
     async def test_one_shot_fires_only_once(self) -> None:
-        mgr = TriggerManager(vin="V")
-        mgr.create(_trig("Soc", TriggerOperator.LT, 20, once=True, cooldown=0))
-
-        await mgr.evaluate("Soc", 15.0, 25.0, TS)
-        await mgr.evaluate("Soc", 10.0, 15.0, TS)
-        # Second fire should not happen (trigger was deleted)
-        mgr.drain_pending()
-        # drain_pending was called after both evaluates, so only 1
-        # notification should be there from the first evaluate
-        # (the second was cleared by the first drain_pending above)
-        # Actually both evaluates happen before drain, so let me adjust:
-
-    @pytest.mark.asyncio
-    async def test_one_shot_only_one_notification(self) -> None:
+        """One-shot trigger fires once, then is skipped on subsequent evaluations."""
         mgr = TriggerManager(vin="V")
         mgr.create(_trig("Soc", TriggerOperator.LT, 20, once=True, cooldown=0))
 
         await mgr.evaluate("Soc", 15.0, 25.0, TS)
         await mgr.evaluate("Soc", 10.0, 15.0, TS)
         pending = mgr.drain_pending()
+        # Only one notification — second evaluate skipped the fired trigger
         assert len(pending) == 1
+
+    @pytest.mark.asyncio
+    async def test_one_shot_deleted_after_explicit_delete(self) -> None:
+        """One-shot trigger is removed when delete() is called (simulating delivery)."""
+        mgr = TriggerManager(vin="V")
+        t = mgr.create(_trig("Soc", TriggerOperator.LT, 20, once=True, cooldown=0))
+
+        await mgr.evaluate("Soc", 15.0, 25.0, TS)
+        assert len(mgr.list_all()) == 1
+
+        mgr.delete(t.id)
+        assert mgr.list_all() == []
+
+    @pytest.mark.asyncio
+    async def test_one_shot_notification_carries_once_flag(self) -> None:
+        """Notification from a one-shot trigger has once=True."""
+        mgr = TriggerManager(vin="V")
+        mgr.create(_trig("Soc", TriggerOperator.LT, 20, once=True, cooldown=0))
+
+        await mgr.evaluate("Soc", 15.0, 25.0, TS)
+        pending = mgr.drain_pending()
+        assert len(pending) == 1
+        assert pending[0].once is True
+
+    @pytest.mark.asyncio
+    async def test_persistent_notification_once_is_false(self) -> None:
+        """Notification from a persistent trigger has once=False."""
+        mgr = TriggerManager(vin="V")
+        mgr.create(_trig("Soc", TriggerOperator.LT, 20, once=False, cooldown=0))
+
+        await mgr.evaluate("Soc", 15.0, 25.0, TS)
+        pending = mgr.drain_pending()
+        assert len(pending) == 1
+        assert pending[0].once is False
 
 
 class TestDelivery:
@@ -315,7 +339,7 @@ class TestFieldIndex:
     async def test_only_matching_field_evaluated(self) -> None:
         mgr = TriggerManager(vin="V")
         mgr.create(_trig("Soc", TriggerOperator.LT, 20, cooldown=0))
-        mgr.create(_trig("InsideTemp", TriggerOperator.GT, 100, cooldown=0))
+        mgr.create(_trig("InsideTemp", TriggerOperator.GT, 35, cooldown=0))
 
         await mgr.evaluate("Soc", 15.0, 25.0, TS)
         pending = mgr.drain_pending()
@@ -472,3 +496,81 @@ class TestMatches:
     def test_string_numeric_coercion(self) -> None:
         c = _cond("f", TriggerOperator.GT, "80")
         assert _matches(c, "85", None) is True
+
+
+class TestEvaluateSingle:
+    """Tests for evaluate_single — one-trigger evaluation without side-effects."""
+
+    @pytest.mark.asyncio
+    async def test_returns_true_on_match(self) -> None:
+        mgr = TriggerManager(vin="V")
+        t = mgr.create(_trig("BatteryLevel", TriggerOperator.LT, 20))
+
+        fired = await mgr.evaluate_single(t.id, 15.0, None, TS)
+
+        assert fired is True
+        pending = mgr.drain_pending()
+        assert len(pending) == 1
+        assert pending[0].value == 15.0
+
+    @pytest.mark.asyncio
+    async def test_returns_false_on_no_match(self) -> None:
+        mgr = TriggerManager(vin="V")
+        t = mgr.create(_trig("BatteryLevel", TriggerOperator.LT, 20))
+
+        fired = await mgr.evaluate_single(t.id, 50.0, None, TS)
+
+        assert fired is False
+        assert len(mgr.drain_pending()) == 0
+
+    @pytest.mark.asyncio
+    async def test_returns_false_for_missing_id(self) -> None:
+        mgr = TriggerManager(vin="V")
+
+        fired = await mgr.evaluate_single("nonexistent", 15.0, None, TS)
+
+        assert fired is False
+
+    @pytest.mark.asyncio
+    async def test_does_not_auto_delete(self) -> None:
+        """evaluate_single does NOT auto-delete one-shot triggers."""
+        mgr = TriggerManager(vin="V")
+        t = mgr.create(_trig("BatteryLevel", TriggerOperator.LT, 20, once=True))
+
+        fired = await mgr.evaluate_single(t.id, 15.0, None, TS)
+
+        assert fired is True
+        # Trigger should still exist — caller handles deletion
+        assert len(mgr.list_all()) == 1
+
+    @pytest.mark.asyncio
+    async def test_calls_fire_callbacks(self) -> None:
+        mgr = TriggerManager(vin="V")
+        t = mgr.create(_trig("BatteryLevel", TriggerOperator.LT, 20))
+
+        cb = AsyncMock()
+        mgr.add_on_fire(cb)
+
+        await mgr.evaluate_single(t.id, 15.0, None, TS)
+
+        cb.assert_awaited_once()
+        assert cb.call_args[0][0].field == "BatteryLevel"
+
+
+class TestQueueNotification:
+    """Tests for queue_notification and vin property."""
+
+    def test_queue_notification(self) -> None:
+        mgr = TriggerManager(vin="V")
+        n = TriggerNotification(
+            trigger_id="t1", field="f", operator=TriggerOperator.LT,
+            threshold=20, value=15, vin="V",
+        )
+        mgr.queue_notification(n)
+        pending = mgr.drain_pending()
+        assert len(pending) == 1
+        assert pending[0].trigger_id == "t1"
+
+    def test_vin_property(self) -> None:
+        mgr = TriggerManager(vin="MYVIN")
+        assert mgr.vin == "MYVIN"

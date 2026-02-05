@@ -9,6 +9,7 @@ first; write handlers call the command API, auto-wake once on
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -28,6 +29,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _fahrenheit_to_celsius(f: float) -> float:
+    """Convert Fahrenheit to Celsius, rounded to 1 decimal place."""
+    return round((f - 32.0) * 5.0 / 9.0, 1)
+
+
+def _celsius_to_fahrenheit(c: float) -> float:
+    """Convert Celsius to Fahrenheit, rounded to 1 decimal place."""
+    return round(c * 9.0 / 5.0 + 32.0, 1)
+
+
 # API snake_case → OpenClaw dot notation aliases for system.run
 _METHOD_ALIASES: dict[str, str] = {
     "door_lock": "door.lock",
@@ -35,6 +47,7 @@ _METHOD_ALIASES: dict[str, str] = {
     "auto_conditioning_start": "climate.on",
     "auto_conditioning_stop": "climate.off",
     "set_temps": "climate.set_temp",
+    "set_preconditioning_max": "climate.defrost",
     "charge_start": "charge.start",
     "charge_stop": "charge.stop",
     "set_charge_limit": "charge.set_limit",
@@ -46,6 +59,7 @@ _METHOD_ALIASES: dict[str, str] = {
     "navigation_sc_request": "nav.supercharger",
     "navigation_waypoints_request": "nav.waypoints",
     "trigger_homelink": "homelink.trigger",
+    "list_triggers": "trigger.list",
 }
 
 
@@ -84,12 +98,14 @@ class CommandDispatcher:
             "speed.get": self._handle_speed_get,
             "charge_state.get": self._handle_charge_state_get,
             "security.get": self._handle_security_get,
+            "telemetry.get": self._handle_telemetry_get,
             # Writes
             "door.lock": self._handle_door_lock,
             "door.unlock": self._handle_door_unlock,
             "climate.on": self._handle_climate_on,
             "climate.off": self._handle_climate_off,
             "climate.set_temp": self._handle_climate_set_temp,
+            "climate.defrost": self._handle_climate_defrost,
             "charge.start": self._handle_charge_start,
             "charge.stop": self._handle_charge_stop,
             "charge.set_limit": self._handle_charge_set_limit,
@@ -105,16 +121,24 @@ class CommandDispatcher:
             "nav.waypoints": self._handle_nav_waypoints,
             "homelink.trigger": self._handle_homelink,
             "system.run": self._handle_system_run,
-            # Trigger commands
+            # Shared trigger operations
             "trigger.create": self._handle_trigger_create,
-            "trigger.delete": self._handle_trigger_delete,
-            "trigger.list": self._handle_trigger_list,
+            "trigger.list": self._handle_trigger_list_all,
             "trigger.poll": self._handle_trigger_poll,
-            # Convenience trigger aliases
+            "trigger.delete": self._handle_trigger_delete,
+            # Domain-specific trigger CRUD
             "cabin_temp.trigger": self._handle_cabin_temp_trigger,
+            "cabin_temp.trigger.list": self._handle_cabin_temp_list,
+            "cabin_temp.trigger.delete": self._handle_trigger_delete,
             "outside_temp.trigger": self._handle_outside_temp_trigger,
+            "outside_temp.trigger.list": self._handle_outside_temp_list,
+            "outside_temp.trigger.delete": self._handle_trigger_delete,
             "battery.trigger": self._handle_battery_trigger,
+            "battery.trigger.list": self._handle_battery_list,
+            "battery.trigger.delete": self._handle_trigger_delete,
             "location.trigger": self._handle_location_trigger,
+            "location.trigger.list": self._handle_location_list,
+            "location.trigger.delete": self._handle_trigger_delete,
         }
 
     async def dispatch(self, msg: dict[str, Any]) -> dict[str, Any] | None:
@@ -285,6 +309,16 @@ class CommandDispatcher:
             "sentry_mode": vs.get("sentry_mode"),
         }
 
+    async def _handle_telemetry_get(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Read the latest value of any telemetry field from the store."""
+        field = params.get("field", "")
+        if not field:
+            raise ValueError("telemetry.get requires 'field' parameter")
+        value = self._store_get(field)
+        if value is None:
+            return {"field": field, "pending": True}
+        return {"field": field, "value": value}
+
     # -- Write helpers -------------------------------------------------------
 
     async def _auto_wake(self, operation: Any) -> Any:
@@ -348,6 +382,12 @@ class CommandDispatcher:
         temp_f = float(temp)
         return await self._simple_command(
             "set_temps", {"driver_temp": temp_f, "passenger_temp": temp_f}
+        )
+
+    async def _handle_climate_defrost(self, params: dict[str, Any]) -> dict[str, Any]:
+        on = params.get("on", True)
+        return await self._simple_command(
+            "set_preconditioning_max", {"on": bool(on), "manual_override": True}
         )
 
     async def _handle_charge_start(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -454,7 +494,13 @@ class CommandDispatcher:
         return self._trigger_manager
 
     async def _handle_trigger_create(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Create a new trigger from the given condition parameters."""
+        """Create a new trigger from the given condition parameters.
+
+        After creation, immediately evaluates the trigger against the
+        current telemetry store value.  If the condition is already
+        satisfied, the event is fired and the trigger is deleted — the
+        response includes ``"immediate": True`` so the caller knows.
+        """
         mgr = self._require_trigger_manager()
         field = params.get("field", "")
         if not field:
@@ -476,11 +522,35 @@ class CommandDispatcher:
             cooldown_seconds=params.get("cooldown_seconds", 60.0),
         )
         created = mgr.create(trigger)
-        return {
+
+        result: dict[str, Any] = {
             "id": created.id,
             "field": created.condition.field,
             "operator": created.condition.operator.value,
         }
+
+        # Immediate evaluation: if the telemetry store already has a
+        # value for this field that satisfies the condition, fire now.
+        # One-shot triggers are NOT deleted here — the push callback
+        # handles deletion after confirmed WebSocket delivery.
+        if self._store is not None:
+            snap = self._store.get(field)
+            if snap is not None:
+                from datetime import UTC, datetime
+
+                fired = await mgr.evaluate_single(
+                    created.id, snap.value, None, datetime.now(UTC)
+                )
+                if fired:
+                    result["immediate"] = True
+                    logger.info(
+                        "Trigger %s fired immediately (value=%s)%s",
+                        created.id,
+                        snap.value,
+                        " — once, pending delivery" if created.once else " — kept (persistent)",
+                    )
+
+        return result
 
     async def _handle_trigger_delete(self, params: dict[str, Any]) -> dict[str, Any]:
         """Delete a trigger by ID."""
@@ -491,23 +561,60 @@ class CommandDispatcher:
         deleted = mgr.delete(trigger_id)
         return {"deleted": deleted, "id": trigger_id}
 
-    async def _handle_trigger_list(self, params: dict[str, Any]) -> dict[str, Any]:
-        """List all registered triggers."""
+    def _list_triggers_for_field(
+        self, field: str, *, show_fahrenheit: bool = False
+    ) -> dict[str, Any]:
+        """List triggers filtered to a specific telemetry field.
+
+        When *show_fahrenheit* is ``True``, a ``value_f`` display field is
+        added for numeric thresholds (temperature triggers stored in °C).
+        """
+        mgr = self._require_trigger_manager()
+        triggers = [t for t in mgr.list_all() if t.condition.field == field]
+        result = []
+        for t in triggers:
+            entry: dict[str, Any] = {
+                "id": t.id,
+                "field": t.condition.field,
+                "operator": t.condition.operator.value,
+                "value": t.condition.value,
+                "once": t.once,
+                "cooldown_seconds": t.cooldown_seconds,
+            }
+            if show_fahrenheit and t.condition.value is not None:
+                with contextlib.suppress(TypeError, ValueError):
+                    entry["value_f"] = _celsius_to_fahrenheit(float(t.condition.value))
+            result.append(entry)
+        return {"triggers": result}
+
+    async def _handle_cabin_temp_list(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._list_triggers_for_field("InsideTemp", show_fahrenheit=True)
+
+    async def _handle_outside_temp_list(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._list_triggers_for_field("OutsideTemp", show_fahrenheit=True)
+
+    async def _handle_battery_list(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._list_triggers_for_field("BatteryLevel")
+
+    async def _handle_location_list(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._list_triggers_for_field("Location")
+
+    async def _handle_trigger_list_all(self, params: dict[str, Any]) -> dict[str, Any]:
+        """List ALL triggers across all fields."""
         mgr = self._require_trigger_manager()
         triggers = mgr.list_all()
-        return {
-            "triggers": [
-                {
-                    "id": t.id,
-                    "field": t.condition.field,
-                    "operator": t.condition.operator.value,
-                    "value": t.condition.value,
-                    "once": t.once,
-                    "cooldown_seconds": t.cooldown_seconds,
-                }
-                for t in triggers
-            ]
-        }
+        result = []
+        for t in triggers:
+            entry: dict[str, Any] = {
+                "id": t.id,
+                "field": t.condition.field,
+                "operator": t.condition.operator.value,
+                "value": t.condition.value,
+                "once": t.once,
+                "cooldown_seconds": t.cooldown_seconds,
+            }
+            result.append(entry)
+        return {"triggers": result}
 
     async def _handle_trigger_poll(self, params: dict[str, Any]) -> dict[str, Any]:
         """Drain and return pending trigger notifications."""
@@ -518,10 +625,24 @@ class CommandDispatcher:
     # -- Convenience trigger aliases -----------------------------------------
 
     async def _handle_cabin_temp_trigger(self, params: dict[str, Any]) -> dict[str, Any]:
-        return await self._handle_trigger_create({**params, "field": "InsideTemp"})
+        converted = {**params, "field": "InsideTemp"}
+        if "value" in converted and converted["value"] is not None:
+            f_val = float(converted["value"])
+            converted["value"] = _fahrenheit_to_celsius(f_val)
+            logger.debug(
+                "cabin_temp.trigger: converted %.1f°F → %.1f°C", f_val, converted["value"]
+            )
+        return await self._handle_trigger_create(converted)
 
     async def _handle_outside_temp_trigger(self, params: dict[str, Any]) -> dict[str, Any]:
-        return await self._handle_trigger_create({**params, "field": "OutsideTemp"})
+        converted = {**params, "field": "OutsideTemp"}
+        if "value" in converted and converted["value"] is not None:
+            f_val = float(converted["value"])
+            converted["value"] = _fahrenheit_to_celsius(f_val)
+            logger.debug(
+                "outside_temp.trigger: converted %.1f°F → %.1f°C", f_val, converted["value"]
+            )
+        return await self._handle_trigger_create(converted)
 
     async def _handle_battery_trigger(self, params: dict[str, Any]) -> dict[str, Any]:
         return await self._handle_trigger_create({**params, "field": "BatteryLevel"})

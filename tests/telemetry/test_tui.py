@@ -267,7 +267,7 @@ class TestTelemetryTUIApp:
         async with app.run_test():
             app._state["BatteryLevel"] = 80
             app._timestamps["BatteryLevel"] = datetime.now(UTC)
-            app._update_panels()
+            app._update_panel_cell("BatteryLevel", 80)
 
             table = app.query_one("#battery-table", DataTable)
             assert table.row_count == 1
@@ -279,7 +279,7 @@ class TestTelemetryTUIApp:
         async with app.run_test():
             app._state["InsideTemp"] = 22.5
             app._timestamps["InsideTemp"] = datetime.now(UTC)
-            app._update_panels()
+            app._update_panel_cell("InsideTemp", 22.5)
 
             table = app.query_one("#climate-table", DataTable)
             assert table.row_count == 1
@@ -291,7 +291,7 @@ class TestTelemetryTUIApp:
         async with app.run_test():
             app._state["Locked"] = True
             app._timestamps["Locked"] = datetime.now(UTC)
-            app._update_panels()
+            app._update_panel_cell("Locked", True)
 
             table = app.query_one("#security-table", DataTable)
             assert table.row_count == 1
@@ -303,7 +303,7 @@ class TestTelemetryTUIApp:
         async with app.run_test():
             app._state["UnknownField123"] = 42
             app._timestamps["UnknownField123"] = datetime.now(UTC)
-            app._update_panels()
+            app._update_panel_cell("UnknownField123", 42)
 
             table = app.query_one("#diagnostics-table", DataTable)
             assert table.row_count == 1
@@ -355,7 +355,7 @@ class TestTelemetryTUIApp:
         async with app.run_test():
             app._state["BatteryLevel"] = 80
             app._timestamps["BatteryLevel"] = datetime.now(UTC)
-            app._update_panels()
+            app._update_panel_cell("BatteryLevel", 80)
 
             table = app.query_one("#battery-table", DataTable)
             assert table.row_count == 1
@@ -363,7 +363,7 @@ class TestTelemetryTUIApp:
             # Second field in same panel.
             app._state["Soc"] = 80
             app._timestamps["Soc"] = datetime.now(UTC)
-            app._update_panels()
+            app._update_panel_cell("Soc", 80)
 
             assert table.row_count == 2
 
@@ -373,14 +373,14 @@ class TestTelemetryTUIApp:
         async with app.run_test():
             app._state["BatteryLevel"] = 80
             app._timestamps["BatteryLevel"] = datetime.now(UTC)
-            app._update_panels()
+            app._update_panel_cell("BatteryLevel", 80)
 
             table = app.query_one("#battery-table", DataTable)
             assert table.row_count == 1
 
             # Update same field.
             app._state["BatteryLevel"] = 75
-            app._update_panels()
+            app._update_panel_cell("BatteryLevel", 75)
 
             # Still one row, not two.
             assert table.row_count == 1
@@ -599,3 +599,85 @@ class TestActivitySidebar:
             app._maybe_log_frame_summary()
             # No message should have been enqueued.
             assert app._activity_queue.empty()
+
+
+# ---------------------------------------------------------------------------
+# Triggers widget
+# ---------------------------------------------------------------------------
+
+
+class TestTriggersWidget:
+    @pytest.mark.asyncio
+    async def test_triggers_table_exists(self) -> None:
+        """The triggers DataTable should be present in the sidebar."""
+        app = TelemetryTUI(vin=VIN)
+        async with app.run_test():
+            table = app.query_one("#triggers-table", DataTable)
+            assert table is not None
+            assert table.row_count == 0
+
+    @pytest.mark.asyncio
+    async def test_triggers_table_populated(self) -> None:
+        """Triggers are shown after set_trigger_manager and _update_triggers."""
+        from tescmd.triggers.manager import TriggerManager
+        from tescmd.triggers.models import TriggerCondition, TriggerDefinition, TriggerOperator
+
+        app = TelemetryTUI(vin=VIN)
+        mgr = TriggerManager(vin=VIN)
+        mgr.create(
+            TriggerDefinition(
+                condition=TriggerCondition(
+                    field="BatteryLevel", operator=TriggerOperator.LT, value=20,
+                ),
+            )
+        )
+        mgr.create(
+            TriggerDefinition(
+                condition=TriggerCondition(
+                    field="InsideTemp", operator=TriggerOperator.GT, value=35,
+                ),
+                once=True,
+            )
+        )
+        app.set_trigger_manager(mgr)
+
+        async with app.run_test():
+            app._update_triggers()
+            table = app.query_one("#triggers-table", DataTable)
+            assert table.row_count == 2
+
+    @pytest.mark.asyncio
+    async def test_triggers_table_removes_deleted(self) -> None:
+        """Deleted triggers are removed from the table on refresh."""
+        from tescmd.triggers.manager import TriggerManager
+        from tescmd.triggers.models import TriggerCondition, TriggerDefinition, TriggerOperator
+
+        app = TelemetryTUI(vin=VIN)
+        mgr = TriggerManager(vin=VIN)
+        t = mgr.create(
+            TriggerDefinition(
+                condition=TriggerCondition(
+                    field="BatteryLevel", operator=TriggerOperator.LT, value=20,
+                ),
+            )
+        )
+        app.set_trigger_manager(mgr)
+
+        async with app.run_test():
+            app._update_triggers()
+            table = app.query_one("#triggers-table", DataTable)
+            assert table.row_count == 1
+
+            mgr.delete(t.id)
+            app._update_triggers()
+            assert table.row_count == 0
+
+    @pytest.mark.asyncio
+    async def test_triggers_noop_without_manager(self) -> None:
+        """_update_triggers is a no-op when no manager is set."""
+        app = TelemetryTUI(vin=VIN)
+        async with app.run_test():
+            # Should not raise
+            app._update_triggers()
+            table = app.query_one("#triggers-table", DataTable)
+            assert table.row_count == 0

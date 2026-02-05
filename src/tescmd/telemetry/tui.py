@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 
     from tescmd.output.rich_output import DisplayUnits
     from tescmd.telemetry.decoder import TelemetryFrame
+    from tescmd.triggers.manager import TriggerManager
 
 logger = logging.getLogger(__name__)
 
@@ -429,9 +430,19 @@ class TelemetryTUI(App[None]):
         grid-size: 2;
         grid-gutter: 0;
     }
-    #activity-log {
+    #sidebar {
         width: 1fr;
         min-width: 30;
+        height: 1fr;
+    }
+    #triggers-table {
+        height: auto;
+        min-height: 5;
+        max-height: 12;
+        border: solid #e67e22;
+        padding: 0;
+    }
+    #activity-log {
         height: 1fr;
         border: solid $accent;
         padding: 0 1;
@@ -556,6 +567,10 @@ class TelemetryTUI(App[None]):
         self._activity_file_handler: logging.FileHandler | None = None
         self._activity_log_path: str = ""
 
+        # Trigger manager reference (set by serve.py after construction).
+        self._trigger_manager: TriggerManager | None = None
+        self._trigger_table_keys: set[str] = set()
+
         # Debug logger for command attempts — always writes to a file.
         self._cmd_logger = logging.getLogger("tescmd.tui.commands")
         self._cmd_log_handler: logging.FileHandler | None = None
@@ -571,7 +586,9 @@ class TelemetryTUI(App[None]):
                         yield DataTable(
                             id=f"{panel_id}-table", cursor_type="none", zebra_stripes=True
                         )
-            yield RichLog(id="activity-log", wrap=True, markup=True)
+            with Vertical(id="sidebar"):
+                yield DataTable(id="triggers-table", cursor_type="none")
+                yield RichLog(id="activity-log", wrap=True, markup=True)
         yield Static(id="server-bar")
         yield Static(id="command-status")
         yield Footer()
@@ -585,6 +602,13 @@ class TelemetryTUI(App[None]):
             table = self.query_one(f"#{panel_id}-table", DataTable)
             table.add_column("Field", key="field", width=24)
             table.add_column("Value", key="value", width=24)
+
+        # Triggers table.
+        triggers_table = self.query_one("#triggers-table", DataTable)
+        triggers_table.border_title = "Triggers"
+        triggers_table.add_column("Field", key="field", width=14)
+        triggers_table.add_column("Condition", key="condition", width=10)
+        triggers_table.add_column("Type", key="type", width=6)
 
         # Activity sidebar title.
         activity_log = self.query_one("#activity-log", RichLog)
@@ -759,7 +783,7 @@ class TelemetryTUI(App[None]):
             self._queue.put_nowait(frame)
 
     async def _process_queue(self) -> None:
-        """Background worker: drain the queue and update state."""
+        """Background worker: drain the queue and update state + widgets."""
         while True:
             try:
                 frame = await asyncio.wait_for(self._queue.get(), timeout=0.5)
@@ -774,6 +798,7 @@ class TelemetryTUI(App[None]):
             for datum in frame.data:
                 self._state[datum.field_name] = datum.value
                 self._timestamps[datum.field_name] = frame.created_at
+                self._update_panel_cell(datum.field_name, datum.value)
 
     # -- Server info setters (called from serve.py) ---------------------------
 
@@ -796,13 +821,16 @@ class TelemetryTUI(App[None]):
     def set_log_path(self, path: Path | str) -> None:
         self._log_path = str(path)
 
+    def set_trigger_manager(self, mgr: TriggerManager) -> None:
+        self._trigger_manager = mgr
+
     # -- UI update (runs every 1 second) --------------------------------------
 
     def _update_ui(self) -> None:
         """Refresh all visible widgets from current state."""
         self._update_header()
-        self._update_panels()
         self._update_server_info()
+        self._update_triggers()
         self._maybe_log_frame_summary()
 
     def _update_header(self) -> None:
@@ -821,20 +849,18 @@ class TelemetryTUI(App[None]):
             f"Frames: {self._frame_count:,}  Up: {hours:02d}:{minutes:02d}:{seconds:02d}"
         )
 
-    def _update_panels(self) -> None:
-        """Route each field to its categorized panel DataTable."""
-        for field_name in sorted(self._state.keys()):
-            panel_id = _FIELD_TO_PANEL.get(field_name, "diagnostics")
-            value = self._state[field_name]
-            display_value = _format_value(field_name, value, self._units)
-            tracked = self._panel_table_fields[panel_id]
+    def _update_panel_cell(self, field_name: str, value: Any) -> None:
+        """Update a single field's cell in the appropriate panel DataTable."""
+        panel_id = _FIELD_TO_PANEL.get(field_name, "diagnostics")
+        display_value = _format_value(field_name, value, self._units)
+        tracked = self._panel_table_fields[panel_id]
 
-            table = self.query_one(f"#{panel_id}-table", DataTable)
-            if field_name in tracked:
-                table.update_cell(field_name, "value", display_value)
-            else:
-                table.add_row(field_name, display_value, key=field_name)
-                tracked.add(field_name)
+        table = self.query_one(f"#{panel_id}-table", DataTable)
+        if field_name in tracked:
+            table.update_cell(field_name, "value", display_value)
+        else:
+            table.add_row(field_name, display_value, key=field_name)
+            tracked.add(field_name)
 
     def _update_server_info(self) -> None:
         parts: list[str] = []
@@ -861,6 +887,44 @@ class TelemetryTUI(App[None]):
         else:
             info_widget.update("")
             info_widget.display = False
+
+    def _update_triggers(self) -> None:
+        """Refresh the triggers DataTable from the trigger manager."""
+        if self._trigger_manager is None:
+            return
+
+        table = self.query_one("#triggers-table", DataTable)
+        triggers = self._trigger_manager.list_all()
+        current_ids = {t.id for t in triggers}
+
+        # Remove rows for deleted triggers.
+        removed = self._trigger_table_keys - current_ids
+        for tid in removed:
+            table.remove_row(tid)
+        self._trigger_table_keys -= removed
+
+        # Add or update rows.
+        for t in triggers:
+            cond = t.condition
+            op = cond.operator.value
+            if op == "changed":
+                condition_text = "changed"
+            elif op in ("enter", "leave"):
+                condition_text = f"{op} geofence"
+            else:
+                symbols = {
+                    "lt": "<", "gt": ">", "lte": "\u2264",
+                    "gte": "\u2265", "eq": "=", "neq": "\u2260",
+                }
+                condition_text = f"{symbols.get(op, op)} {cond.value}"
+            fire_type = "once" if t.once else "persist"
+
+            if t.id in self._trigger_table_keys:
+                table.update_cell(t.id, "condition", condition_text)
+                table.update_cell(t.id, "type", fire_type)
+            else:
+                table.add_row(cond.field, condition_text, fire_type, key=t.id)
+                self._trigger_table_keys.add(t.id)
 
     # -- Command execution (keybinding actions) --------------------------------
 
