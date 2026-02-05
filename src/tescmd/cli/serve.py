@@ -663,7 +663,7 @@ def _register_trigger_tools(
     Each trigger domain (cabin_temp, outside_temp, battery, location) gets
     its own create, list, and delete tools.  Temperature triggers accept
     values in °F and convert to °C internally (matching the dispatcher's
-    convenience aliases).  ``trigger_poll`` is shared across all domains.
+    convenience aliases).
 
     When *telemetry_store* is provided, newly created triggers are
     immediately evaluated against the current value.  If the condition
@@ -993,19 +993,6 @@ def _register_trigger_tools(
         "Create a trigger on any telemetry field",
         _generic_trigger_schema,
         is_write=True,
-    )
-
-    # -- Shared: poll --------------------------------------------------------
-
-    def _handle_poll(params: dict[str, Any]) -> dict[str, Any]:
-        notifications = trigger_manager.drain_pending()
-        return {"notifications": [n.model_dump(mode="json") for n in notifications]}
-
-    mcp_server.register_custom_tool(
-        "trigger_poll",
-        _handle_poll,
-        "Poll for fired trigger notifications across all domains",
-        {"type": "object", "properties": {}},
     )
 
     # -- Shared: list all triggers -------------------------------------------

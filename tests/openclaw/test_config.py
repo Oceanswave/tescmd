@@ -119,7 +119,7 @@ class TestNodeCapabilities:
         assert "location.get" in caps.reads
         assert "telemetry.get" in caps.reads
         assert "trigger.list" in caps.reads
-        assert "trigger.poll" in caps.reads
+        assert "trigger.poll" not in caps.reads
         assert "system.run" in caps.writes
         assert "trigger.create" in caps.writes
         assert "trigger.delete" in caps.writes
@@ -174,7 +174,7 @@ class TestBridgeConfigCapabilities:
     def test_default_capabilities(self) -> None:
         cfg = BridgeConfig()
         assert isinstance(cfg.capabilities, NodeCapabilities)
-        assert len(cfg.capabilities.reads) == 4
+        assert len(cfg.capabilities.reads) == 3
         assert len(cfg.capabilities.writes) == 3
         assert "telemetry.get" in cfg.capabilities.reads
         assert "trigger.create" in cfg.capabilities.writes

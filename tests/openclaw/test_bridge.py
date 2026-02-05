@@ -503,19 +503,21 @@ class TestBridgeTriggerEvaluation:
             client_id="test",
         )
 
+        fired: list[TriggerNotification] = []
+        mgr.add_on_fire(AsyncMock(side_effect=lambda n: fired.append(n)))
+
         # First frame: value above threshold — no fire
         frame1 = _make_frame(data=[TelemetryDatum("BatteryLevel", 3, 25.0, "float")])
         await bridge.on_frame(frame1)
-        assert len(mgr.drain_pending()) == 0
+        assert len(fired) == 0
 
         # Second frame: value below threshold — trigger fires
         frame2 = _make_frame(data=[TelemetryDatum("BatteryLevel", 3, 15.0, "float")])
         await bridge.on_frame(frame2)
-        pending = mgr.drain_pending()
-        assert len(pending) == 1
-        assert pending[0].field == "BatteryLevel"
-        assert pending[0].value == 15.0
-        assert pending[0].previous_value == 25.0
+        assert len(fired) == 1
+        assert fired[0].field == "BatteryLevel"
+        assert fired[0].value == 15.0
+        assert fired[0].previous_value == 25.0
 
     @pytest.mark.asyncio
     async def test_previous_value_captured_before_store_update(
@@ -538,12 +540,14 @@ class TestBridgeTriggerEvaluation:
             trigger_manager=mgr,
         )
 
+        fired: list[TriggerNotification] = []
+        mgr.add_on_fire(AsyncMock(side_effect=lambda n: fired.append(n)))
+
         # First frame: no previous value → CHANGED fires (None != 72.0)
         frame1 = _make_frame(data=[TelemetryDatum("Soc", 3, 72.0, "float")])
         await bridge.on_frame(frame1)
-        n1 = mgr.drain_pending()
-        assert len(n1) == 1
-        assert n1[0].previous_value is None
+        assert len(fired) == 1
+        assert fired[0].previous_value is None
 
         # After frame1, store should have Soc=72.0
         assert store.get("Soc").value == 72.0  # type: ignore[union-attr]
@@ -551,16 +555,14 @@ class TestBridgeTriggerEvaluation:
         # Second frame with same value — CHANGED does not fire
         frame2 = _make_frame(data=[TelemetryDatum("Soc", 3, 72.0, "float")])
         await bridge.on_frame(frame2)
-        n2 = mgr.drain_pending()
-        assert len(n2) == 0
+        assert len(fired) == 1  # still 1
 
         # Third frame with different value — fires with previous=72.0
         frame3 = _make_frame(data=[TelemetryDatum("Soc", 3, 80.0, "float")])
         await bridge.on_frame(frame3)
-        n3 = mgr.drain_pending()
-        assert len(n3) == 1
-        assert n3[0].previous_value == 72.0
-        assert n3[0].value == 80.0
+        assert len(fired) == 2
+        assert fired[1].previous_value == 72.0
+        assert fired[1].value == 80.0
 
     @pytest.mark.asyncio
     async def test_trigger_works_without_store(self, gateway: GatewayClient) -> None:
@@ -579,11 +581,13 @@ class TestBridgeTriggerEvaluation:
             trigger_manager=mgr,
         )
 
+        fired: list[TriggerNotification] = []
+        mgr.add_on_fire(AsyncMock(side_effect=lambda n: fired.append(n)))
+
         # Value below threshold — fires (previous is None, which is fine for numeric ops)
         frame = _make_frame(data=[TelemetryDatum("BatteryLevel", 3, 15.0, "float")])
         await bridge.on_frame(frame)
-        pending = mgr.drain_pending()
-        assert len(pending) == 1
+        assert len(fired) == 1
 
     @pytest.mark.asyncio
     async def test_trigger_callback_invoked_from_bridge(self, gateway: GatewayClient) -> None:
@@ -635,6 +639,9 @@ class TestBridgeTriggerEvaluation:
         filters = {"BatteryLevel": FieldFilter(granularity=0.0, throttle_seconds=0.0)}
         filt = DualGateFilter(filters)
         emitter = EventEmitter(client_id="test")
+        fired: list[TriggerNotification] = []
+        mgr.add_on_fire(AsyncMock(side_effect=lambda n: fired.append(n)))
+
         bridge = TelemetryBridge(
             gateway,
             filt,
@@ -651,11 +658,10 @@ class TestBridgeTriggerEvaluation:
             await bridge.on_frame(frame)
 
         # One-shot trigger should have fired once (at level 10.0 crossing)
-        pending = mgr.drain_pending()
-        assert len(pending) == 1
-        assert pending[0].value == 10.0
-        assert pending[0].previous_value == 20.0
-        assert pending[0].once is True
+        assert len(fired) == 1
+        assert fired[0].value == 10.0
+        assert fired[0].previous_value == 20.0
+        assert fired[0].once is True
 
         # Trigger stays registered (pending delivery confirmation)
         assert len(mgr.list_all()) == 1

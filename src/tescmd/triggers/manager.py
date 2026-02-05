@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections import defaultdict, deque
+from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
 from tescmd.triggers.models import (
@@ -25,7 +25,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 MAX_TRIGGERS = 100
-MAX_PENDING = 500
 
 
 class TriggerLimitError(Exception):
@@ -46,7 +45,6 @@ class TriggerManager:
         self._triggers: dict[str, TriggerDefinition] = {}
         self._field_index: dict[str, set[str]] = defaultdict(set)
         self._last_fire_times: dict[str, float] = {}
-        self._pending: deque[TriggerNotification] = deque(maxlen=MAX_PENDING)
         self._on_fire_callbacks: list[Callable[[TriggerNotification], Awaitable[None]]] = []
         self._fired_once_ids: set[str] = set()
 
@@ -93,20 +91,10 @@ class TriggerManager:
         """Return all registered triggers."""
         return list(self._triggers.values())
 
-    def drain_pending(self) -> list[TriggerNotification]:
-        """Return and clear all pending notifications (for MCP polling)."""
-        result = list(self._pending)
-        self._pending.clear()
-        return result
-
     @property
     def vin(self) -> str:
         """Vehicle Identification Number included in notifications."""
         return self._vin
-
-    def queue_notification(self, notification: TriggerNotification) -> None:
-        """Queue a notification for MCP polling via :meth:`drain_pending`."""
-        self._pending.append(notification)
 
     def mark_fired_once(self, trigger_id: str) -> None:
         """Mark a one-shot trigger as fired (pending delivery).
@@ -169,8 +157,6 @@ class TriggerManager:
 
         if trigger.once:
             self._fired_once_ids.add(trigger_id)
-
-        self._pending.append(notification)
 
         for callback in self._on_fire_callbacks:
             try:
@@ -253,8 +239,6 @@ class TriggerManager:
             # successful WebSocket delivery.
             if trigger.once:
                 self._fired_once_ids.add(tid)
-
-            self._pending.append(notification)
 
             for callback in self._on_fire_callbacks:
                 try:

@@ -1161,53 +1161,13 @@ class TestTriggerHandlers:
         assert t["value_f"] == 80.1  # converted back to Fahrenheit
 
     @pytest.mark.asyncio
-    async def test_trigger_poll_empty(self) -> None:
+    async def test_trigger_poll_returns_unknown_command(self) -> None:
+        """trigger.poll is no longer a recognized command."""
         ctx = _mock_app_ctx()
         mgr = TriggerManager(vin="VIN1")
         d = CommandDispatcher(vin="VIN1", app_ctx=ctx, trigger_manager=mgr)
         result = await d.dispatch({"method": "trigger.poll", "params": {}})
-        assert result["notifications"] == []
-
-    @pytest.mark.asyncio
-    async def test_trigger_poll_returns_notifications(self) -> None:
-        ctx = _mock_app_ctx()
-        mgr = TriggerManager(vin="VIN1")
-        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, trigger_manager=mgr)
-        await d.dispatch(
-            {
-                "method": "battery.trigger",
-                "params": {"operator": "lt", "value": 20},
-            }
-        )
-        # Simulate trigger firing via evaluate
-        ts = datetime(2026, 2, 1, 12, 0, 0, tzinfo=UTC)
-        await mgr.evaluate("BatteryLevel", 15.0, 25.0, ts)
-        result = await d.dispatch({"method": "trigger.poll", "params": {}})
-        assert len(result["notifications"]) == 1
-        n = result["notifications"][0]
-        assert n["field"] == "BatteryLevel"
-        assert n["value"] == 15.0
-
-    @pytest.mark.asyncio
-    async def test_trigger_poll_drains(self) -> None:
-        """Polling should clear the pending queue."""
-        ctx = _mock_app_ctx()
-        mgr = TriggerManager(vin="VIN1")
-        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, trigger_manager=mgr)
-        await d.dispatch(
-            {
-                "method": "battery.trigger",
-                "params": {"operator": "lt", "value": 20},
-            }
-        )
-        ts = datetime(2026, 2, 1, 12, 0, 0, tzinfo=UTC)
-        await mgr.evaluate("BatteryLevel", 15.0, 25.0, ts)
-        # First poll returns notification
-        r1 = await d.dispatch({"method": "trigger.poll", "params": {}})
-        assert len(r1["notifications"]) == 1
-        # Second poll is empty
-        r2 = await d.dispatch({"method": "trigger.poll", "params": {}})
-        assert len(r2["notifications"]) == 0
+        assert result is None
 
 
 class TestTriggerConvenienceAliases:
@@ -1262,13 +1222,11 @@ class TestTriggerConvenienceAliases:
         )
         ts = datetime(2026, 2, 1, 12, 0, 0, tzinfo=UTC)
         # Telemetry reports 25°C (77°F) — below threshold, should NOT fire
-        await mgr.evaluate("InsideTemp", 25.0, 20.0, ts)
-        assert mgr.drain_pending() == []
+        r1 = await mgr.evaluate("InsideTemp", 25.0, 20.0, ts)
+        assert r1 is False
         # Telemetry reports 30°C (86°F) — above threshold, SHOULD fire
-        await mgr.evaluate("InsideTemp", 30.0, 25.0, ts)
-        pending = mgr.drain_pending()
-        assert len(pending) == 1
-        assert pending[0].value == 30.0
+        r2 = await mgr.evaluate("InsideTemp", 30.0, 25.0, ts)
+        assert r2 is True
 
     @pytest.mark.asyncio
     async def test_battery_trigger(self) -> None:
@@ -1336,13 +1294,6 @@ class TestTriggerHandlersWithoutManager:
             await d.dispatch({"method": "battery.trigger.list", "params": {}})
 
     @pytest.mark.asyncio
-    async def test_trigger_poll_no_manager(self) -> None:
-        ctx = _mock_app_ctx()
-        d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
-        with pytest.raises(RuntimeError, match="Triggers not available"):
-            await d.dispatch({"method": "trigger.poll", "params": {}})
-
-    @pytest.mark.asyncio
     async def test_convenience_alias_no_manager(self) -> None:
         ctx = _mock_app_ctx()
         d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
@@ -1377,11 +1328,6 @@ class TestTriggerImmediateEvaluation:
         # Trigger fires immediately but stays registered (persistent by default)
         assert result["immediate"] is True
         assert len(mgr.list_all()) == 1
-        # Notification should be queued for polling
-        pending = mgr.drain_pending()
-        assert len(pending) == 1
-        assert pending[0].field == "BatteryLevel"
-        assert pending[0].value == 15.0
 
     @pytest.mark.asyncio
     async def test_once_trigger_stays_on_immediate_fire(self) -> None:

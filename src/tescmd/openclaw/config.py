@@ -33,7 +33,6 @@ class NodeCapabilities(BaseModel):
         "location.get",
         "telemetry.get",
         "trigger.list",
-        "trigger.poll",
     ]
     writes: list[str] = [
         "system.run",

@@ -124,7 +124,6 @@ class CommandDispatcher:
             # Shared trigger operations
             "trigger.create": self._handle_trigger_create,
             "trigger.list": self._handle_trigger_list_all,
-            "trigger.poll": self._handle_trigger_poll,
             "trigger.delete": self._handle_trigger_delete,
             # Domain-specific trigger CRUD
             "cabin_temp.trigger": self._handle_cabin_temp_trigger,
@@ -615,12 +614,6 @@ class CommandDispatcher:
             }
             result.append(entry)
         return {"triggers": result}
-
-    async def _handle_trigger_poll(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Drain and return pending trigger notifications."""
-        mgr = self._require_trigger_manager()
-        notifications = mgr.drain_pending()
-        return {"notifications": [n.model_dump(mode="json") for n in notifications]}
 
     # -- Convenience trigger aliases -----------------------------------------
 

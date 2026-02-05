@@ -558,18 +558,17 @@ class TestHandshakeCapabilities:
         permissions = sent["params"]["permissions"]
         caps_list = sent["params"]["caps"]
 
-        # 7 commands: 4 reads + 3 writes
-        assert len(commands) == 7
+        # 6 commands: 3 reads + 3 writes
+        assert len(commands) == 6
         assert "location.get" in commands
         assert "telemetry.get" in commands
         assert "trigger.list" in commands
-        assert "trigger.poll" in commands
         assert "system.run" in commands
         assert "trigger.create" in commands
         assert "trigger.delete" in commands
 
         # permissions must match commands 1:1
-        assert len(permissions) == 7
+        assert len(permissions) == 6
         assert all(permissions[cmd] is True for cmd in commands)
 
         # caps: location, telemetry, trigger, system
