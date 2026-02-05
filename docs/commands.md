@@ -205,6 +205,15 @@ tescmd vehicle list
 
 Returns: VIN, display name, state (online/asleep/offline), vehicle ID.
 
+### `vehicle get [VIN]`
+
+Fetch basic vehicle info (lightweight, no wake required).
+
+```bash
+tescmd vehicle get
+tescmd vehicle get 5YJ3E1EA1NF000000
+```
+
 ### `vehicle info [VIN]`
 
 Get summary information for a vehicle.
@@ -232,6 +241,62 @@ tescmd vehicle data --endpoints charge_state,climate_state
 - `gui_settings` — distance units, temperature units, charge rate units
 
 **Rich output display units:** Values are displayed in US units by default (°F, miles, PSI). The display layer converts from the API's native Celsius, miles, and bar.
+
+### `vehicle rename [VIN] NAME`
+
+Rename the vehicle.
+
+```bash
+tescmd vehicle rename "My Model 3"
+```
+
+### `vehicle mobile-access [VIN]`
+
+Check if mobile access is enabled.
+
+```bash
+tescmd vehicle mobile-access
+```
+
+### `vehicle nearby-chargers [VIN]`
+
+Show nearby Superchargers and destination chargers.
+
+```bash
+tescmd vehicle nearby-chargers
+```
+
+### `vehicle alerts [VIN]`
+
+Show recent vehicle alerts.
+
+```bash
+tescmd vehicle alerts
+```
+
+### `vehicle release-notes [VIN]`
+
+Show firmware release notes.
+
+```bash
+tescmd vehicle release-notes
+```
+
+### `vehicle service [VIN]`
+
+Show vehicle service data.
+
+```bash
+tescmd vehicle service
+```
+
+### `vehicle drivers [VIN]`
+
+List drivers associated with the vehicle.
+
+```bash
+tescmd vehicle drivers
+```
 
 ### `vehicle location [VIN]`
 
@@ -269,6 +334,67 @@ Keep accessory power (USB/outlets) active after exiting the vehicle.
 ```bash
 tescmd vehicle accessory-power --on
 tescmd vehicle accessory-power --off
+```
+
+### `vehicle calendar [VIN] [CALENDAR_DATA]`
+
+Send calendar entries to the vehicle. Pass calendar JSON as an argument, via `--file`, or piped through stdin.
+
+```bash
+tescmd vehicle calendar '{"entries": [...]}'
+tescmd vehicle calendar --file calendar.json
+cat calendar.json | tescmd vehicle calendar
+```
+
+**Options:**
+- `--file / -f PATH` — Read calendar JSON from file (use `-` for stdin)
+
+### `vehicle subscriptions [VIN]`
+
+Check subscription eligibility for the vehicle.
+
+```bash
+tescmd vehicle subscriptions
+```
+
+### `vehicle upgrades [VIN]`
+
+Check upgrade eligibility for the vehicle.
+
+```bash
+tescmd vehicle upgrades
+```
+
+### `vehicle options [VIN]`
+
+Fetch vehicle option codes.
+
+```bash
+tescmd vehicle options
+```
+
+### `vehicle specs [VIN]`
+
+Fetch vehicle specifications. Requires partner tokens; $0.10 per call.
+
+```bash
+tescmd vehicle specs
+```
+
+### `vehicle warranty [VIN]`
+
+Fetch warranty details for the vehicle.
+
+```bash
+tescmd vehicle warranty
+```
+
+### `vehicle fleet-status`
+
+Fetch fleet status for all vehicles on the account.
+
+```bash
+tescmd vehicle fleet-status
 ```
 
 ### `vehicle telemetry config [VIN]`
@@ -532,6 +658,72 @@ tescmd charge managed-amps 16
 tescmd charge managed-amps 24
 ```
 
+### `charge precondition-add [VIN] SCHEDULE_JSON`
+
+Add a precondition schedule. Pass the schedule as a JSON string.
+
+```bash
+tescmd charge precondition-add '{"days_of_week": 62, "enabled": true, "latitude": 37.38, "longitude": -122.08, "one_time": false, "precondition_time": 420}'
+```
+
+### `charge precondition-remove [VIN] SCHEDULE_ID`
+
+Remove a precondition schedule by ID.
+
+```bash
+tescmd charge precondition-remove 1
+```
+
+### `charge clear-schedules [VIN]`
+
+Batch remove charge schedules by location type.
+
+```bash
+tescmd charge clear-schedules                   # clear all locations
+tescmd charge clear-schedules --no-work         # keep work schedules
+tescmd charge clear-schedules --home --no-work --no-other  # home only
+```
+
+**Options:**
+- `--home/--no-home` — Remove home location schedules (default: on)
+- `--work/--no-work` — Remove work location schedules (default: on)
+- `--other/--no-other` — Remove other location schedules (default: on)
+
+### `charge clear-preconditions [VIN]`
+
+Batch remove precondition schedules by location type.
+
+```bash
+tescmd charge clear-preconditions               # clear all locations
+tescmd charge clear-preconditions --no-work     # keep work schedules
+```
+
+**Options:**
+- `--home/--no-home` — Remove home location schedules (default: on)
+- `--work/--no-work` — Remove work location schedules (default: on)
+- `--other/--no-other` — Remove other location schedules (default: on)
+
+### `charge managed-location [VIN]`
+
+Set managed charger location (fleet management).
+
+```bash
+tescmd charge managed-location --lat 37.3861 --lon -122.0839
+```
+
+**Options:**
+- `--lat` (required) — Latitude
+- `--lon` (required) — Longitude
+
+### `charge managed-schedule [VIN] TIME_MINUTES`
+
+Set managed scheduled charging time (fleet management). TIME_MINUTES is minutes past midnight (0–1440).
+
+```bash
+tescmd charge managed-schedule 420              # 7:00 AM
+tescmd charge managed-schedule 1380             # 11:00 PM
+```
+
 ---
 
 ## `climate` — Climate and Comfort
@@ -621,6 +813,69 @@ tescmd climate bioweapon --on --manual-override  # force manual override
 ```
 
 **`--manual-override`** — Force manual override of automatic behavior.
+
+### `climate precondition [VIN]`
+
+Enable or disable max preconditioning.
+
+```bash
+tescmd climate precondition --on
+tescmd climate precondition --off
+```
+
+### `climate seat-cool [VIN] SEAT LEVEL`
+
+Set seat cooler for a specific seat.
+
+```bash
+tescmd climate seat-cool driver 2          # driver seat, level 2 (0-3)
+tescmd climate seat-cool passenger 0       # passenger seat off
+tescmd climate seat-cool rear-left 1       # rear left
+```
+
+Seats: `driver`, `passenger`, `rear-left`, `rear-center`, `rear-right`
+
+### `climate overheat [VIN]`
+
+Configure cabin overheat protection.
+
+```bash
+tescmd climate overheat --on
+tescmd climate overheat --off
+tescmd climate overheat --on --fan-only    # fan only (no AC)
+```
+
+**Options:**
+- `--on/--off` — Enable or disable cabin overheat protection
+- `--fan-only` — Use fan only (no AC)
+
+### `climate auto-seat [VIN] SEAT`
+
+Enable or disable auto seat climate for a specific seat.
+
+```bash
+tescmd climate auto-seat driver --on
+tescmd climate auto-seat passenger --off
+```
+
+Seats: `driver`, `passenger`, `rear-left`, `rear-center`, `rear-right`
+
+### `climate auto-wheel [VIN]`
+
+Enable or disable auto steering wheel heat.
+
+```bash
+tescmd climate auto-wheel --on
+tescmd climate auto-wheel --off
+```
+
+### `climate wheel-level [VIN] LEVEL`
+
+Set steering wheel heat level (0=off, 1=low, 2=med, 3=high).
+
+```bash
+tescmd climate wheel-level 2
+```
 
 ### `climate defrost [VIN]`
 
@@ -752,6 +1007,57 @@ tescmd security boombox --sound fart       # fart sound
 ```
 
 **`--sound`** — Sound to play: `locate` (default, ping/chirp) or `fart`.
+
+### `security auto-secure [VIN]`
+
+Close falcon-wing doors and lock (Model X only).
+
+```bash
+tescmd security auto-secure
+```
+
+### `security valet-reset [VIN]`
+
+Reset valet PIN.
+
+```bash
+tescmd security valet-reset
+```
+
+### `security pin-reset [VIN]`
+
+Reset PIN to Drive.
+
+```bash
+tescmd security pin-reset
+```
+
+### `security pin-clear-admin [VIN]`
+
+Admin clear PIN to Drive (fleet manager only).
+
+```bash
+tescmd security pin-clear-admin
+```
+
+### `security speed-clear [VIN]`
+
+Clear speed limit PIN.
+
+```bash
+tescmd security speed-clear --pin 1234
+```
+
+**Options:**
+- `--pin` (required) — Speed limit PIN
+
+### `security speed-clear-admin [VIN]`
+
+Admin clear speed limit PIN (fleet manager only).
+
+```bash
+tescmd security speed-clear-admin
+```
 
 ---
 
@@ -1084,6 +1390,23 @@ View calendar-based energy history.
 tescmd energy calendar 12345
 tescmd energy calendar 12345 --kind power --period month
 ```
+
+### `energy telemetry SITE_ID`
+
+Show telemetry history for an energy site (wall connector).
+
+```bash
+tescmd energy telemetry 12345
+tescmd energy telemetry 12345 --kind power
+tescmd energy telemetry 12345 --kind charge --start-date 2025-01-01 --end-date 2025-01-31
+tescmd energy telemetry 12345 --time-zone America/Los_Angeles
+```
+
+**Options:**
+- `--kind` — Telemetry data type: `charge` (default) or `power`
+- `--start-date` — Start date (YYYY-MM-DD)
+- `--end-date` — End date (YYYY-MM-DD)
+- `--time-zone` — Time zone (e.g. `America/Los_Angeles`)
 
 ---
 
@@ -1492,29 +1815,8 @@ Displays: active profile, region, VIN, setup tier, domain, client ID, auth state
 
 The following endpoints are implemented in the API layer but not yet exposed as dedicated CLI commands. They can be accessed via `tescmd raw get` or `tescmd raw post`.
 
-### Vehicle Endpoints
-
-| Endpoint | API Method | Description |
-|----------|-----------|-------------|
-| `GET /dx/vehicles/subscriptions/eligibility` | `VehicleAPI.eligible_subscriptions()` | Check subscription eligibility |
-| `GET /dx/vehicles/upgrades/eligibility` | `VehicleAPI.eligible_upgrades()` | Check upgrade eligibility |
-| `GET /dx/vehicles/options` | `VehicleAPI.options()` | Get vehicle options |
-| `GET /vehicles/{vin}/specs` | `VehicleAPI.specs()` | Get vehicle specifications |
-| `GET /dx/warranty/details` | `VehicleAPI.warranty_details()` | Get warranty details |
-| `POST /vehicles/fleet_status` | `VehicleAPI.fleet_status()` | Get fleet status |
-| `GET /vehicles/{vin}/fleet_telemetry_config` | `VehicleAPI.fleet_telemetry_config()` | Get Fleet Telemetry config |
-| `GET /vehicles/{vin}/fleet_telemetry_errors` | `VehicleAPI.fleet_telemetry_errors()` | Get Fleet Telemetry errors |
-
-### Energy Endpoints
-
-| Endpoint | API Method | Description |
-|----------|-----------|-------------|
-| `GET /energy_sites/{id}/telemetry_history` | `EnergyAPI.telemetry_history()` | Telemetry-based charge history |
-
-### Vehicle Commands (Fleet Management)
+### Vehicle Commands
 
 | Command | API Method | Description |
 |---------|-----------|-------------|
 | `navigation_request` | `CommandAPI.navigation_request()` | Legacy navigation (REST-only, share endpoint preferred) |
-| `set_managed_charger_location` | `CommandAPI.set_managed_charger_location()` | Set managed charger location (fleet) |
-| `set_managed_scheduled_charging_time` | `CommandAPI.set_managed_scheduled_charging_time()` | Set managed scheduled charging time (fleet) |
