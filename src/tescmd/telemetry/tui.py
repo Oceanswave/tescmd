@@ -913,8 +913,12 @@ class TelemetryTUI(App[None]):
                 condition_text = f"{op} geofence"
             else:
                 symbols = {
-                    "lt": "<", "gt": ">", "lte": "\u2264",
-                    "gte": "\u2265", "eq": "=", "neq": "\u2260",
+                    "lt": "<",
+                    "gt": ">",
+                    "lte": "\u2264",
+                    "gte": "\u2265",
+                    "eq": "=",
+                    "neq": "\u2260",
                 }
                 condition_text = f"{symbols.get(op, op)} {cond.value}"
             fire_type = "once" if t.once else "persist"

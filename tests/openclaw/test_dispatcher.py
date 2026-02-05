@@ -1085,9 +1085,7 @@ class TestTriggerHandlers:
         )
         trigger_id = create_result["id"]
 
-        result = await d.dispatch(
-            {"method": "trigger.delete", "params": {"id": trigger_id}}
-        )
+        result = await d.dispatch({"method": "trigger.delete", "params": {"id": trigger_id}})
         assert result["deleted"] is True
         assert len(mgr.list_all()) == 0
 
@@ -1097,9 +1095,7 @@ class TestTriggerHandlers:
         ctx = _mock_app_ctx()
         mgr = TriggerManager(vin="VIN1")
         d = CommandDispatcher(vin="VIN1", app_ctx=ctx, trigger_manager=mgr)
-        await d.dispatch(
-            {"method": "battery.trigger", "params": {"operator": "lt", "value": 20}}
-        )
+        await d.dispatch({"method": "battery.trigger", "params": {"operator": "lt", "value": 20}})
         await d.dispatch(
             {"method": "cabin_temp.trigger", "params": {"operator": "gt", "value": 95}}
         )
@@ -1283,9 +1279,7 @@ class TestTriggerHandlersWithoutManager:
         ctx = _mock_app_ctx()
         d = CommandDispatcher(vin="VIN1", app_ctx=ctx)
         with pytest.raises(RuntimeError, match="Triggers not available"):
-            await d.dispatch(
-                {"method": "battery.trigger.delete", "params": {"id": "abc"}}
-            )
+            await d.dispatch({"method": "battery.trigger.delete", "params": {"id": "abc"}})
 
     @pytest.mark.asyncio
     async def test_trigger_list_no_manager(self) -> None:
@@ -1315,9 +1309,7 @@ class TestTriggerImmediateEvaluation:
         ctx = _mock_app_ctx()
         store = TelemetryStore()
         mgr = TriggerManager(vin="VIN1")
-        d = CommandDispatcher(
-            vin="VIN1", app_ctx=ctx, telemetry_store=store, trigger_manager=mgr
-        )
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, telemetry_store=store, trigger_manager=mgr)
 
         # Seed the store with a current battery value of 15%
         store.update("BatteryLevel", 15.0, datetime(2026, 2, 1, tzinfo=UTC))
@@ -1336,9 +1328,7 @@ class TestTriggerImmediateEvaluation:
         ctx = _mock_app_ctx()
         store = TelemetryStore()
         mgr = TriggerManager(vin="VIN1")
-        d = CommandDispatcher(
-            vin="VIN1", app_ctx=ctx, telemetry_store=store, trigger_manager=mgr
-        )
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, telemetry_store=store, trigger_manager=mgr)
 
         store.update("BatteryLevel", 15.0, datetime(2026, 2, 1, tzinfo=UTC))
 
@@ -1356,9 +1346,7 @@ class TestTriggerImmediateEvaluation:
         ctx = _mock_app_ctx()
         store = TelemetryStore()
         mgr = TriggerManager(vin="VIN1")
-        d = CommandDispatcher(
-            vin="VIN1", app_ctx=ctx, telemetry_store=store, trigger_manager=mgr
-        )
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, telemetry_store=store, trigger_manager=mgr)
 
         # Battery is at 50% — trigger for < 20 should NOT fire
         store.update("BatteryLevel", 50.0, datetime(2026, 2, 1, tzinfo=UTC))
@@ -1375,9 +1363,7 @@ class TestTriggerImmediateEvaluation:
         ctx = _mock_app_ctx()
         store = TelemetryStore()
         mgr = TriggerManager(vin="VIN1")
-        d = CommandDispatcher(
-            vin="VIN1", app_ctx=ctx, telemetry_store=store, trigger_manager=mgr
-        )
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, telemetry_store=store, trigger_manager=mgr)
 
         # No telemetry data yet — trigger should register but not fire
         result = await d.dispatch(
@@ -1391,9 +1377,7 @@ class TestTriggerImmediateEvaluation:
     async def test_trigger_not_immediate_without_store(self) -> None:
         ctx = _mock_app_ctx()
         mgr = TriggerManager(vin="VIN1")
-        d = CommandDispatcher(
-            vin="VIN1", app_ctx=ctx, telemetry_store=None, trigger_manager=mgr
-        )
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, telemetry_store=None, trigger_manager=mgr)
 
         result = await d.dispatch(
             {"method": "battery.trigger", "params": {"operator": "lt", "value": 20}}
@@ -1408,18 +1392,14 @@ class TestTriggerImmediateEvaluation:
         ctx = _mock_app_ctx()
         store = TelemetryStore()
         mgr = TriggerManager(vin="VIN1")
-        d = CommandDispatcher(
-            vin="VIN1", app_ctx=ctx, telemetry_store=store, trigger_manager=mgr
-        )
+        d = CommandDispatcher(vin="VIN1", app_ctx=ctx, telemetry_store=store, trigger_manager=mgr)
 
         cb = AsyncMock()
         mgr.add_on_fire(cb)
 
         store.update("BatteryLevel", 15.0, datetime(2026, 2, 1, tzinfo=UTC))
 
-        await d.dispatch(
-            {"method": "battery.trigger", "params": {"operator": "lt", "value": 20}}
-        )
+        await d.dispatch({"method": "battery.trigger", "params": {"operator": "lt", "value": 20}})
 
         cb.assert_awaited_once()
         notification = cb.call_args[0][0]
