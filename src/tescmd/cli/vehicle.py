@@ -30,6 +30,8 @@ from tescmd.models.vehicle import NearbyChargingSites, Vehicle
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from typing import IO
+
     from tescmd.cli.main import AppContext
 
 
@@ -500,7 +502,7 @@ async def _cmd_drivers(app_ctx: AppContext, vin_positional: str | None) -> None:
 def calendar_cmd(
     app_ctx: AppContext,
     vin_positional: str | None,
-    calendar_file: click.utils.LazyFile | None,
+    calendar_file: IO[str] | None,
     calendar_data: str | None,
 ) -> None:
     """Send calendar entries to the vehicle.
