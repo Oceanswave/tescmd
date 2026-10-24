@@ -40,6 +40,7 @@ class ChargeState(BaseModel):
     charge_port_door_open: bool | None = None
     minutes_to_full_charge: int | None = None
     scheduled_charging_start_time: int | None = None
+    scheduled_charging_pending: bool | None = None
     charger_type: str | None = None
     ideal_battery_range: float | None = None
     est_battery_range: float | None = None

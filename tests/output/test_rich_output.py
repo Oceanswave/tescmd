@@ -173,6 +173,35 @@ class TestChargeStatus:
         assert "SAE" in output
         assert "Battery heater" in output
 
+    def test_renders_scheduled_charging_state(self) -> None:
+        console, buf = _make_console()
+        ro = RichOutput(console)
+
+        ro.charge_schedule_status(
+            ChargeState(
+                scheduled_charging_mode="Start at",
+                scheduled_charging_pending=True,
+                scheduled_charging_start_time=1_800_000_000,
+                scheduled_departure_time_minutes=420,
+            )
+        )
+        output = buf.getvalue()
+
+        assert "Scheduled Charging State" in output
+        assert "Start at" in output
+        assert "Pending" in output
+        assert "yes" in output
+        assert "Scheduled departure" in output
+        assert "07:00" in output
+
+    def test_reports_unavailable_scheduled_charging_state(self) -> None:
+        console, buf = _make_console()
+        ro = RichOutput(console)
+
+        ro.charge_schedule_status(ChargeState())
+
+        assert "did not return scheduled-charging state fields" in buf.getvalue()
+
     def test_renders_est_range_and_schedule(self) -> None:
         console, buf = _make_console()
         ro = RichOutput(console)

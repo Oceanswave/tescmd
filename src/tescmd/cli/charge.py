@@ -60,6 +60,41 @@ async def _cmd_status(app_ctx: AppContext, vin_positional: str | None) -> None:
             formatter.rich.info("No charge state data available.")
 
 
+@charge_group.command("schedule-status")
+@click.argument("vin_positional", required=False, default=None, metavar="VIN")
+@global_options
+def schedule_status_cmd(app_ctx: AppContext, vin_positional: str | None) -> None:
+    """Show scheduled-charging state available from the Fleet API."""
+    run_async(_cmd_schedule_status(app_ctx, vin_positional))
+
+
+async def _cmd_schedule_status(app_ctx: AppContext, vin_positional: str | None) -> None:
+    formatter = app_ctx.formatter
+    vin = require_vin(vin_positional, app_ctx.vin)
+    client, api = get_vehicle_api(app_ctx)
+    try:
+        vdata = await cached_vehicle_data(app_ctx, api, vin, endpoints=["charge_state"])
+    finally:
+        await client.close()
+
+    if formatter.format == "json":
+        charge_state = vdata.charge_state
+        fields = (
+            "scheduled_charging_mode",
+            "scheduled_charging_pending",
+            "scheduled_charging_start_time",
+            "scheduled_departure_time_minutes",
+        )
+        data = (
+            charge_state.model_dump(include=set(fields), exclude_none=True) if charge_state else {}
+        )
+        formatter.output(data, command="charge.schedule-status")
+    elif vdata.charge_state:
+        formatter.rich.charge_schedule_status(vdata.charge_state)
+    else:
+        formatter.rich.info("No charge state data available.")
+
+
 # ---------------------------------------------------------------------------
 # Simple commands (write via CommandAPI)
 # ---------------------------------------------------------------------------

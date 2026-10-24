@@ -376,6 +376,39 @@ class RichOutput:
 
         self._con.print(table)
 
+    def charge_schedule_status(self, cs: ChargeState) -> None:
+        """Print the scheduled-charging state returned by vehicle_data."""
+        rows: list[tuple[str, str]] = []
+        if cs.scheduled_charging_mode is not None:
+            rows.append(("Mode", cs.scheduled_charging_mode))
+        if cs.scheduled_charging_pending is not None:
+            rows.append(("Pending", "yes" if cs.scheduled_charging_pending else "no"))
+        if cs.scheduled_charging_start_time is not None:
+            from datetime import UTC
+
+            rows.append(
+                (
+                    "Scheduled start",
+                    datetime.fromtimestamp(cs.scheduled_charging_start_time, tz=UTC)
+                    .astimezone()
+                    .strftime("%I:%M %p"),
+                )
+            )
+        if cs.scheduled_departure_time_minutes is not None:
+            hours, minutes = divmod(cs.scheduled_departure_time_minutes, 60)
+            rows.append(("Scheduled departure", f"{hours:02d}:{minutes:02d}"))
+
+        if not rows:
+            self.info("Tesla did not return scheduled-charging state fields.")
+            return
+
+        table = Table(title="Scheduled Charging State")
+        table.add_column("Field", style="bold")
+        table.add_column("Value")
+        for field, value in rows:
+            table.add_row(field, value)
+        self._con.print(table)
+
     # ------------------------------------------------------------------
     # Climate status
     # ------------------------------------------------------------------

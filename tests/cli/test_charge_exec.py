@@ -90,6 +90,41 @@ class TestChargeStatus:
         assert parsed["data"]["battery_range"] == 220.5
 
 
+class TestChargeScheduleStatus:
+    def test_schedule_status_json(self, cli_env: dict[str, str], httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(
+            url=f"{FLEET}/api/1/vehicles/{VIN}/vehicle_data?endpoints=charge_state",
+            method="GET",
+            json={
+                "response": {
+                    "vin": VIN,
+                    "charge_state": {
+                        "scheduled_charging_mode": "Start at",
+                        "scheduled_charging_pending": True,
+                        "scheduled_charging_start_time": 1_800_000_000,
+                        "scheduled_departure_time_minutes": 420,
+                    },
+                }
+            },
+        )
+        result = CliRunner().invoke(
+            cli,
+            ["--format", "json", "charge", "schedule-status", VIN],
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        assert parsed["ok"] is True
+        assert parsed["command"] == "charge.schedule-status"
+        assert parsed["data"] == {
+            "scheduled_charging_mode": "Start at",
+            "scheduled_charging_pending": True,
+            "scheduled_charging_start_time": 1_800_000_000,
+            "scheduled_departure_time_minutes": 420,
+        }
+
+
 # =============================================================================
 # Simple write commands (no extra parameters)
 # =============================================================================

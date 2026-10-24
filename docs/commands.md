@@ -234,6 +234,8 @@ tescmd vehicle data --endpoints charge_state,climate_state
 
 **`--endpoints`** filter to specific data categories:
 - `charge_state` — battery level/range (rated, ideal, estimated, usable), charge rate, voltage, current, charger power/type, energy added, cable type, port latch/door, scheduled charging, battery heater, preconditioning
+- `charge_schedule_data` — saved charge schedules configured on the vehicle
+- `preconditioning_schedule_data` — saved preconditioning schedules configured on the vehicle
 - `climate_state` — interior/exterior temp, HVAC status, fan speed, defrost, front+rear seat heaters, steering wheel heater, cabin overheat protection, bioweapon defense mode, auto conditioning, preconditioning
 - `drive_state` — GPS coordinates, heading, speed, shift state, power
 - `vehicle_state` — locked/unlocked, doors (4), windows (4), frunk/trunk, odometer, firmware version, sentry mode, dashcam state, center display, remote start, user present, homelink nearby, TPMS tire pressure (4 wheels)
@@ -548,6 +550,20 @@ Show current charging status (battery level, range, charge rate, port state).
 
 ```bash
 tescmd charge status
+```
+
+### `charge schedule-status [VIN]`
+
+Show the scheduled-charging state exposed through the Fleet API, including mode,
+pending state, scheduled start, and scheduled departure when available. This
+command requests `charge_state`; it does not display the vehicle's saved charge
+schedule definitions. Tesla documents those separately under the
+`charge_schedule_data` `vehicle_data` endpoint. Retrieve them as JSON with:
+
+```bash
+tescmd charge schedule-status
+tescmd --format json charge schedule-status
+tescmd --format json vehicle data --endpoints charge_schedule_data
 ```
 
 ### `charge start [VIN]`
